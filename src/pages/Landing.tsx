@@ -424,7 +424,7 @@ const Landing = () => {
             <div>
               <h4 className="font-semibold mb-4">Legal</h4>
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li><a href="#" className="hover:text-primary">Términos y Condiciones</a></li>
+                <li><Link to="/terminos" className="hover:text-primary">Términos y Condiciones</Link></li>
                 <li><a href="#" className="hover:text-primary">Política de Privacidad</a></li>
                 <li><a href="#" className="hover:text-primary">Política de Envíos</a></li>
               </ul>
