@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -13,23 +13,26 @@ import {
   Menu,
   X,
   User,
-  Phone
+  Phone,
+  Package,
+  Loader2
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useStoreConfig } from "@/contexts/StoreConfigContext";
+import { supabase, Producto } from "@/lib/supabase";
 import gudsLogo from "@/assets/guds-logo.png";
 
-const products = [
-  { id: "1", name: "Aceite Vegetal 5L", price: 89, originalPrice: 99, image: "🫒", category: "Aceites", discount: 10, rating: 4.8 },
-  { id: "2", name: "Arroz Grano Largo 25kg", price: 450, image: "🍚", category: "Granos", rating: 4.9 },
-  { id: "3", name: "Azúcar Estándar 50kg", price: 680, image: "🧂", category: "Endulzantes", rating: 4.7 },
-  { id: "4", name: "Frijol Negro 25kg", price: 520, originalPrice: 580, image: "🫘", category: "Granos", discount: 10, rating: 4.8 },
-  { id: "5", name: "Harina de Trigo 44kg", price: 380, image: "🌾", category: "Harinas", rating: 4.6 },
-  { id: "6", name: "Sal de Mesa 25kg", price: 120, image: "🧂", category: "Condimentos", rating: 4.5 },
-  { id: "7", name: "Mayonesa 3.8kg", price: 145, image: "🥫", category: "Condimentos", rating: 4.7 },
-  { id: "8", name: "Pasta Espagueti 5kg", price: 85, image: "🍝", category: "Pastas", rating: 4.8 },
-];
+interface ProductoLanding {
+  id: string;
+  nombre: string;
+  precio_base: number;
+  precio_oferta?: number | null;
+  en_oferta?: boolean;
+  porcentaje_descuento?: number | null;
+  imagen_url?: string | null;
+  categoria?: { nombre: string } | null;
+}
 
 const benefits = [
   { icon: Truck, title: "Envío Gratis", description: "En compras mayores a $500" },
@@ -41,14 +44,40 @@ const benefits = [
 const Landing = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [productos, setProductos] = useState<ProductoLanding[]>([]);
+  const [loading, setLoading] = useState(true);
   const { formatPrice, currency, setCurrency } = useCurrency();
   const { getActiveBanners, getActiveCategories } = useStoreConfig();
 
   const banners = getActiveBanners();
   const categories = getActiveCategories();
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase())
+  useEffect(() => {
+    fetchProductos();
+  }, []);
+
+  const fetchProductos = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('productos')
+      .select('id, nombre, precio_base, precio_oferta, en_oferta, porcentaje_descuento, imagen_url, categoria:categorias(nombre)')
+      .eq('activo', true)
+      .order('destacado', { ascending: false })
+      .limit(8);
+    
+    if (data) {
+      // Transform data to handle categoria as object
+      const transformed = data.map(p => ({
+        ...p,
+        categoria: Array.isArray(p.categoria) ? p.categoria[0] : p.categoria
+      }));
+      setProductos(transformed);
+    }
+    setLoading(false);
+  };
+
+  const filteredProducts = productos.filter(p => 
+    p.nombre.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -151,7 +180,7 @@ const Landing = () => {
                 </Button>
               </Link>
               <a href="#productos">
-                <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10">
+                <Button size="lg" className="bg-white/20 text-white border-2 border-white hover:bg-white hover:text-primary">
                   Ver Catálogo
                 </Button>
               </a>
@@ -234,52 +263,73 @@ const Landing = () => {
             </Link>
           </div>
           
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
-            {filteredProducts.map((product) => (
-              <Link
-                key={product.id}
-                to="/registro"
-                className="bg-card rounded-2xl border border-border overflow-hidden group hover:shadow-lg transition-shadow"
-              >
-                {/* Product Image */}
-                <div className="bg-muted p-8 flex items-center justify-center text-6xl relative">
-                  {product.image}
-                  {product.discount && (
-                    <Badge className="absolute top-3 left-3 bg-red-500 text-white">
-                      -{product.discount}%
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Product Info */}
-                <div className="p-4">
-                  <div className="flex items-center gap-1 mb-2">
-                    <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                    <span className="text-sm font-medium">{product.rating}</span>
-                  </div>
-                  <h3 className="font-semibold text-foreground line-clamp-2 mb-1 group-hover:text-primary transition-colors">
-                    {product.name}
-                  </h3>
-                  <p className="text-sm text-muted-foreground mb-3">{product.category}</p>
-                  
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xl font-bold text-primary">{formatPrice(product.price)}</p>
-                      {product.originalPrice && (
-                        <p className="text-sm text-muted-foreground line-through">
-                          {formatPrice(product.originalPrice)}
-                        </p>
+          {loading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : filteredProducts.length === 0 ? (
+            <div className="text-center py-12">
+              <Package className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <p className="text-muted-foreground">No se encontraron productos</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+              {filteredProducts.map((product) => {
+                const precio = product.en_oferta && product.precio_oferta ? product.precio_oferta : product.precio_base;
+                
+                return (
+                  <Link
+                    key={product.id}
+                    to="/registro"
+                    className="bg-card rounded-2xl border border-border overflow-hidden group hover:shadow-lg transition-shadow"
+                  >
+                    {/* Product Image */}
+                    <div className="bg-muted aspect-square flex items-center justify-center relative">
+                      {product.imagen_url ? (
+                        <img 
+                          src={product.imagen_url} 
+                          alt={product.nombre} 
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Package className="h-16 w-16 text-muted-foreground" />
+                      )}
+                      {product.en_oferta && product.porcentaje_descuento && (
+                        <Badge className="absolute top-3 left-3 bg-red-500 text-white">
+                          -{product.porcentaje_descuento}%
+                        </Badge>
                       )}
                     </div>
-                    <Button size="sm" className="gap-1">
-                      <ShoppingBag className="h-4 w-4" />
-                      Pedir
-                    </Button>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+
+                    {/* Product Info */}
+                    <div className="p-4">
+                      <h3 className="font-semibold text-foreground line-clamp-2 mb-1 group-hover:text-primary transition-colors">
+                        {product.nombre}
+                      </h3>
+                      <p className="text-sm text-muted-foreground mb-3">
+                        {product.categoria?.nombre || 'Sin categoría'}
+                      </p>
+                      
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xl font-bold text-primary">{formatPrice(precio)}</p>
+                          {product.en_oferta && product.precio_oferta && (
+                            <p className="text-sm text-muted-foreground line-through">
+                              {formatPrice(product.precio_base)}
+                            </p>
+                          )}
+                        </div>
+                        <Button size="sm" className="gap-1">
+                          <ShoppingBag className="h-4 w-4" />
+                          Pedir
+                        </Button>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
 
           {/* CTA */}
           <div className="mt-12 text-center">
