@@ -12,6 +12,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Registro from "./pages/Registro";
+import TerminosCondiciones from "./pages/TerminosCondiciones";
 
 // Admin Pages
 import Index from "./pages/Index";
@@ -101,6 +102,7 @@ const App = () => (
                 <Route path="/" element={<Landing />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/registro" element={<Registro />} />
+                <Route path="/terminos" element={<TerminosCondiciones />} />
                 
                 {/* Admin Dashboard - Solo admin */}
                 <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><Index /></ProtectedRoute>} />
