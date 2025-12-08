@@ -1,284 +1,339 @@
-import { useState } from "react";
-import { PortalLayout } from "@/components/portal/PortalLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { useState, useEffect } from "react";
+import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
+import { useCurrency } from "@/contexts/CurrencyContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { 
+  Package, 
+  Truck, 
+  CheckCircle, 
+  Clock, 
+  ChevronRight,
+  MapPin,
+  Phone,
+  RotateCcw,
+  Loader2
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
+import { ProductImage } from "@/components/portal/ProductImage";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Search, Eye, Package, Truck, CheckCircle, Clock, MapPin } from "lucide-react";
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
 
-const orders = [
-  {
-    id: "ORD-045",
-    date: "2024-01-15",
-    delivery: "2024-01-17",
-    items: [
-      { name: "Aceite Vegetal 5L", quantity: 10, price: 89.0 },
-      { name: "Arroz Grano Largo 25kg", quantity: 5, price: 450.0 },
-    ],
-    total: 3140.0,
-    status: "enviado",
-    tracking: [
-      { step: "Pedido recibido", date: "2024-01-15 09:30", completed: true },
-      { step: "En preparación", date: "2024-01-15 11:00", completed: true },
-      { step: "En camino", date: "2024-01-16 08:00", completed: true },
-      { step: "Entregado", date: "", completed: false },
-    ],
-  },
-  {
-    id: "ORD-044",
-    date: "2024-01-12",
-    delivery: "2024-01-14",
-    items: [
-      { name: "Frijol Negro 25kg", quantity: 8, price: 520.0 },
-    ],
-    total: 4160.0,
-    status: "completado",
-    tracking: [
-      { step: "Pedido recibido", date: "2024-01-12 10:00", completed: true },
-      { step: "En preparación", date: "2024-01-12 14:00", completed: true },
-      { step: "En camino", date: "2024-01-13 07:00", completed: true },
-      { step: "Entregado", date: "2024-01-14 09:30", completed: true },
-    ],
-  },
-  {
-    id: "ORD-043",
-    date: "2024-01-10",
-    delivery: "2024-01-12",
-    items: [
-      { name: "Harina de Trigo 44kg", quantity: 15, price: 380.0 },
-      { name: "Azúcar Estándar 50kg", quantity: 10, price: 680.0 },
-    ],
-    total: 12500.0,
-    status: "completado",
-    tracking: [
-      { step: "Pedido recibido", date: "2024-01-10 08:00", completed: true },
-      { step: "En preparación", date: "2024-01-10 10:00", completed: true },
-      { step: "En camino", date: "2024-01-11 06:00", completed: true },
-      { step: "Entregado", date: "2024-01-12 10:00", completed: true },
-    ],
-  },
-  {
-    id: "ORD-042",
-    date: "2024-01-08",
-    delivery: "2024-01-10",
-    items: [
-      { name: "Sal de Mesa 25kg", quantity: 20, price: 120.0 },
-    ],
-    total: 2400.0,
-    status: "completado",
-    tracking: [
-      { step: "Pedido recibido", date: "2024-01-08 11:00", completed: true },
-      { step: "En preparación", date: "2024-01-08 15:00", completed: true },
-      { step: "En camino", date: "2024-01-09 07:00", completed: true },
-      { step: "Entregado", date: "2024-01-10 08:30", completed: true },
-    ],
-  },
-];
+interface OrdenDB {
+  id: string;
+  numero_orden: string;
+  estado: string;
+  total: number;
+  subtotal: number;
+  created_at: string;
+  fecha_entrega?: string;
+  notas?: string;
+  items?: OrdenItem[];
+}
 
-const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "outline"; icon: typeof Package }> = {
-  pendiente: { label: "Pendiente", variant: "secondary", icon: Clock },
-  procesando: { label: "Procesando", variant: "default", icon: Package },
-  enviado: { label: "En Camino", variant: "outline", icon: Truck },
-  completado: { label: "Entregado", variant: "default", icon: CheckCircle },
+interface OrdenItem {
+  id: string;
+  producto_id: string;
+  cantidad: number;
+  precio_unitario: number;
+  subtotal: number;
+  producto?: {
+    nombre: string;
+    imagen_emoji?: string;
+    imagen_url?: string;
+  };
+}
+
+const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
+  pendiente: { label: "Pendiente", color: "bg-gray-500", icon: Clock },
+  confirmado: { label: "Confirmado", color: "bg-blue-500", icon: CheckCircle },
+  procesando: { label: "Preparando", color: "bg-yellow-500", icon: Package },
+  enviado: { label: "En Camino", color: "bg-blue-500", icon: Truck },
+  en_camino: { label: "En Camino", color: "bg-blue-500", icon: Truck },
+  entregado: { label: "Entregado", color: "bg-green-500", icon: CheckCircle },
+  completado: { label: "Entregado", color: "bg-green-500", icon: CheckCircle },
+  cancelado: { label: "Cancelado", color: "bg-red-500", icon: Clock },
 };
 
 const PortalPedidos = () => {
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedOrder, setSelectedOrder] = useState<OrdenDB | null>(null);
+  const [activeTab, setActiveTab] = useState<"activos" | "historial">("activos");
+  const [ordenes, setOrdenes] = useState<OrdenDB[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { formatPrice } = useCurrency();
+  const { user } = useAuth();
 
-  const filteredOrders = orders.filter((order) => {
-    const matchesStatus = statusFilter === "all" || order.status === statusFilter;
-    const matchesSearch = order.id.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesStatus && matchesSearch;
-  });
+  useEffect(() => {
+    if (user?.cliente_id) {
+      fetchOrdenes();
+    }
+  }, [user]);
+
+  const fetchOrdenes = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('ordenes')
+      .select(`
+        *,
+        items:orden_items(
+          *,
+          producto:productos(nombre, imagen_emoji, imagen_url)
+        )
+      `)
+      .eq('cliente_id', user?.cliente_id)
+      .order('created_at', { ascending: false });
+    
+    if (data) setOrdenes(data);
+    setLoading(false);
+  };
+
+  const activeOrders = ordenes.filter(o => o.estado !== "entregado" && o.estado !== "cancelado");
+  const completedOrders = ordenes.filter(o => o.estado === "entregado");
+  const displayOrders = activeTab === "activos" ? activeOrders : completedOrders;
+
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleDateString('es-ES', { 
+      day: 'numeric', 
+      month: 'short', 
+      year: 'numeric' 
+    });
+  };
 
   return (
-    <PortalLayout title="Mis Pedidos">
-      {/* Filters */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center mb-6">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por número de pedido..."
-            className="pl-9"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+    <PortalMobileLayout title="Mis Pedidos">
+      {/* Tabs */}
+      <div className="px-4 pt-4">
+        <div className="flex bg-muted rounded-xl p-1">
+          <button
+            onClick={() => setActiveTab("activos")}
+            className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === "activos"
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground"
+            }`}
+          >
+            Activos ({activeOrders.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("historial")}
+            className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === "historial"
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground"
+            }`}
+          >
+            Historial ({completedOrders.length})
+          </button>
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="Estado" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="pendiente">Pendiente</SelectItem>
-            <SelectItem value="procesando">Procesando</SelectItem>
-            <SelectItem value="enviado">En Camino</SelectItem>
-            <SelectItem value="completado">Entregado</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
       {/* Orders List */}
-      <div className="space-y-4">
-        {filteredOrders.map((order) => {
-          const StatusIcon = statusConfig[order.status].icon;
-          return (
-            <Card key={order.id} className="border-border">
-              <CardContent className="p-6">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                  <div className="flex items-start gap-4">
-                    <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <StatusIcon className="h-6 w-6 text-primary" />
+      <div className="px-4 py-4 space-y-3">
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : displayOrders.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="h-16 w-16 rounded-full bg-muted mx-auto flex items-center justify-center mb-4">
+              <Package className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <p className="text-muted-foreground">
+              {activeTab === "activos" 
+                ? "No tienes pedidos activos" 
+                : "No hay pedidos en el historial"}
+            </p>
+            <Link to="/portal/catalogo">
+              <Button className="mt-4">Hacer un pedido</Button>
+            </Link>
+          </div>
+        ) : (
+          displayOrders.map((order) => {
+            const config = statusConfig[order.estado] || statusConfig.pendiente;
+            const StatusIcon = config.icon;
+            const itemCount = order.items?.reduce((sum, i) => sum + i.cantidad, 0) || 0;
+
+            return (
+              <button
+                key={order.id}
+                onClick={() => setSelectedOrder(order)}
+                className="w-full bg-card rounded-xl border border-border p-4 text-left"
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className={`h-8 w-8 rounded-full ${config.color}/10 flex items-center justify-center`}>
+                      <StatusIcon className={`h-4 w-4 ${config.color.replace('bg-', 'text-')}`} />
                     </div>
                     <div>
-                      <div className="flex items-center gap-3 mb-1">
-                        <h3 className="font-semibold text-foreground text-lg">{order.id}</h3>
-                        <Badge variant={statusConfig[order.status].variant}>
-                          {statusConfig[order.status].label}
-                        </Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {order.items.length} productos • Pedido el {order.date}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        Entrega estimada: {order.delivery}
-                      </p>
+                      <p className="font-semibold text-foreground">{order.numero_orden}</p>
+                      <p className="text-xs text-muted-foreground">{formatDate(order.created_at)}</p>
                     </div>
                   </div>
+                  <Badge className={`${config.color} text-white`}>
+                    {config.label}
+                  </Badge>
+                </div>
 
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-foreground">${order.total.toFixed(2)}</p>
-                    </div>
+                {/* ETA for active orders */}
+                {(order.estado === "enviado" || order.estado === "en_camino") && order.fecha_entrega && (
+                  <div className="bg-blue-500/10 rounded-lg p-2 mb-3 flex items-center gap-2">
+                    <Truck className="h-4 w-4 text-blue-500" />
+                    <span className="text-sm text-blue-700 font-medium">
+                      Entrega: {formatDate(order.fecha_entrega)}
+                    </span>
+                  </div>
+                )}
 
-                    <Dialog>
-                      <DialogTrigger asChild>
-                        <Button variant="outline" className="gap-2">
-                          <Eye className="h-4 w-4" />
-                          Ver Detalles
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-2xl">
-                        <DialogHeader>
-                          <DialogTitle className="flex items-center gap-3">
-                            Pedido {order.id}
-                            <Badge variant={statusConfig[order.status].variant}>
-                              {statusConfig[order.status].label}
-                            </Badge>
-                          </DialogTitle>
-                        </DialogHeader>
-
-                        <div className="space-y-6 mt-4">
-                          {/* Tracking Timeline */}
-                          <div>
-                            <h4 className="font-semibold mb-4 flex items-center gap-2">
-                              <MapPin className="h-4 w-4" />
-                              Seguimiento
-                            </h4>
-                            <div className="space-y-4">
-                              {order.tracking.map((step, index) => (
-                                <div key={index} className="flex gap-4">
-                                  <div className="flex flex-col items-center">
-                                    <div
-                                      className={`h-4 w-4 rounded-full ${
-                                        step.completed ? "bg-primary" : "bg-muted"
-                                      }`}
-                                    />
-                                    {index < order.tracking.length - 1 && (
-                                      <div
-                                        className={`w-0.5 h-8 ${
-                                          step.completed ? "bg-primary" : "bg-muted"
-                                        }`}
-                                      />
-                                    )}
-                                  </div>
-                                  <div className="flex-1 pb-4">
-                                    <p
-                                      className={`font-medium ${
-                                        step.completed ? "text-foreground" : "text-muted-foreground"
-                                      }`}
-                                    >
-                                      {step.step}
-                                    </p>
-                                    {step.date && (
-                                      <p className="text-sm text-muted-foreground">{step.date}</p>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Order Items */}
-                          <div>
-                            <h4 className="font-semibold mb-4">Productos</h4>
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Producto</TableHead>
-                                  <TableHead className="text-center">Cantidad</TableHead>
-                                  <TableHead className="text-right">Precio Unit.</TableHead>
-                                  <TableHead className="text-right">Subtotal</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {order.items.map((item, index) => (
-                                  <TableRow key={index}>
-                                    <TableCell>{item.name}</TableCell>
-                                    <TableCell className="text-center">{item.quantity}</TableCell>
-                                    <TableCell className="text-right">
-                                      ${item.price.toFixed(2)}
-                                    </TableCell>
-                                    <TableCell className="text-right font-medium">
-                                      ${(item.price * item.quantity).toFixed(2)}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                                <TableRow>
-                                  <TableCell colSpan={3} className="text-right font-semibold">
-                                    Total
-                                  </TableCell>
-                                  <TableCell className="text-right font-bold text-lg">
-                                    ${order.total.toFixed(2)}
-                                  </TableCell>
-                                </TableRow>
-                              </TableBody>
-                            </Table>
-                          </div>
+                {/* Items Preview */}
+                {order.items && order.items.length > 0 && (
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="flex -space-x-2">
+                      {order.items.slice(0, 3).map((item, i) => (
+                        <div key={i} className="border-2 border-card rounded-lg overflow-hidden">
+                          <ProductImage 
+                            imageUrl={item.producto?.imagen_url}
+                            emoji={item.producto?.imagen_emoji}
+                            alt={item.producto?.nombre}
+                            size="sm"
+                          />
                         </div>
-                      </DialogContent>
-                    </Dialog>
+                      ))}
+                      {order.items.length > 3 && (
+                        <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center text-xs font-medium border-2 border-card">
+                          +{order.items.length - 3}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-sm text-muted-foreground">
+                      {itemCount} {itemCount === 1 ? "producto" : "productos"}
+                    </span>
+                  </div>
+                )}
+
+                {/* Footer */}
+                <div className="flex items-center justify-between pt-3 border-t border-border">
+                  <span className="font-bold text-primary text-lg">{formatPrice(order.total)}</span>
+                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                    Ver detalles
+                    <ChevronRight className="h-4 w-4" />
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+              </button>
+            );
+          })
+        )}
       </div>
-    </PortalLayout>
+
+      {/* Order Detail Sheet */}
+      <Sheet open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
+        <SheetContent side="bottom" className="h-[90vh] rounded-t-3xl">
+          {selectedOrder && (() => {
+            const config = statusConfig[selectedOrder.estado] || statusConfig.pendiente;
+            return (
+              <>
+                <SheetHeader className="text-left">
+                  <SheetTitle className="flex items-center justify-between">
+                    <span>{selectedOrder.numero_orden}</span>
+                    <Badge className={`${config.color} text-white`}>
+                      {config.label}
+                    </Badge>
+                  </SheetTitle>
+                </SheetHeader>
+
+                <div className="mt-4 space-y-6 overflow-y-auto pb-6">
+                  {/* Order Info */}
+                  <div className="bg-muted rounded-xl p-4">
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-muted-foreground">Fecha del pedido</span>
+                      <span>{formatDate(selectedOrder.created_at)}</span>
+                    </div>
+                    {selectedOrder.fecha_entrega && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Fecha de entrega</span>
+                        <span>{formatDate(selectedOrder.fecha_entrega)}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Contact Driver (for active orders) */}
+                  {(selectedOrder.estado === "enviado" || selectedOrder.estado === "en_camino") && (
+                    <div className="bg-blue-500/10 rounded-xl p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="h-12 w-12 rounded-full bg-blue-500/20 flex items-center justify-center">
+                            <Truck className="h-6 w-6 text-blue-500" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-blue-700">Pedido en camino</p>
+                            <p className="text-sm text-blue-600">Tu pedido está siendo entregado</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Products */}
+                  <div>
+                    <h3 className="font-semibold mb-3">Productos</h3>
+                    <div className="space-y-3">
+                      {selectedOrder.items?.map((item, index) => (
+                        <div key={index} className="flex items-center gap-3">
+                          <ProductImage 
+                            imageUrl={item.producto?.imagen_url}
+                            emoji={item.producto?.imagen_emoji}
+                            alt={item.producto?.nombre}
+                            size="sm"
+                            className="h-12 w-12"
+                          />
+                          <div className="flex-1">
+                            <p className="font-medium text-sm">{item.producto?.nombre || 'Producto'}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {item.cantidad} x {formatPrice(item.precio_unitario)}
+                            </p>
+                          </div>
+                          <p className="font-medium">{formatPrice(item.subtotal)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Summary */}
+                  <div className="bg-muted rounded-xl p-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Subtotal</span>
+                      <span>{formatPrice(selectedOrder.subtotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Envío</span>
+                      <span className="text-green-600">Gratis</span>
+                    </div>
+                    <div className="flex justify-between font-semibold pt-2 border-t border-border">
+                      <span>Total</span>
+                      <span className="text-primary">{formatPrice(selectedOrder.total)}</span>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  {selectedOrder.estado === "entregado" && (
+                    <Button className="w-full gap-2">
+                      <RotateCcw className="h-4 w-4" />
+                      Repetir pedido
+                    </Button>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+        </SheetContent>
+      </Sheet>
+    </PortalMobileLayout>
   );
 };
 

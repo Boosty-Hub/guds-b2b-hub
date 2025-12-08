@@ -1,0 +1,214 @@
+import { useState, useEffect } from "react";
+import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { 
+  ChevronLeft,
+  User,
+  Mail,
+  Phone,
+  Building2,
+  Loader2,
+  Save
+} from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { supabase, Cliente } from "@/lib/supabase";
+import { useToast } from "@/hooks/use-toast";
+
+const PortalPerfil = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [cliente, setCliente] = useState<Cliente | null>(null);
+  const [formData, setFormData] = useState({
+    nombre: "",
+    apellido: "",
+    telefono: "",
+    email: "",
+  });
+
+  useEffect(() => {
+    if (user) {
+      setFormData({
+        nombre: user.nombre || "",
+        apellido: user.apellido || "",
+        telefono: user.telefono || "",
+        email: user.email || "",
+      });
+      
+      if (user.cliente_id) {
+        fetchCliente();
+      } else {
+        setLoading(false);
+      }
+    }
+  }, [user]);
+
+  const fetchCliente = async () => {
+    const { data } = await supabase
+      .from('clientes')
+      .select('*')
+      .eq('id', user?.cliente_id)
+      .single();
+    
+    if (data) setCliente(data);
+    setLoading(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    
+    const { error } = await supabase
+      .from('usuarios')
+      .update({
+        nombre: formData.nombre,
+        apellido: formData.apellido,
+        telefono: formData.telefono,
+      })
+      .eq('id', user?.id);
+    
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Guardado", description: "Tus datos han sido actualizados" });
+    }
+    
+    setSaving(false);
+  };
+
+  const initials = user ? `${user.nombre?.charAt(0) || ''}${user.apellido?.charAt(0) || ''}`.toUpperCase() : 'U';
+
+  return (
+    <PortalMobileLayout showHeader={false} showNav={false}>
+      {/* Header */}
+      <div className="bg-primary text-primary-foreground px-4 py-3 sticky top-0 z-50">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="p-1">
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+          <h1 className="text-lg font-semibold">Datos Personales</h1>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      ) : (
+        <div className="px-4 py-6 space-y-6">
+          {/* Avatar */}
+          <div className="flex flex-col items-center">
+            <div className="h-24 w-24 rounded-full bg-primary/10 flex items-center justify-center mb-3">
+              <span className="text-3xl font-bold text-primary">{initials}</span>
+            </div>
+            <Button variant="outline" size="sm">Cambiar foto</Button>
+          </div>
+
+          {/* Form */}
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <User className="h-4 w-4" />
+                Nombre
+              </Label>
+              <Input
+                value={formData.nombre}
+                onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                placeholder="Tu nombre"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <User className="h-4 w-4" />
+                Apellido
+              </Label>
+              <Input
+                value={formData.apellido}
+                onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
+                placeholder="Tu apellido"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Mail className="h-4 w-4" />
+                Email
+              </Label>
+              <Input
+                value={formData.email}
+                disabled
+                className="bg-muted"
+              />
+              <p className="text-xs text-muted-foreground">El email no puede ser modificado</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Phone className="h-4 w-4" />
+                Teléfono
+              </Label>
+              <Input
+                value={formData.telefono}
+                onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
+                placeholder="Tu teléfono"
+              />
+            </div>
+          </div>
+
+          {/* Business Info (Read Only) */}
+          {cliente && (
+            <div className="bg-muted rounded-xl p-4 space-y-3">
+              <h3 className="font-semibold flex items-center gap-2">
+                <Building2 className="h-4 w-4" />
+                Datos del Negocio
+              </h3>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-muted-foreground">Negocio</p>
+                  <p className="font-medium">{cliente.nombre_negocio}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">RIF</p>
+                  <p className="font-medium">{cliente.rif}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Tipo</p>
+                  <p className="font-medium">{cliente.tipo_negocio}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Ciudad</p>
+                  <p className="font-medium">{cliente.ciudad}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Save Button */}
+          <Button 
+            className="w-full gap-2" 
+            size="lg"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <>
+                <Save className="h-5 w-5" />
+                Guardar Cambios
+              </>
+            )}
+          </Button>
+        </div>
+      )}
+    </PortalMobileLayout>
+  );
+};
+
+export default PortalPerfil;

@@ -1,7 +1,10 @@
+import { useState, useEffect } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -17,26 +20,167 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Search, ArrowUpRight, ArrowDownLeft, Package, Warehouse } from "lucide-react";
+import { Plus, Search, ArrowUpRight, ArrowDownLeft, Package, Warehouse, Loader2, RefreshCw } from "lucide-react";
+import { supabase, Producto } from "@/lib/supabase";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 
-const inventory = [
-  { sku: "ARR-001", name: "Arroz Premium 50kg", warehouse: "Bodega Central", stock: 250, minStock: 50, maxStock: 500, lastMovement: "2024-01-15" },
-  { sku: "ACE-001", name: "Aceite Vegetal 20L", warehouse: "Bodega Central", stock: 180, minStock: 30, maxStock: 300, lastMovement: "2024-01-14" },
-  { sku: "AZU-001", name: "Azúcar Blanca 50kg", warehouse: "Bodega Central", stock: 15, minStock: 40, maxStock: 400, lastMovement: "2024-01-15" },
-  { sku: "HAR-001", name: "Harina de Trigo 50kg", warehouse: "Bodega Norte", stock: 320, minStock: 60, maxStock: 500, lastMovement: "2024-01-13" },
-  { sku: "SAL-001", name: "Sal Yodada 25kg", warehouse: "Bodega Central", stock: 0, minStock: 20, maxStock: 200, lastMovement: "2024-01-10" },
-];
-
-const movements = [
-  { id: "MOV-001", date: "2024-01-15 14:30", type: "entrada", product: "Arroz Premium 50kg", quantity: 100, warehouse: "Bodega Central", reference: "COMP-0125", user: "Juan Pérez" },
-  { id: "MOV-002", date: "2024-01-15 11:20", type: "salida", product: "Aceite Vegetal 20L", quantity: 45, warehouse: "Bodega Central", reference: "ORD-002", user: "María García" },
-  { id: "MOV-003", date: "2024-01-15 09:45", type: "entrada", product: "Azúcar Blanca 50kg", quantity: 50, warehouse: "Bodega Central", reference: "COMP-0124", user: "Juan Pérez" },
-  { id: "MOV-004", date: "2024-01-14 16:00", type: "salida", product: "Harina de Trigo 50kg", quantity: 80, warehouse: "Bodega Norte", reference: "ORD-001", user: "Carlos López" },
-  { id: "MOV-005", date: "2024-01-14 10:30", type: "transferencia", product: "Sal Yodada 25kg", quantity: 20, warehouse: "Bodega Central → Norte", reference: "TRF-0012", user: "Ana Martínez" },
-];
+interface MovimientoInventario {
+  id: string;
+  producto_id: string;
+  tipo: string;
+  cantidad: number;
+  stock_anterior: number;
+  stock_nuevo: number;
+  motivo: string | null;
+  referencia_tipo: string | null;
+  created_at: string;
+  producto?: Producto;
+}
 
 const Inventario = () => {
+  const [productos, setProductos] = useState<Producto[]>([]);
+  const [movimientos, setMovimientos] = useState<MovimientoInventario[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [movementSearchTerm, setMovementSearchTerm] = useState("");
+  const [tipoFiltro, setTipoFiltro] = useState("all");
+  
+  // Estados para diálogos
+  const [isMovementOpen, setIsMovementOpen] = useState(false);
+  const [movementType, setMovementType] = useState<'entrada' | 'salida' | 'ajuste'>('entrada');
+  const [selectedProductoId, setSelectedProductoId] = useState("");
+  const [cantidad, setCantidad] = useState("");
+  const [motivo, setMotivo] = useState("");
+  const [saving, setSaving] = useState(false);
+  
+  const { toast } = useToast();
+  const { user } = useAuth();
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    const [productosRes, movimientosRes] = await Promise.all([
+      supabase.from('productos').select('*').order('nombre'),
+      supabase.from('movimientos_inventario').select('*, producto:productos(nombre, sku)').order('created_at', { ascending: false }).limit(50)
+    ]);
+    
+    if (productosRes.data) setProductos(productosRes.data);
+    if (movimientosRes.data) setMovimientos(movimientosRes.data);
+    setLoading(false);
+  };
+
+  const filteredProductos = productos.filter(p =>
+    p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    p.sku.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const filteredMovimientos = movimientos.filter(m => {
+    const matchesSearch = movementSearchTerm === "" || 
+      (m.producto as any)?.nombre?.toLowerCase().includes(movementSearchTerm.toLowerCase()) ||
+      (m.producto as any)?.sku?.toLowerCase().includes(movementSearchTerm.toLowerCase());
+    const matchesTipo = tipoFiltro === "all" || m.tipo === tipoFiltro;
+    return matchesSearch && matchesTipo;
+  });
+
+  const openMovementDialog = (type: 'entrada' | 'salida' | 'ajuste') => {
+    setMovementType(type);
+    setSelectedProductoId("");
+    setCantidad("");
+    setMotivo("");
+    setIsMovementOpen(true);
+  };
+
+  const handleMovement = async () => {
+    if (!selectedProductoId || !cantidad) {
+      toast({ title: "Error", description: "Selecciona un producto y cantidad", variant: "destructive" });
+      return;
+    }
+
+    const cantidadNum = parseInt(cantidad);
+    if (isNaN(cantidadNum) || cantidadNum <= 0) {
+      toast({ title: "Error", description: "La cantidad debe ser un número positivo", variant: "destructive" });
+      return;
+    }
+
+    const producto = productos.find(p => p.id === selectedProductoId);
+    if (!producto) return;
+
+    setSaving(true);
+
+    try {
+      let nuevoStock: number;
+      
+      if (movementType === 'entrada') {
+        nuevoStock = producto.stock_actual + cantidadNum;
+      } else if (movementType === 'salida') {
+        if (cantidadNum > producto.stock_actual) {
+          toast({ title: "Error", description: "No hay suficiente stock disponible", variant: "destructive" });
+          setSaving(false);
+          return;
+        }
+        nuevoStock = producto.stock_actual - cantidadNum;
+      } else {
+        // Ajuste: la cantidad es el nuevo stock
+        nuevoStock = cantidadNum;
+      }
+
+      // Actualizar stock del producto
+      const { error: updateError } = await supabase
+        .from('productos')
+        .update({ stock_actual: nuevoStock, updated_at: new Date().toISOString() })
+        .eq('id', selectedProductoId);
+
+      if (updateError) throw updateError;
+
+      // Registrar movimiento
+      const { error: movError } = await supabase
+        .from('movimientos_inventario')
+        .insert({
+          producto_id: selectedProductoId,
+          tipo: movementType,
+          cantidad: movementType === 'ajuste' ? Math.abs(nuevoStock - producto.stock_actual) : cantidadNum,
+          stock_anterior: producto.stock_actual,
+          stock_nuevo: nuevoStock,
+          motivo: motivo || null,
+          referencia_tipo: 'manual',
+          usuario_id: user?.id || null,
+        });
+
+      if (movError) throw movError;
+
+      toast({ 
+        title: "Movimiento registrado", 
+        description: `${movementType === 'entrada' ? 'Entrada' : movementType === 'salida' ? 'Salida' : 'Ajuste'} de ${cantidadNum} unidades` 
+      });
+
+      setIsMovementOpen(false);
+      fetchData();
+    } catch (error: any) {
+      console.error('Error:', error);
+      toast({ title: "Error", description: error.message || "No se pudo registrar el movimiento", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const stats = {
+    total: productos.length,
+    bajoMinimo: productos.filter(p => p.stock_actual > 0 && p.stock_actual <= p.stock_minimo).length,
+    agotados: productos.filter(p => p.stock_actual === 0).length,
+  };
+
   return (
     <MainLayout title="Inventario">
       {/* Stats */}
@@ -47,8 +191,8 @@ const Inventario = () => {
               <Warehouse className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <p className="text-2xl font-bold">3</p>
-              <p className="text-sm text-muted-foreground">Bodegas</p>
+              <p className="text-2xl font-bold">{stats.total}</p>
+              <p className="text-sm text-muted-foreground">Productos</p>
             </div>
           </div>
         </div>
@@ -58,8 +202,8 @@ const Inventario = () => {
               <ArrowUpRight className="h-5 w-5 text-success" />
             </div>
             <div>
-              <p className="text-2xl font-bold">156</p>
-              <p className="text-sm text-muted-foreground">Entradas Hoy</p>
+              <p className="text-2xl font-bold">{movimientos.filter(m => m.tipo === 'entrada').length}</p>
+              <p className="text-sm text-muted-foreground">Entradas</p>
             </div>
           </div>
         </div>
@@ -69,8 +213,8 @@ const Inventario = () => {
               <ArrowDownLeft className="h-5 w-5 text-destructive" />
             </div>
             <div>
-              <p className="text-2xl font-bold">89</p>
-              <p className="text-sm text-muted-foreground">Salidas Hoy</p>
+              <p className="text-2xl font-bold">{stats.agotados}</p>
+              <p className="text-sm text-muted-foreground">Agotados</p>
             </div>
           </div>
         </div>
@@ -80,7 +224,7 @@ const Inventario = () => {
               <Package className="h-5 w-5 text-warning" />
             </div>
             <div>
-              <p className="text-2xl font-bold">23</p>
+              <p className="text-2xl font-bold">{stats.bajoMinimo}</p>
               <p className="text-sm text-muted-foreground">Bajo Mínimo</p>
             </div>
           </div>
@@ -99,63 +243,64 @@ const Inventario = () => {
             <div className="flex flex-1 items-center gap-4">
               <div className="relative flex-1 max-w-md">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Buscar producto..." className="pl-9" />
+                <Input 
+                  placeholder="Buscar producto..." 
+                  className="pl-9" 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
               </div>
-              <Select defaultValue="all">
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Bodega" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas las bodegas</SelectItem>
-                  <SelectItem value="central">Bodega Central</SelectItem>
-                  <SelectItem value="norte">Bodega Norte</SelectItem>
-                  <SelectItem value="sur">Bodega Sur</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
-            <Button className="gap-2">
-              <Plus className="h-4 w-4" />
+            <Button className="gap-2" onClick={() => openMovementDialog('ajuste')}>
+              <RefreshCw className="h-4 w-4" />
               Ajuste de Inventario
             </Button>
           </div>
 
           {/* Inventory Table */}
           <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Producto</TableHead>
-                  <TableHead>Bodega</TableHead>
-                  <TableHead className="text-center">Stock</TableHead>
-                  <TableHead className="text-center">Mínimo</TableHead>
-                  <TableHead className="text-center">Máximo</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Último Mov.</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {inventory.map((item) => {
-                  const status = item.stock === 0 ? "agotado" : item.stock < item.minStock ? "bajo" : "ok";
-                  return (
-                    <TableRow key={item.sku} className="hover:bg-muted/50">
-                      <TableCell className="font-mono text-sm text-primary">{item.sku}</TableCell>
-                      <TableCell className="font-medium">{item.name}</TableCell>
-                      <TableCell className="text-muted-foreground">{item.warehouse}</TableCell>
-                      <TableCell className="text-center font-semibold">{item.stock}</TableCell>
-                      <TableCell className="text-center text-muted-foreground">{item.minStock}</TableCell>
-                      <TableCell className="text-center text-muted-foreground">{item.maxStock}</TableCell>
-                      <TableCell>
-                        <Badge variant={status === "ok" ? "default" : status === "bajo" ? "secondary" : "destructive"}>
-                          {status === "ok" ? "OK" : status === "bajo" ? "Bajo" : "Agotado"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">{item.lastMovement}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>SKU</TableHead>
+                    <TableHead>Producto</TableHead>
+                    <TableHead className="text-center">Stock</TableHead>
+                    <TableHead className="text-center">Mínimo</TableHead>
+                    <TableHead className="text-center">Máximo</TableHead>
+                    <TableHead>Estado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredProductos.map((item) => {
+                    const status = item.stock_actual === 0 ? "agotado" : item.stock_actual <= item.stock_minimo ? "bajo" : "ok";
+                    return (
+                      <TableRow key={item.id} className="hover:bg-muted/50">
+                        <TableCell className="font-mono text-sm text-primary">{item.sku}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            {item.imagen_emoji && <span>{item.imagen_emoji}</span>}
+                            {item.nombre}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center font-semibold">{item.stock_actual}</TableCell>
+                        <TableCell className="text-center text-muted-foreground">{item.stock_minimo}</TableCell>
+                        <TableCell className="text-center text-muted-foreground">{item.stock_maximo || '-'}</TableCell>
+                        <TableCell>
+                          <Badge variant={status === "ok" ? "default" : status === "bajo" ? "secondary" : "destructive"}>
+                            {status === "ok" ? "OK" : status === "bajo" ? "Bajo" : "Agotado"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
           </div>
         </TabsContent>
 
@@ -165,9 +310,14 @@ const Inventario = () => {
             <div className="flex flex-1 items-center gap-4">
               <div className="relative flex-1 max-w-md">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Buscar movimiento..." className="pl-9" />
+                <Input 
+                  placeholder="Buscar movimiento..." 
+                  className="pl-9"
+                  value={movementSearchTerm}
+                  onChange={(e) => setMovementSearchTerm(e.target.value)}
+                />
               </div>
-              <Select defaultValue="all">
+              <Select value={tipoFiltro} onValueChange={setTipoFiltro}>
                 <SelectTrigger className="w-40">
                   <SelectValue placeholder="Tipo" />
                 </SelectTrigger>
@@ -175,16 +325,16 @@ const Inventario = () => {
                   <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="entrada">Entradas</SelectItem>
                   <SelectItem value="salida">Salidas</SelectItem>
-                  <SelectItem value="transferencia">Transferencias</SelectItem>
+                  <SelectItem value="ajuste">Ajustes</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" className="gap-2">
+              <Button variant="outline" className="gap-2" onClick={() => openMovementDialog('entrada')}>
                 <ArrowUpRight className="h-4 w-4" />
                 Entrada
               </Button>
-              <Button variant="outline" className="gap-2">
+              <Button variant="outline" className="gap-2" onClick={() => openMovementDialog('salida')}>
                 <ArrowDownLeft className="h-4 w-4" />
                 Salida
               </Button>
@@ -193,41 +343,141 @@ const Inventario = () => {
 
           {/* Movements Table */}
           <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Fecha/Hora</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Producto</TableHead>
-                  <TableHead className="text-center">Cantidad</TableHead>
-                  <TableHead>Bodega</TableHead>
-                  <TableHead>Referencia</TableHead>
-                  <TableHead>Usuario</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {movements.map((mov) => (
-                  <TableRow key={mov.id} className="hover:bg-muted/50">
-                    <TableCell className="font-mono text-sm">{mov.id}</TableCell>
-                    <TableCell className="text-muted-foreground">{mov.date}</TableCell>
-                    <TableCell>
-                      <Badge variant={mov.type === "entrada" ? "default" : mov.type === "salida" ? "destructive" : "secondary"}>
-                        {mov.type.charAt(0).toUpperCase() + mov.type.slice(1)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-medium">{mov.product}</TableCell>
-                    <TableCell className="text-center font-semibold">{mov.quantity}</TableCell>
-                    <TableCell className="text-muted-foreground">{mov.warehouse}</TableCell>
-                    <TableCell className="font-mono text-sm text-primary">{mov.reference}</TableCell>
-                    <TableCell className="text-muted-foreground">{mov.user}</TableCell>
+            {filteredMovimientos.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <Package className="h-12 w-12 mb-4 opacity-50" />
+                <p>No hay movimientos registrados</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Producto</TableHead>
+                    <TableHead className="text-center">Cantidad</TableHead>
+                    <TableHead className="text-center">Stock Anterior</TableHead>
+                    <TableHead className="text-center">Stock Nuevo</TableHead>
+                    <TableHead>Motivo</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredMovimientos.map((mov: any) => (
+                    <TableRow key={mov.id} className="hover:bg-muted/50">
+                      <TableCell className="text-muted-foreground">
+                        {new Date(mov.created_at).toLocaleDateString('es-VE', { 
+                          day: '2-digit', 
+                          month: '2-digit', 
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={mov.tipo === "entrada" ? "default" : mov.tipo === "salida" ? "destructive" : "secondary"}>
+                          {mov.tipo.charAt(0).toUpperCase() + mov.tipo.slice(1)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-medium">{mov.producto?.nombre || '-'}</TableCell>
+                      <TableCell className="text-center font-semibold">
+                        <span className={mov.tipo === 'entrada' ? 'text-green-600' : mov.tipo === 'salida' ? 'text-red-600' : ''}>
+                          {mov.tipo === 'entrada' ? '+' : mov.tipo === 'salida' ? '-' : ''}{mov.cantidad}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center text-muted-foreground">{mov.stock_anterior}</TableCell>
+                      <TableCell className="text-center text-muted-foreground">{mov.stock_nuevo}</TableCell>
+                      <TableCell className="text-muted-foreground">{mov.motivo || '-'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Dialog de Movimiento */}
+      <Dialog open={isMovementOpen} onOpenChange={setIsMovementOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {movementType === 'entrada' ? '📥 Entrada de Inventario' : 
+               movementType === 'salida' ? '📤 Salida de Inventario' : 
+               '🔄 Ajuste de Inventario'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Producto *</Label>
+              <Select value={selectedProductoId} onValueChange={setSelectedProductoId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar producto" />
+                </SelectTrigger>
+                <SelectContent>
+                  {productos.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <div className="flex items-center gap-2">
+                        <span>{p.imagen_emoji}</span>
+                        <span>{p.nombre}</span>
+                        <span className="text-muted-foreground">({p.stock_actual} en stock)</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {selectedProductoId && (
+              <div className="rounded-lg bg-muted/50 p-3">
+                <p className="text-sm text-muted-foreground">
+                  Stock actual: <span className="font-semibold text-foreground">
+                    {productos.find(p => p.id === selectedProductoId)?.stock_actual || 0}
+                  </span>
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>
+                {movementType === 'ajuste' ? 'Nuevo Stock *' : 'Cantidad *'}
+              </Label>
+              <Input
+                type="number"
+                min="1"
+                placeholder={movementType === 'ajuste' ? 'Nuevo stock' : 'Cantidad'}
+                value={cantidad}
+                onChange={(e) => setCantidad(e.target.value)}
+              />
+              {movementType === 'ajuste' && cantidad && selectedProductoId && (
+                <p className="text-xs text-muted-foreground">
+                  Diferencia: {parseInt(cantidad) - (productos.find(p => p.id === selectedProductoId)?.stock_actual || 0)} unidades
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Motivo / Observaciones</Label>
+              <Textarea
+                placeholder="Ej: Compra a proveedor, Venta directa, Ajuste por conteo físico..."
+                value={motivo}
+                onChange={(e) => setMotivo(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsMovementOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleMovement} disabled={saving}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {movementType === 'entrada' ? 'Registrar Entrada' : 
+               movementType === 'salida' ? 'Registrar Salida' : 
+               'Aplicar Ajuste'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 };
