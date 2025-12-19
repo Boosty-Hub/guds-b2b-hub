@@ -13,6 +13,8 @@ import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Registro from "./pages/Registro";
 import TerminosCondiciones from "./pages/TerminosCondiciones";
+import Soporte from "./pages/Soporte";
+import PoliticasPrivacidad from "./pages/PoliticasPrivacidad";
 
 // Admin Pages
 import Index from "./pages/Index";
@@ -103,6 +105,8 @@ const App = () => (
                 <Route path="/login" element={<Login />} />
                 <Route path="/registro" element={<Registro />} />
                 <Route path="/terminos" element={<TerminosCondiciones />} />
+                <Route path="/soporte" element={<Soporte />} />
+                <Route path="/privacidad" element={<PoliticasPrivacidad />} />
                 
                 {/* Admin Dashboard - Solo admin */}
                 <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><Index /></ProtectedRoute>} />
