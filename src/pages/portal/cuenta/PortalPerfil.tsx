@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,8 @@ import {
   Phone,
   Building2,
   Loader2,
-  Save
+  Save,
+  Camera
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase, Cliente } from "@/lib/supabase";
@@ -21,9 +22,12 @@ const PortalPerfil = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [formData, setFormData] = useState({
     nombre: "",
@@ -40,6 +44,7 @@ const PortalPerfil = () => {
         telefono: user.telefono || "",
         email: user.email || "",
       });
+      setAvatarUrl(user.avatar || null);
       
       if (user.cliente_id) {
         fetchCliente();
@@ -48,6 +53,58 @@ const PortalPerfil = () => {
       }
     }
   }, [user]);
+
+  const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast({ title: "Error", description: "Solo se permiten imágenes", variant: "destructive" });
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "Error", description: "La imagen no debe superar 5MB", variant: "destructive" });
+      return;
+    }
+
+    setUploadingPhoto(true);
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `avatars/${user.id}-${Date.now()}.${fileExt}`;
+
+      // Upload to storage
+      const { error: uploadError } = await supabase.storage
+        .from('imagenes')
+        .upload(fileName, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('imagenes')
+        .getPublicUrl(fileName);
+
+      // Update user profile with avatar URL
+      const { error: updateError } = await supabase
+        .from('usuarios')
+        .update({ avatar_url: publicUrl })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      setAvatarUrl(publicUrl);
+      toast({ title: "Éxito", description: "Foto actualizada correctamente" });
+    } catch (error: any) {
+      console.error('Error uploading photo:', error);
+      toast({ title: "Error", description: error.message || "No se pudo subir la foto", variant: "destructive" });
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
 
   const fetchCliente = async () => {
     const { data } = await supabase
@@ -103,10 +160,41 @@ const PortalPerfil = () => {
         <div className="px-4 py-6 space-y-6">
           {/* Avatar */}
           <div className="flex flex-col items-center">
-            <div className="h-24 w-24 rounded-full bg-primary/10 flex items-center justify-center mb-3">
-              <span className="text-3xl font-bold text-primary">{initials}</span>
+            <div className="relative">
+              {avatarUrl ? (
+                <img 
+                  src={avatarUrl} 
+                  alt="Avatar" 
+                  className="h-24 w-24 rounded-full object-cover"
+                />
+              ) : (
+                <div className="h-24 w-24 rounded-full bg-primary/10 flex items-center justify-center">
+                  <span className="text-3xl font-bold text-primary">{initials}</span>
+                </div>
+              )}
+              {uploadingPhoto && (
+                <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-white" />
+                </div>
+              )}
             </div>
-            <Button variant="outline" size="sm">Cambiar foto</Button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handlePhotoUpload}
+              accept="image/*"
+              className="hidden"
+            />
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="mt-3 gap-2"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingPhoto}
+            >
+              <Camera className="h-4 w-4" />
+              Cambiar foto
+            </Button>
           </div>
 
           {/* Form */}
