@@ -17,7 +17,8 @@ import {
   Gift,
   Shield,
   Star,
-  Loader2
+  Loader2,
+  Trash2
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase, Cliente } from "@/lib/supabase";
@@ -51,6 +52,7 @@ const menuItems = [
     items: [
       { icon: HelpCircle, label: "Centro de ayuda", path: "/portal/ayuda", badge: null },
       { icon: FileText, label: "Términos y condiciones", path: "/portal/terminos", badge: null },
+      { icon: Trash2, label: "Eliminar cuenta", path: "/portal/cuenta/eliminar", badge: null },
     ]
   },
 ];
