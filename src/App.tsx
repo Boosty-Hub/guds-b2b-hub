@@ -58,6 +58,7 @@ import PortalNotificaciones from "./pages/portal/cuenta/PortalNotificaciones";
 import PortalSeguridad from "./pages/portal/cuenta/PortalSeguridad";
 import PortalPreferencias from "./pages/portal/cuenta/PortalPreferencias";
 import PortalAyuda from "./pages/portal/cuenta/PortalAyuda";
+import PortalEliminarCuenta from "./pages/portal/cuenta/PortalEliminarCuenta";
 
 // Portal de Vendedor
 import VendedorDashboard from "./pages/vendedor/VendedorDashboard";
@@ -154,6 +155,7 @@ const App = () => (
                 <Route path="/portal/cuenta/seguridad" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalSeguridad /></ProtectedRoute>} />
                 <Route path="/portal/cuenta/preferencias" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalPreferencias /></ProtectedRoute>} />
                 <Route path="/portal/ayuda" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalAyuda /></ProtectedRoute>} />
+                <Route path="/portal/cuenta/eliminar" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalEliminarCuenta /></ProtectedRoute>} />
           
                 {/* Portal de Vendedor - Solo vendedor */}
                 <Route path="/vendedor" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorDashboard /></ProtectedRoute>} />
