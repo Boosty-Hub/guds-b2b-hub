@@ -145,7 +145,7 @@ const PortalPerfil = () => {
       {/* Header */}
       <div className="bg-primary text-primary-foreground px-4 py-3 sticky top-0 z-50">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-1">
+          <button onClick={() => navigate("/portal/cuenta")} className="p-1">
             <ChevronLeft className="h-6 w-6" />
           </button>
           <h1 className="text-lg font-semibold">Datos Personales</h1>
