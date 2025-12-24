@@ -75,6 +75,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               nombre: userData.nombre,
               apellido: userData.apellido || '',
               role: (userData.role as UserRole) || 'cliente',
+              avatar: userData.avatar_url || undefined,
               cliente_id: userData.cliente_id || undefined,
               telefono: userData.telefono || undefined,
             });
@@ -99,6 +100,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 nombre: newUser.nombre,
                 apellido: newUser.apellido || '',
                 role: (newUser.role as UserRole) || 'cliente',
+                avatar: newUser.avatar_url || undefined,
                 cliente_id: newUser.cliente_id || undefined,
                 telefono: newUser.telefono || undefined,
               });
@@ -229,6 +231,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           nombre: newUser.nombre,
           apellido: newUser.apellido || '',
           role: role,
+          avatar: newUser.avatar_url || undefined,
           cliente_id: newUser.cliente_id || undefined,
           telefono: newUser.telefono || undefined,
         });
@@ -243,6 +246,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         nombre: userData.nombre,
         apellido: userData.apellido || '',
         role: role,
+        avatar: userData.avatar_url || undefined,
         cliente_id: userData.cliente_id || undefined,
         telefono: userData.telefono || undefined,
       });
