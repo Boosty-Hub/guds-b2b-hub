@@ -54,6 +54,49 @@ const PortalPerfil = () => {
     }
   }, [user]);
 
+  // Compress image before upload
+  const compressImage = (file: File, maxWidth: number = 800, quality: number = 0.8): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        // Calculate new dimensions maintaining aspect ratio
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                resolve(blob);
+              } else {
+                reject(new Error('Failed to compress image'));
+              }
+            },
+            'image/jpeg',
+            quality
+          );
+        } else {
+          reject(new Error('Canvas context not available'));
+        }
+      };
+
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !user) return;
@@ -64,22 +107,21 @@ const PortalPerfil = () => {
       return;
     }
 
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: "Error", description: "La imagen no debe superar 5MB", variant: "destructive" });
-      return;
-    }
-
     setUploadingPhoto(true);
 
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `avatars/${user.id}-${Date.now()}.${fileExt}`;
+      // Compress the image before upload
+      const compressedBlob = await compressImage(file, 800, 0.8);
+      
+      const fileName = `avatars/${user.id}-${Date.now()}.jpg`;
 
-      // Upload to storage
+      // Upload compressed image to storage
       const { error: uploadError } = await supabase.storage
         .from('imagenes')
-        .upload(fileName, file, { upsert: true });
+        .upload(fileName, compressedBlob, { 
+          upsert: true,
+          contentType: 'image/jpeg'
+        });
 
       if (uploadError) throw uploadError;
 
