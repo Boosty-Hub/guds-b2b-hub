@@ -357,6 +357,21 @@ const Productos = () => {
     }));
   };
 
+  const handleToggleActivo = async (productoId: string, activo: boolean) => {
+    const { error } = await supabase
+      .from('productos')
+      .update({ activo })
+      .eq('id', productoId);
+
+    if (error) {
+      toast({ title: "Error", description: "No se pudo actualizar el estado", variant: "destructive" });
+    } else {
+      // Actualizar localmente para evitar refetch
+      setProductos(prev => prev.map(p => p.id === productoId ? { ...p, activo } : p));
+      toast({ title: activo ? "Producto Activado" : "Producto Desactivado" });
+    }
+  };
+
   // Funciones de selección múltiple
   const toggleSelectAll = () => {
     if (selectedIds.length === filteredProductos.length) {
@@ -1082,6 +1097,7 @@ const Productos = () => {
                 <TableHead className="text-right">Precio Base</TableHead>
                 <TableHead className="text-center">Stock</TableHead>
                 <TableHead>Estado</TableHead>
+                <TableHead className="text-center">Activo</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
@@ -1133,6 +1149,12 @@ const Productos = () => {
                     <TableCell className="text-center">{producto.stock_actual}</TableCell>
                     <TableCell>
                       <Badge variant={status.variant}>{status.label}</Badge>
+                    </TableCell>
+                    <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                      <Switch
+                        checked={producto.activo}
+                        onCheckedChange={(checked) => handleToggleActivo(producto.id, checked)}
+                      />
                     </TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex justify-end gap-1">
