@@ -3,6 +3,7 @@ import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { 
   User,
   MapPin,
@@ -128,9 +129,12 @@ const PortalCuenta = () => {
           ) : (
             <>
               <div className="flex items-center gap-4">
-                <div className="h-16 w-16 rounded-full bg-white/20 flex items-center justify-center">
-                  <span className="text-2xl font-bold">{initials}</span>
-                </div>
+                <Avatar className="h-16 w-16 border-2 border-white/30">
+                  <AvatarImage src={user?.avatar} alt={user?.nombre || "Usuario"} />
+                  <AvatarFallback className="bg-white/20 text-white text-2xl font-bold">
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
                 <div className="flex-1">
                   <h2 className="text-lg font-semibold">{user?.nombre} {user?.apellido}</h2>
                   <p className="text-sm opacity-90">{user?.email}</p>
