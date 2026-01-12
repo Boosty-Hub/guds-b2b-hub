@@ -19,7 +19,7 @@ import { supabase, Cliente } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 
 const PortalPerfil = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -54,47 +54,86 @@ const PortalPerfil = () => {
     }
   }, [user]);
 
-  // Compress image before upload
-  const compressImage = (file: File, maxWidth: number = 800, quality: number = 0.8): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
+  // Compress image before upload (optimized to avoid iOS/WKWebView crashes)
+  const compressImage = async (
+    file: File,
+    maxDimension: number = 1024,
+    quality: number = 0.82
+  ): Promise<Blob> => {
+    const toJpegBlob = (canvas: HTMLCanvasElement) =>
+      new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error("Failed to compress image"));
+          },
+          "image/jpeg",
+          quality
+        );
+      });
+
+    // Prefer createImageBitmap (usually more memory-friendly on iOS/WKWebView)
+    if (typeof createImageBitmap === "function") {
+      // Tiny decode first to infer orientation with minimal memory
+      const thumb = await createImageBitmap(file, {
+        resizeWidth: 64,
+        resizeQuality: "low",
+      });
+      const isLandscape = thumb.width >= thumb.height;
+      thumb.close?.();
+
+      const bitmap = await createImageBitmap(
+        file,
+        isLandscape
+          ? { resizeWidth: maxDimension, resizeQuality: "high" }
+          : { resizeHeight: maxDimension, resizeQuality: "high" }
+      );
+
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Canvas context not available");
+
+        ctx.drawImage(bitmap, 0, 0);
+        return await toJpegBlob(canvas);
+      } finally {
+        bitmap.close?.();
+      }
+    }
+
+    // Fallback: <img> + canvas
+    const objectUrl = URL.createObjectURL(file);
+    try {
       const img = new Image();
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
+      (img as any).decoding = "async";
 
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Failed to load image"));
+        img.src = objectUrl;
+      });
 
-        // Calculate new dimensions maintaining aspect ratio
-        if (width > maxWidth) {
-          height = (height * maxWidth) / width;
-          width = maxWidth;
-        }
+      const width = img.width;
+      const height = img.height;
+      const scale = Math.min(1, maxDimension / Math.max(width, height));
+      const targetW = Math.max(1, Math.round(width * scale));
+      const targetH = Math.max(1, Math.round(height * scale));
 
-        canvas.width = width;
-        canvas.height = height;
+      const canvas = document.createElement("canvas");
+      canvas.width = targetW;
+      canvas.height = targetH;
 
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          canvas.toBlob(
-            (blob) => {
-              if (blob) {
-                resolve(blob);
-              } else {
-                reject(new Error('Failed to compress image'));
-              }
-            },
-            'image/jpeg',
-            quality
-          );
-        } else {
-          reject(new Error('Canvas context not available'));
-        }
-      };
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas context not available");
 
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = URL.createObjectURL(file);
-    });
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+      return await toJpegBlob(canvas);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
   };
 
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,15 +149,15 @@ const PortalPerfil = () => {
     setUploadingPhoto(true);
 
     try {
-      // Compress the image before upload
-      const compressedBlob = await compressImage(file, 800, 0.8);
-      
+      // Compress the image before upload (keeps memory low on iOS)
+      const compressedBlob = await compressImage(file, 1024, 0.82);
+
       const fileName = `avatars/${user.id}-${Date.now()}.jpg`;
 
       // Upload compressed image to storage
       const { error: uploadError } = await supabase.storage
         .from('imagenes')
-        .upload(fileName, compressedBlob, { 
+        .upload(fileName, compressedBlob, {
           upsert: true,
           contentType: 'image/jpeg'
         });
@@ -139,12 +178,15 @@ const PortalPerfil = () => {
       if (updateError) throw updateError;
 
       setAvatarUrl(publicUrl);
+      updateUser({ avatar: publicUrl });
       toast({ title: "Éxito", description: "Foto actualizada correctamente" });
     } catch (error: any) {
       console.error('Error uploading photo:', error);
       toast({ title: "Error", description: error.message || "No se pudo subir la foto", variant: "destructive" });
     } finally {
       setUploadingPhoto(false);
+      // allow selecting the same file again
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
