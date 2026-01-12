@@ -1,13 +1,12 @@
 import { ReactNode, useState, useEffect } from "react";
-import { NavLink, useLocation } from "react-router-dom";
-import { Home, Search, ShoppingCart, ClipboardList, User } from "lucide-react";
+import { NavLink, useLocation, Link } from "react-router-dom";
+import { Home, Search, ShoppingCart, ClipboardList, User, Bell } from "lucide-react";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { useDeviceType } from "@/hooks/use-mobile";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { CurrencySwitch } from "@/components/CurrencySwitch";
-import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface PortalMobileLayoutProps {
@@ -65,8 +64,8 @@ export const PortalMobileLayout = ({
 
   // Para tablet (iPad), usamos un contenedor más amplio
   const containerClass = isTablet 
-    ? "min-h-screen bg-background max-w-3xl mx-auto relative" 
-    : "min-h-screen bg-background max-w-md mx-auto relative";
+    ? "min-h-screen bg-muted max-w-3xl mx-auto relative" 
+    : "min-h-screen bg-muted max-w-md mx-auto relative";
 
   return (
     <div className={containerClass}>
@@ -91,18 +90,22 @@ export const PortalMobileLayout = ({
               {isTablet ? (
                 <>
                   <CurrencySwitch />
-                  <Button variant="ghost" size="icon" className="relative text-primary-foreground hover:bg-white/20">
-                    <Bell className="h-5 w-5" />
-                    <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs text-primary font-semibold">
-                      3
-                    </span>
-                  </Button>
-                  <Avatar className="h-9 w-9 border-2 border-white/30">
-                    <AvatarImage src={user?.avatar} alt={user?.nombre || "Usuario"} />
-                    <AvatarFallback className="bg-white/20 text-primary-foreground font-semibold text-sm">
-                      {getInitials()}
-                    </AvatarFallback>
-                  </Avatar>
+                  <Link to="/portal/cuenta/notificaciones">
+                    <Button variant="ghost" size="icon" className="relative text-primary-foreground hover:bg-white/20">
+                      <Bell className="h-5 w-5" />
+                      <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs text-primary font-semibold">
+                        3
+                      </span>
+                    </Button>
+                  </Link>
+                  <Link to="/portal/cuenta">
+                    <Avatar className="h-9 w-9 border-2 border-white/30">
+                      <AvatarImage src={user?.avatar} alt={user?.nombre || "Usuario"} />
+                      <AvatarFallback className="bg-white/20 text-primary-foreground font-semibold text-sm">
+                        {getInitials()}
+                      </AvatarFallback>
+                    </Avatar>
+                  </Link>
                 </>
               ) : (
                 <button
