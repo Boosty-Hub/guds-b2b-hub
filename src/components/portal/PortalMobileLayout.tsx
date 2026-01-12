@@ -89,7 +89,7 @@ export const PortalMobileLayout = ({
             <div className="flex items-center gap-3">
               {isTablet ? (
                 <>
-                  <CurrencySwitch />
+                  <CurrencySwitch variant="header" />
                   <Link to="/portal/cuenta/notificaciones">
                     <Button variant="ghost" size="icon" className="relative text-primary-foreground hover:bg-white/20">
                       <Bell className="h-5 w-5" />
