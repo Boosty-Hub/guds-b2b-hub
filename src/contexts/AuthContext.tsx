@@ -36,6 +36,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
   logout: () => void;
+  updateUser: (patch: Partial<User>) => void;
   registros: RegistroCliente[];
   addRegistro: (registro: Omit<RegistroCliente, "id" | "estado" | "fechaRegistro">) => Promise<boolean>;
   aprobarRegistro: (id: string) => Promise<void>;
@@ -264,6 +265,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
   };
 
+  const updateUser = (patch: Partial<User>) => {
+    setUser((prev) => (prev ? { ...prev, ...patch } : prev));
+  };
+
   const addRegistro = async (registro: Omit<RegistroCliente, "id" | "estado" | "fechaRegistro">): Promise<boolean> => {
     const { error } = await supabase
       .from('registros_clientes')
@@ -324,6 +329,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         loading,
         login,
         logout,
+        updateUser,
         registros,
         addRegistro,
         aprobarRegistro,
