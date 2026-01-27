@@ -50,10 +50,11 @@ import {
   XCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { LiveDeliveryMap } from "@/components/delivery/LiveDeliveryMap";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
+mapboxgl.accessToken = "pk.eyJ1IjoiZ3VkcyIsImEiOiJjbWt3cHR5emswMXE2M2ZuYngwcDJybXF6In0.k_RC8LITMponN_6XwIXARA";
 
 interface Envio {
   id: string;
@@ -439,36 +440,9 @@ const Delivery = () => {
         </TabsContent>
 
         {/* Mapa Tab */}
+        {/* Mapa en Vivo Tab */}
         <TabsContent value="mapa">
-          <Card className="border-border">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MapPin className="h-5 w-5" />
-                Mapa de Entregas en Vivo
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div ref={mapContainer} className="h-[500px] rounded-lg overflow-hidden" />
-              <div className="flex gap-4 mt-4">
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded-full bg-gray-500" />
-                  <span className="text-sm text-muted-foreground">Pendiente</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded-full bg-amber-500" />
-                  <span className="text-sm text-muted-foreground">En Ruta</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded-full bg-green-500" />
-                  <span className="text-sm text-muted-foreground">Entregado</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded-full bg-red-500" />
-                  <span className="text-sm text-muted-foreground">Fallido</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <LiveDeliveryMap />
         </TabsContent>
 
         {/* Repartidores Tab */}
