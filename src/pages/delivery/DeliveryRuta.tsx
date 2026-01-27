@@ -15,7 +15,7 @@ import {
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
+mapboxgl.accessToken = "pk.eyJ1IjoiZ3VkcyIsImEiOiJjbWt3cHR5emswMXE2M2ZuYngwcDJybXF6In0.k_RC8LITMponN_6XwIXARA";
 
 interface PuntoRuta {
   id: string;
