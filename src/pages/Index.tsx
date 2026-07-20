@@ -68,7 +68,7 @@ const Index = () => {
       // Total productos
       supabase.from('productos').select('id', { count: 'exact' }).eq('activo', true),
       // Productos bajo stock
-      supabase.from('productos').select('id', { count: 'exact' }).lt('stock', 10).eq('activo', true),
+      supabase.from('productos').select('id', { count: 'exact' }).lt('stock_actual', 10).eq('activo', true),
       // Ventas del mes
       supabase.from('ordenes').select('total').gte('created_at', startOfMonth),
       // Ventas mes anterior

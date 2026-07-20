@@ -3,6 +3,8 @@ import { PortalSidebar } from "./PortalSidebar";
 import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CurrencySwitch } from "@/components/CurrencySwitch";
+import { TasaBcv } from "@/components/TasaBcv";
+import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
@@ -29,13 +31,9 @@ export const PortalLayout = ({ children, title }: PortalLayoutProps) => {
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card px-6">
           <h1 className="text-xl font-semibold text-foreground">{title}</h1>
           <div className="flex items-center gap-4">
+            <TasaBcv showButton={false} />
             <CurrencySwitch />
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-                3
-              </span>
-            </Button>
+            <NotificationsDropdown />
             <div className="flex items-center gap-3">
               <Avatar className="h-9 w-9">
                 <AvatarImage src={user?.avatar} alt={user?.nombre || "Usuario"} />

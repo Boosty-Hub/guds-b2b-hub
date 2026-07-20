@@ -38,7 +38,7 @@ import { useToast } from "@/hooks/use-toast";
 
 interface OrdenDB {
   id: string;
-  numero_orden: string;
+  numero: string;
   cliente_id: string;
   estado: string;
   subtotal: number;
@@ -196,52 +196,31 @@ const Ordenes = () => {
     }
 
     setSubmitting(true);
-    
-    const subtotal = newOrder.items.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
-    const numeroOrden = `ORD-${Date.now().toString(36).toUpperCase()}`;
 
-    const { data: orden, error: ordenError } = await supabase
-      .from('ordenes')
-      .insert({
-        cliente_id: newOrder.cliente_id,
-        numero_orden: numeroOrden,
-        estado: 'pendiente',
-        subtotal,
-        descuento: 0,
-        total: subtotal,
-        metodo_pago: newOrder.metodo_pago,
-        notas: newOrder.notas,
-      })
-      .select()
-      .single();
+    // Crear la orden de forma atómica en el servidor (numera, aplica IVA/envío,
+    // inserta cabecera + items). Misma lógica de dinero que el checkout del cliente.
+    const { data, error } = await supabase.rpc('crear_orden_admin', {
+      p_cliente_id: newOrder.cliente_id,
+      p_metodo_pago: newOrder.metodo_pago,
+      p_notas: newOrder.notas,
+      p_items: newOrder.items.map(item => ({
+        producto_id: item.producto_id,
+        cantidad: item.cantidad,
+        precio_unitario: item.precio,
+      })),
+    });
 
-    if (ordenError || !orden) {
-      toast({ title: "Error", description: ordenError?.message || "Error al crear orden", variant: "destructive" });
+    if (error) {
+      toast({ title: "No se pudo crear la orden", description: error.message, variant: "destructive" });
       setSubmitting(false);
       return;
     }
 
-    const orderItems = newOrder.items.map(item => ({
-      orden_id: orden.id,
-      producto_id: item.producto_id,
-      cantidad: item.cantidad,
-      precio_unitario: item.precio,
-      subtotal: item.precio * item.cantidad,
-    }));
-
-    const { error: itemsError } = await supabase
-      .from('orden_items')
-      .insert(orderItems);
-
-    if (itemsError) {
-      toast({ title: "Error", description: itemsError.message, variant: "destructive" });
-    } else {
-      toast({ title: "Orden creada", description: `Orden ${numeroOrden} creada exitosamente` });
-      setIsCreateOpen(false);
-      setNewOrder({ cliente_id: "", metodo_pago: "transferencia", notas: "", items: [] });
-      fetchOrdenes();
-    }
-    
+    const creada = Array.isArray(data) ? data[0] : data;
+    toast({ title: "Orden creada", description: `Orden ${creada?.numero ?? ''} creada exitosamente` });
+    setIsCreateOpen(false);
+    setNewOrder({ cliente_id: "", metodo_pago: "transferencia", notas: "", items: [] });
+    fetchOrdenes();
     setSubmitting(false);
   };
 
@@ -255,7 +234,7 @@ const Ordenes = () => {
 
   const filteredOrdenes = ordenes.filter(orden => {
     const matchesSearch = 
-      orden.numero_orden.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      orden.numero?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       orden.cliente?.nombre_negocio?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === "all" || orden.estado === statusFilter;
     return matchesSearch && matchesStatus;
@@ -287,7 +266,7 @@ const Ordenes = () => {
               <SelectItem value="confirmado">Confirmado</SelectItem>
               <SelectItem value="procesando">Procesando</SelectItem>
               <SelectItem value="enviado">Enviado</SelectItem>
-              <SelectItem value="entregado">Entregado</SelectItem>
+              <SelectItem value="completado">Completado</SelectItem>
               <SelectItem value="cancelado">Cancelado</SelectItem>
             </SelectContent>
           </Select>
@@ -325,7 +304,7 @@ const Ordenes = () => {
             <TableBody>
               {filteredOrdenes.map((orden) => (
                 <TableRow key={orden.id} className="hover:bg-muted/50">
-                  <TableCell className="font-medium text-primary">{orden.numero_orden}</TableCell>
+                  <TableCell className="font-medium text-primary">{orden.numero}</TableCell>
                   <TableCell className="font-medium">{orden.cliente?.nombre_negocio || 'N/A'}</TableCell>
                   <TableCell className="text-center">{orden.items?.length || 0}</TableCell>
                   <TableCell className="text-right font-semibold">{formatPrice(orden.total)}</TableCell>
@@ -370,7 +349,7 @@ const Ordenes = () => {
               {/* Order Info */}
               <div className="bg-muted rounded-xl p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-lg font-bold text-primary">{selectedOrder.numero_orden}</span>
+                  <span className="text-lg font-bold text-primary">{selectedOrder.numero}</span>
                   <Badge variant={statusConfig[selectedOrder.estado]?.variant || "secondary"}>
                     {statusConfig[selectedOrder.estado]?.label || selectedOrder.estado}
                   </Badge>
@@ -443,7 +422,7 @@ const Ordenes = () => {
               <div>
                 <h3 className="font-semibold mb-2">Cambiar Estado</h3>
                 <div className="grid grid-cols-2 gap-2">
-                  {['pendiente', 'confirmado', 'procesando', 'enviado', 'entregado', 'cancelado'].map((status) => (
+                  {['pendiente', 'confirmado', 'procesando', 'enviado', 'completado', 'cancelado'].map((status) => (
                     <Button
                       key={status}
                       variant={selectedOrder.estado === status ? "default" : "outline"}

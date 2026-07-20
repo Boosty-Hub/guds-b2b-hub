@@ -46,9 +46,9 @@ const ConfigNotificaciones = () => {
   const handleSave = async () => {
     setSaving(true);
     
-    // Upsert each config value
+    // Upsert each config value, comprobando el error de cada uno
     for (const [key, value] of Object.entries(config)) {
-      await supabase
+      const { error } = await supabase
         .from('configuracion')
         .upsert({
           clave: `notif_${key}`,
@@ -57,6 +57,11 @@ const ConfigNotificaciones = () => {
           descripcion: `Notificación: ${key}`,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'clave' });
+      if (error) {
+        toast({ title: "No se pudieron guardar las preferencias", description: error.message, variant: "destructive" });
+        setSaving(false);
+        return;
+      }
     }
 
     toast({

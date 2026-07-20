@@ -1,212 +1,69 @@
+import { useState, useEffect, useCallback } from "react";
 import { DeliveryLayout } from "@/components/delivery/DeliveryLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { 
-  Package, 
-  CheckCircle, 
-  Clock, 
-  MapPin,
-  Navigation,
-  Phone,
-  ArrowRight,
-  Truck
-} from "lucide-react";
 import { Link } from "react-router-dom";
+import { Package, Truck, CheckCircle, XCircle, Clock, ArrowRight, Loader2 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 
-const proximasEntregas = [
-  { 
-    id: "ENV-001", 
-    cliente: "Walmart Centro", 
-    direccion: "Av. Insurgentes Sur 1234", 
-    hora: "10:30 AM",
-    productos: 12,
-    prioridad: "alta"
-  },
-  { 
-    id: "ENV-002", 
-    cliente: "Soriana Norte", 
-    direccion: "Blvd. Manuel Ávila Camacho 500", 
-    hora: "11:15 AM",
-    productos: 8,
-    prioridad: "normal"
-  },
-  { 
-    id: "ENV-003", 
-    cliente: "OXXO Zona 5", 
-    direccion: "Av. Universidad 1500", 
-    hora: "12:00 PM",
-    productos: 5,
-    prioridad: "normal"
-  },
-];
+interface Row { estado: string; fecha_entrega: string | null; }
 
 const DeliveryDashboard = () => {
-  const entregasHoy = 8;
-  const entregasCompletadas = 3;
-  const porcentajeCompletado = (entregasCompletadas / entregasHoy) * 100;
+  const { user } = useAuth();
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchRows = useCallback(async () => {
+    if (!user?.id) return;
+    setLoading(true);
+    const { data } = await supabase.from("entregas").select("estado,fecha_entrega").eq("repartidor_id", user.id);
+    if (data) setRows(data as Row[]);
+    setLoading(false);
+  }, [user?.id]);
+  useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  const hoy = new Date().toISOString().slice(0, 10);
+  const asignadas = rows.filter((r) => r.estado === "asignada").length;
+  const enCamino = rows.filter((r) => r.estado === "en_camino").length;
+  const entregadasHoy = rows.filter((r) => r.estado === "entregada" && r.fecha_entrega?.slice(0, 10) === hoy).length;
+  const fallidas = rows.filter((r) => r.estado === "fallida").length;
+  const pendientes = asignadas + enCamino;
+
+  const stat = (icon: React.ReactNode, n: number, label: string, cls: string) => (
+    <Card className="border-border"><CardContent className="p-4">
+      <div className="flex items-center gap-3">
+        <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${cls}`}>{icon}</div>
+        <div><p className="text-2xl font-bold">{n}</p><p className="text-sm text-muted-foreground">{label}</p></div>
+      </div>
+    </CardContent></Card>
+  );
 
   return (
-    <DeliveryLayout title="Dashboard">
-      {/* Progress Card */}
-      <Card className="border-border mb-6 bg-gradient-to-r from-amber-500/10 to-amber-500/5">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="text-sm text-muted-foreground">Progreso del Día</p>
-              <p className="text-3xl font-bold text-foreground">
-                {entregasCompletadas} de {entregasHoy} entregas
-              </p>
-            </div>
-            <div className="h-16 w-16 rounded-full bg-amber-500/20 flex items-center justify-center">
-              <Truck className="h-8 w-8 text-amber-500" />
-            </div>
+    <DeliveryLayout title="Inicio">
+      {loading ? (
+        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-amber-500" /></div>
+      ) : (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Hola, {user?.nombre} 👋</h2>
+            <p className="text-muted-foreground">Tienes {pendientes} {pendientes === 1 ? "entrega pendiente" : "entregas pendientes"} hoy.</p>
           </div>
-          <Progress value={porcentajeCompletado} className="h-3 mb-2" />
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">{porcentajeCompletado.toFixed(0)}% completado</span>
-            <span className="text-amber-500 font-medium">
-              {entregasHoy - entregasCompletadas} pendientes
-            </span>
+          <div className="grid grid-cols-2 gap-4">
+            {stat(<Clock className="h-5 w-5 text-muted-foreground" />, asignadas, "Asignadas", "bg-muted")}
+            {stat(<Truck className="h-5 w-5 text-amber-600" />, enCamino, "En camino", "bg-amber-500/10")}
+            {stat(<CheckCircle className="h-5 w-5 text-green-600" />, entregadasHoy, "Entregadas hoy", "bg-green-500/10")}
+            {stat(<XCircle className="h-5 w-5 text-red-600" />, fallidas, "Fallidas", "bg-red-500/10")}
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 md:gap-4 md:grid-cols-4 mb-6">
-        <Card className="border-border">
-          <CardContent className="p-3 md:p-4">
+          <Card className="border-border"><CardContent className="p-6 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="h-9 w-9 md:h-10 md:w-10 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <Package className="h-4 w-4 md:h-5 md:w-5 text-blue-500" />
-              </div>
-              <div>
-                <p className="text-xl md:text-2xl font-bold">{entregasHoy}</p>
-                <p className="text-xs text-muted-foreground">Asignadas</p>
-              </div>
+              <Package className="h-6 w-6 text-amber-500" />
+              <div><p className="font-medium">Tus entregas de hoy</p><p className="text-sm text-muted-foreground">Ver y gestionar tus entregas</p></div>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border">
-          <CardContent className="p-3 md:p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 md:h-10 md:w-10 rounded-full bg-amber-500/10 flex items-center justify-center">
-                <Clock className="h-4 w-4 md:h-5 md:w-5 text-amber-500" />
-              </div>
-              <div>
-                <p className="text-xl md:text-2xl font-bold">{entregasHoy - entregasCompletadas}</p>
-                <p className="text-xs text-muted-foreground">Pendientes</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border">
-          <CardContent className="p-3 md:p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 md:h-10 md:w-10 rounded-full bg-green-500/10 flex items-center justify-center">
-                <CheckCircle className="h-4 w-4 md:h-5 md:w-5 text-green-500" />
-              </div>
-              <div>
-                <p className="text-xl md:text-2xl font-bold">{entregasCompletadas}</p>
-                <p className="text-xs text-muted-foreground">Completadas</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border">
-          <CardContent className="p-3 md:p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 md:h-10 md:w-10 rounded-full bg-purple-500/10 flex items-center justify-center">
-                <Navigation className="h-4 w-4 md:h-5 md:w-5 text-purple-500" />
-              </div>
-              <div>
-                <p className="text-xl md:text-2xl font-bold">24 km</p>
-                <p className="text-xs text-muted-foreground">Recorrido</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 md:gap-6 lg:grid-cols-3">
-        {/* Quick Actions */}
-        <Card className="border-border lg:col-span-1">
-          <CardHeader>
-            <CardTitle className="text-lg">Acciones Rápidas</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Link to="/delivery/ruta">
-              <Button className="w-full justify-start gap-3 bg-amber-500 hover:bg-amber-600" size="lg">
-                <Navigation className="h-5 w-5" />
-                Ver Mi Ruta
-              </Button>
-            </Link>
-            <Link to="/delivery/entregas">
-              <Button variant="outline" className="w-full justify-start gap-3" size="lg">
-                <Package className="h-5 w-5" />
-                Mis Entregas
-              </Button>
-            </Link>
-            <Link to="/delivery/historial">
-              <Button variant="outline" className="w-full justify-start gap-3" size="lg">
-                <CheckCircle className="h-5 w-5" />
-                Ver Historial
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-
-        {/* Próximas Entregas */}
-        <Card className="border-border lg:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg">Próximas Entregas</CardTitle>
-            <Link to="/delivery/entregas">
-              <Button variant="ghost" size="sm" className="gap-1">
-                Ver todas <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {proximasEntregas.map((entrega, index) => (
-                <div
-                  key={entrega.id}
-                  className={`flex items-center justify-between rounded-lg border p-4 transition-colors ${
-                    index === 0 ? "border-amber-500/50 bg-amber-500/5" : "border-border hover:bg-muted/50"
-                  }`}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${
-                      index === 0 ? "bg-amber-500/20" : "bg-muted"
-                    }`}>
-                      <span className={`text-lg font-bold ${index === 0 ? "text-amber-500" : "text-muted-foreground"}`}>
-                        {index + 1}
-                      </span>
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{entrega.cliente}</p>
-                        {entrega.prioridad === "alta" && (
-                          <Badge variant="destructive" className="text-xs">Prioritario</Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <MapPin className="h-3 w-3" />
-                        <span>{entrega.direccion}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-medium">{entrega.hora}</p>
-                    <p className="text-sm text-muted-foreground">{entrega.productos} productos</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            <Button asChild className="bg-amber-500 hover:bg-amber-600"><Link to="/delivery/entregas">Ir a entregas <ArrowRight className="h-4 w-4 ml-1" /></Link></Button>
+          </CardContent></Card>
+        </div>
+      )}
     </DeliveryLayout>
   );
 };

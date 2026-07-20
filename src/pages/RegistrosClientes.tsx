@@ -72,6 +72,9 @@ const RegistrosClientes = () => {
   const [isRejectOpen, setIsRejectOpen] = useState(false);
   const [isApproveOpen, setIsApproveOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [approving, setApproving] = useState(false);
+  // Credenciales generadas al aprobar (para comunicárselas al cliente)
+  const [credenciales, setCredenciales] = useState<{ email: string; password: string } | null>(null);
   const { toast } = useToast();
 
   const pendingCount = getPendingRegistros().length;
@@ -85,15 +88,31 @@ const RegistrosClientes = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (!selectedRegistro) return;
-    aprobarRegistro(selectedRegistro.id);
-    toast({
-      title: "Registro Aprobado",
-      description: `${selectedRegistro.nombreNegocio} ha sido aprobado como cliente`,
-    });
+    setApproving(true);
+    const res = await aprobarRegistro(selectedRegistro.id);
+    setApproving(false);
+
+    if (!res.success) {
+      toast({
+        title: "No se pudo aprobar",
+        description: res.error || "Ocurrió un error al aprobar el registro",
+        variant: "destructive",
+      });
+      return;
+    }
+    const negocio = selectedRegistro.nombreNegocio;
     setIsApproveOpen(false);
     setSelectedRegistro(null);
+    // Mostrar las credenciales temporales para comunicárselas al cliente
+    if (res.email && res.password) {
+      setCredenciales({ email: res.email, password: res.password });
+    }
+    toast({
+      title: "Registro Aprobado",
+      description: `${negocio} ha sido aprobado como cliente`,
+    });
   };
 
   const handleReject = () => {
@@ -187,7 +206,7 @@ const RegistrosClientes = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {["all", "pendiente", "aprobado", "rechazado"].map((status) => (
             <Button
               key={status}
@@ -415,18 +434,55 @@ const RegistrosClientes = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>¿Aprobar este registro?</AlertDialogTitle>
             <AlertDialogDescription>
-              Se creará una cuenta de cliente para "{selectedRegistro?.nombreNegocio}". 
-              El cliente recibirá un email con sus credenciales de acceso.
+              Se creará la cuenta de cliente para "{selectedRegistro?.nombreNegocio}" y se generará
+              una contraseña temporal. Deberás comunicársela al cliente (no se envía por email).
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleApprove} className="bg-green-600 hover:bg-green-700">
-              Aprobar Cliente
+            <AlertDialogCancel disabled={approving}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleApprove} disabled={approving} className="bg-green-600 hover:bg-green-700">
+              {approving ? "Aprobando..." : "Aprobar Cliente"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Credenciales generadas */}
+      <Dialog open={!!credenciales} onOpenChange={(o) => { if (!o) setCredenciales(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cliente aprobado — credenciales de acceso</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-sm">
+            <p className="text-muted-foreground">
+              Comunícale estas credenciales al cliente por un canal seguro (WhatsApp, llamada).
+              Esta contraseña temporal <b>solo se muestra una vez</b>.
+            </p>
+            <div className="rounded-lg border border-border bg-muted p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Email</span>
+                <code className="font-medium">{credenciales?.email}</code>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Contraseña temporal</span>
+                <code className="font-bold text-primary">{credenciales?.password}</code>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard?.writeText(`Email: ${credenciales?.email}\nContraseña temporal: ${credenciales?.password}`);
+                toast({ title: "Copiado", description: "Credenciales copiadas al portapapeles" });
+              }}
+            >
+              Copiar
+            </Button>
+            <Button onClick={() => setCredenciales(null)}>Entendido</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Reject Dialog */}
       <Dialog open={isRejectOpen} onOpenChange={setIsRejectOpen}>

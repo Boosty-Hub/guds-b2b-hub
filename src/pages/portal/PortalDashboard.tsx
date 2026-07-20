@@ -22,7 +22,7 @@ import { useDeviceType } from "@/hooks/use-mobile";
 
 interface Orden {
   id: string;
-  numero_orden: string;
+  numero: string;
   estado: string;
   total: number;
   created_at: string;
@@ -182,7 +182,7 @@ const PortalDashboard = () => {
                   </div>
                   <div>
                     <p className={`font-semibold ${isTablet ? 'text-lg' : ''}`}>Pedido en camino</p>
-                    <p className={`opacity-90 ${isTablet ? 'text-base' : 'text-sm'}`}>{order.numero_orden}</p>
+                    <p className={`opacity-90 ${isTablet ? 'text-base' : 'text-sm'}`}>{order.numero}</p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -320,28 +320,28 @@ const PortalDashboard = () => {
                   <div className="flex items-center gap-3">
                     <div className={`rounded-full flex items-center justify-center ${isTablet ? 'h-12 w-12' : 'h-10 w-10'} ${
                       order.estado === "enviado" || order.estado === "en_camino" ? "bg-blue-500/10" : 
-                      order.estado === "entregado" ? "bg-green-500/10" : "bg-yellow-500/10"
+                      order.estado === "completado" ? "bg-green-500/10" : "bg-yellow-500/10"
                     }`}>
                       {order.estado === "enviado" || order.estado === "en_camino" ? (
                         <Truck className={`text-blue-500 ${isTablet ? 'h-6 w-6' : 'h-5 w-5'}`} />
-                      ) : order.estado === "entregado" ? (
+                      ) : order.estado === "completado" ? (
                         <Package className={`text-green-500 ${isTablet ? 'h-6 w-6' : 'h-5 w-5'}`} />
                       ) : (
                         <Clock className={`text-yellow-500 ${isTablet ? 'h-6 w-6' : 'h-5 w-5'}`} />
                       )}
                     </div>
                     <div>
-                      <p className={`font-medium text-foreground ${isTablet ? 'text-base' : ''}`}>{order.numero_orden}</p>
+                      <p className={`font-medium text-foreground ${isTablet ? 'text-base' : ''}`}>{order.numero}</p>
                       <p className={`text-muted-foreground ${isTablet ? 'text-sm' : 'text-xs'}`}>{formatPrice(order.total)}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant={
                       order.estado === "enviado" || order.estado === "en_camino" ? "default" : 
-                      order.estado === "entregado" ? "secondary" : "outline"
+                      order.estado === "completado" ? "secondary" : "outline"
                     }>
                       {order.estado === "enviado" || order.estado === "en_camino" ? "En camino" : 
-                       order.estado === "entregado" ? "Entregado" : 
+                       order.estado === "completado" ? "Entregado" : 
                        order.estado === "pendiente" ? "Pendiente" : order.estado}
                     </Badge>
                     <ChevronRight className={`text-muted-foreground ${isTablet ? 'h-5 w-5' : 'h-4 w-4'}`} />

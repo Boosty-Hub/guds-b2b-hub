@@ -93,7 +93,7 @@ const Categorias = () => {
     });
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!formData.nombre) {
       toast({
         title: "Error",
@@ -103,14 +103,19 @@ const Categorias = () => {
       return;
     }
 
-    addCategoria({
-      nombre: formData.nombre,
-      icono: formData.icono,
-      color: formData.color,
-      activo: true,
-      orden: categorias.length + 1,
-      productosCount: 0,
-    });
+    try {
+      await addCategoria({
+        nombre: formData.nombre,
+        icono: formData.icono,
+        color: formData.color,
+        activo: true,
+        orden: categorias.length + 1,
+        productosCount: 0,
+      });
+    } catch (e) {
+      toast({ title: "No se pudo crear la categoría", description: (e as Error).message, variant: "destructive" });
+      return;
+    }
 
     toast({
       title: "Categoría Creada",
@@ -120,14 +125,19 @@ const Categorias = () => {
     setIsCreateOpen(false);
   };
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (!selectedCategoria) return;
 
-    updateCategoria(selectedCategoria.id, {
-      nombre: formData.nombre,
-      icono: formData.icono,
-      color: formData.color,
-    });
+    try {
+      await updateCategoria(selectedCategoria.id, {
+        nombre: formData.nombre,
+        icono: formData.icono,
+        color: formData.color,
+      });
+    } catch (e) {
+      toast({ title: "No se pudo actualizar la categoría", description: (e as Error).message, variant: "destructive" });
+      return;
+    }
 
     toast({
       title: "Categoría Actualizada",
@@ -141,7 +151,12 @@ const Categorias = () => {
   const handleDelete = async () => {
     if (!selectedCategoria) return;
 
-    await deleteCategoria(selectedCategoria.id);
+    try {
+      await deleteCategoria(selectedCategoria.id);
+    } catch (e) {
+      toast({ title: "No se pudo eliminar la categoría", description: (e as Error).message, variant: "destructive" });
+      return;
+    }
     toast({
       title: "Categoría Eliminada",
       description: `"${selectedCategoria.nombre}" ha sido eliminada. Los productos asociados quedarán sin categoría.`,
@@ -161,8 +176,13 @@ const Categorias = () => {
     setIsEditOpen(true);
   };
 
-  const handleToggleActivo = (categoria: Categoria) => {
-    updateCategoria(categoria.id, { activo: !categoria.activo });
+  const handleToggleActivo = async (categoria: Categoria) => {
+    try {
+      await updateCategoria(categoria.id, { activo: !categoria.activo });
+    } catch (e) {
+      toast({ title: "No se pudo actualizar", description: (e as Error).message, variant: "destructive" });
+      return;
+    }
     toast({
       title: categoria.activo ? "Categoría Desactivada" : "Categoría Activada",
       description: `"${categoria.nombre}" ha sido ${categoria.activo ? "desactivada" : "activada"}`,

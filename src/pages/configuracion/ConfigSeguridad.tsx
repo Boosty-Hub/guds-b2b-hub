@@ -68,7 +68,7 @@ const ConfigSeguridad = () => {
   };
 
   const saveSecurityConfig = async (key: string, value: boolean) => {
-    await supabase
+    const { error } = await supabase
       .from('configuracion')
       .upsert({
         clave: key,
@@ -77,7 +77,12 @@ const ConfigSeguridad = () => {
         descripcion: `Seguridad: ${key}`,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'clave' });
+    if (error) {
+      toast({ title: "No se pudo guardar", description: error.message, variant: "destructive" });
+      return false;
+    }
     toast({ title: "Guardado", description: "Configuración actualizada" });
+    return true;
   };
 
   return (

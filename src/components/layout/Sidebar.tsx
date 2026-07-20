@@ -15,27 +15,34 @@ import {
   Image,
   FolderOpen,
   UserPlus,
+  Wallet,
+  Landmark,
 } from "lucide-react";
-import gudsLogo from "@/assets/guds-logo.png";
+import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
+import { usePermissions } from "@/contexts/PermissionsContext";
 
 const navItems = [
-  { icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard" },
-  { icon: ShoppingCart, label: "Órdenes", path: "/admin/ordenes" },
-  { icon: Users, label: "Clientes", path: "/admin/clientes" },
-  { icon: UserPlus, label: "Registros", path: "/admin/registros" },
-  { icon: Package, label: "Productos", path: "/admin/productos" },
-  { icon: FolderOpen, label: "Categorías", path: "/admin/categorias" },
-  { icon: Warehouse, label: "Inventario", path: "/admin/inventario" },
-  { icon: Tags, label: "Precios", path: "/admin/precios" },
-  { icon: Ticket, label: "Cupones", path: "/admin/cupones" },
-  { icon: Image, label: "Banners", path: "/admin/banners" },
-  { icon: CreditCard, label: "Cuentas", path: "/admin/cuentas" },
-  { icon: Truck, label: "Delivery", path: "/admin/delivery" },
+  { icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard", modulo: "dashboard" },
+  { icon: ShoppingCart, label: "Órdenes", path: "/admin/ordenes", modulo: "ordenes" },
+  { icon: Users, label: "Clientes", path: "/admin/clientes", modulo: "clientes" },
+  { icon: UserPlus, label: "Registros", path: "/admin/registros", modulo: "registros" },
+  { icon: Package, label: "Productos", path: "/admin/productos", modulo: "productos" },
+  { icon: FolderOpen, label: "Categorías", path: "/admin/categorias", modulo: "categorias" },
+  { icon: Warehouse, label: "Inventario", path: "/admin/inventario", modulo: "inventario" },
+  { icon: Tags, label: "Precios", path: "/admin/precios", modulo: "precios" },
+  { icon: Ticket, label: "Cupones", path: "/admin/cupones", modulo: "cupones" },
+  { icon: Image, label: "Banners", path: "/admin/banners", modulo: "banners" },
+  { icon: CreditCard, label: "Cuentas", path: "/admin/cuentas", modulo: "cuentas" },
+  { icon: Wallet, label: "Pagos", path: "/admin/pagos", modulo: "cuentas" },
+  { icon: Landmark, label: "Bancos", path: "/admin/bancos", modulo: "bancos" },
+  { icon: Truck, label: "Delivery", path: "/admin/delivery", modulo: "delivery" },
 ];
 
 export function Sidebar() {
   const navigate = useNavigate();
+  const { can } = usePermissions();
+  const visibleItems = navItems.filter((item) => item.modulo === "dashboard" || can(item.modulo, "ver"));
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -47,12 +54,12 @@ export function Sidebar() {
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-20 items-center justify-center border-b border-sidebar-border px-6">
-          <img src={gudsLogo} alt="GUDS Logo" className="h-14 w-auto" />
+          <Logo className="h-14 text-primary" />
         </div>
 
         {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3 py-4">
-          {navItems.map((item) => (
+          {visibleItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}

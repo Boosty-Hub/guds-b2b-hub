@@ -7,7 +7,7 @@ import { Link } from "react-router-dom";
 
 interface OrdenReciente {
   id: string;
-  numero_orden: string;
+  numero: string;
   total: number;
   estado: string;
   created_at: string;
@@ -19,9 +19,9 @@ interface OrdenReciente {
 const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
   pendiente: { label: "Pendiente", variant: "secondary" },
   confirmado: { label: "Confirmado", variant: "default" },
-  en_proceso: { label: "En Proceso", variant: "default" },
+  procesando: { label: "Procesando", variant: "default" },
   enviado: { label: "Enviado", variant: "outline" },
-  entregado: { label: "Entregado", variant: "default" },
+  completado: { label: "Completado", variant: "default" },
   cancelado: { label: "Cancelado", variant: "destructive" },
 };
 
@@ -37,7 +37,7 @@ export function RecentOrders() {
   const fetchOrders = async () => {
     const { data } = await supabase
       .from('ordenes')
-      .select('id, numero_orden, total, estado, created_at, cliente:clientes(nombre_negocio)')
+      .select('id, numero, total, estado, created_at, cliente:clientes(nombre_negocio)')
       .order('created_at', { ascending: false })
       .limit(5);
     
@@ -90,7 +90,7 @@ export function RecentOrders() {
           orders.map((order) => (
             <div key={order.id} className="flex items-center justify-between p-4 transition-colors hover:bg-muted/50">
               <div className="flex-1">
-                <p className="font-medium text-foreground">{order.numero_orden}</p>
+                <p className="font-medium text-foreground">{order.numero}</p>
                 <p className="text-sm text-muted-foreground">{order.cliente?.nombre_negocio || 'Sin cliente'}</p>
               </div>
               <div className="text-right">

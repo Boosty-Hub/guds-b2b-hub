@@ -15,9 +15,9 @@ import {
   Smile
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import gudsLogo from "@/assets/guds-logo.png";
+import { Logo } from "@/components/Logo";
 
-const navItems = [
+export const configNavItems = [
   { icon: Users, label: "Usuarios", path: "/admin/configuracion/usuarios" },
   { icon: Building2, label: "Empresa", path: "/admin/configuracion/empresa" },
   { icon: Wallet, label: "Métodos de Pago", path: "/admin/configuracion/metodos-pago" },
@@ -33,11 +33,11 @@ const navItems = [
 
 export const ConfiguracionSidebar = () => {
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-card">
+    <aside className="fixed left-0 top-0 z-40 hidden h-screen w-64 border-r border-border bg-card lg:block">
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-border px-6">
-          <img src={gudsLogo} alt="GUDS" className="h-10 w-auto" />
+          <Logo className="h-10 text-primary" />
         </div>
 
         {/* Back to Admin */}
@@ -63,7 +63,7 @@ export const ConfiguracionSidebar = () => {
 
         {/* Navigation */}
         <nav className="flex-1 space-y-1 px-4">
-          {navItems.map((item) => (
+          {configNavItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}

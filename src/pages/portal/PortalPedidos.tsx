@@ -27,7 +27,7 @@ import { Button } from "@/components/ui/button";
 
 interface OrdenDB {
   id: string;
-  numero_orden: string;
+  numero: string;
   estado: string;
   total: number;
   subtotal: number;
@@ -93,8 +93,8 @@ const PortalPedidos = () => {
     setLoading(false);
   };
 
-  const activeOrders = ordenes.filter(o => o.estado !== "entregado" && o.estado !== "cancelado");
-  const completedOrders = ordenes.filter(o => o.estado === "entregado");
+  const activeOrders = ordenes.filter(o => o.estado !== "completado" && o.estado !== "cancelado");
+  const completedOrders = ordenes.filter(o => o.estado === "completado");
   const displayOrders = activeTab === "activos" ? activeOrders : completedOrders;
 
   const formatDate = (dateStr: string) => {
@@ -172,7 +172,7 @@ const PortalPedidos = () => {
                       <StatusIcon className={`h-4 w-4 ${config.color.replace('bg-', 'text-')}`} />
                     </div>
                     <div>
-                      <p className="font-semibold text-foreground">{order.numero_orden}</p>
+                      <p className="font-semibold text-foreground">{order.numero}</p>
                       <p className="text-xs text-muted-foreground">{formatDate(order.created_at)}</p>
                     </div>
                   </div>
@@ -240,7 +240,7 @@ const PortalPedidos = () => {
               <>
                 <SheetHeader className="text-left">
                   <SheetTitle className="flex items-center justify-between">
-                    <span>{selectedOrder.numero_orden}</span>
+                    <span>{selectedOrder.numero}</span>
                     <Badge className={`${config.color} text-white`}>
                       {config.label}
                     </Badge>

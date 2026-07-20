@@ -24,7 +24,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import gudsLogo from "@/assets/guds-logo.png";
+import { Logo } from "@/components/Logo";
 
 const tiposNegocio = [
   "Bodega",
@@ -113,12 +113,19 @@ const Registro = () => {
     }
 
     setIsSubmitting(true);
-    
-    // Simular envío
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    addRegistro(formData);
+
+    // Persistir la solicitud de verdad y solo mostrar éxito si se guardó.
+    const ok = await addRegistro(formData);
     setIsSubmitting(false);
+
+    if (!ok) {
+      toast({
+        title: "No se pudo enviar la solicitud",
+        description: "Revisa tu conexión e inténtalo de nuevo. Si el problema persiste, contáctanos.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsSuccess(true);
   };
 
@@ -163,7 +170,7 @@ const Registro = () => {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
             <ArrowLeft className="h-5 w-5" />
-            <img src={gudsLogo} alt="GUDS" className="h-8" />
+            <Logo className="h-8 text-primary" />
           </Link>
           <Link to="/login" className="text-sm text-primary font-medium">
             ¿Ya tienes cuenta? Inicia Sesión

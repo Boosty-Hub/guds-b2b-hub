@@ -39,7 +39,10 @@ interface AuthContextType {
   updateUser: (patch: Partial<User>) => void;
   registros: RegistroCliente[];
   addRegistro: (registro: Omit<RegistroCliente, "id" | "estado" | "fechaRegistro">) => Promise<boolean>;
-  aprobarRegistro: (id: string) => Promise<void>;
+  aprobarRegistro: (
+    id: string,
+    opts?: { lista_precios_id?: string; vendedor_id?: string; limite_credito?: number; dias_credito?: number }
+  ) => Promise<{ success: boolean; email?: string; password?: string; error?: string }>;
   rechazarRegistro: (id: string, notas: string) => Promise<void>;
   getPendingRegistros: () => RegistroCliente[];
   refreshRegistros: () => Promise<void>;
@@ -69,7 +72,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
           console.log('Usuario encontrado:', userData, error);
 
-          if (userData) {
+          if (userData && userData.activo === false) {
+            // Cuenta desactivada: cerrar la sesión persistida
+            await supabase.auth.signOut();
+            setUser(null);
+          } else if (userData) {
             setUser({
               id: userData.id,
               email: userData.email,
@@ -239,7 +246,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return { success: true, role };
       }
 
-      // Usuario existente
+      // Usuario existente: bloquear si está desactivado
+      if (userData.activo === false) {
+        await supabase.auth.signOut();
+        return { success: false, error: "Tu cuenta está desactivada. Contacta al administrador." };
+      }
+
       const role = (userData.role as UserRole) || 'cliente';
       setUser({
         id: userData.id,
@@ -292,16 +304,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return false;
   };
 
-  const aprobarRegistro = async (id: string) => {
-    // Llamar a la función de Supabase para aprobar y crear cliente
-    const { error } = await supabase.rpc('aprobar_registro_cliente', {
+  const aprobarRegistro = async (
+    id: string,
+    opts?: { lista_precios_id?: string; vendedor_id?: string; limite_credito?: number; dias_credito?: number }
+  ): Promise<{ success: boolean; email?: string; password?: string; error?: string }> => {
+    // Aprueba, crea el cliente + la cuenta de auth y devuelve la contraseña temporal.
+    const { data, error } = await supabase.rpc('aprobar_registro_cliente', {
       p_registro_id: id,
-      p_admin_id: null, // En producción sería el ID del admin actual
+      p_admin_id: user?.id ?? null,
+      p_lista_precios_id: opts?.lista_precios_id ?? null,
+      p_vendedor_id: opts?.vendedor_id ?? null,
+      p_limite_credito: opts?.limite_credito ?? 0,
+      p_dias_credito: opts?.dias_credito ?? 0,
     });
-    
-    if (!error) {
-      await fetchRegistros();
+
+    if (error) {
+      return { success: false, error: error.message };
     }
+    await fetchRegistros();
+    const row = Array.isArray(data) ? data[0] : data;
+    return { success: true, email: row?.email, password: row?.password_temporal };
   };
 
   const rechazarRegistro = async (id: string, notas: string) => {

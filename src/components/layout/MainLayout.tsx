@@ -18,7 +18,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import gudsLogo from "@/assets/guds-logo.png";
+import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -82,20 +82,20 @@ export function MainLayout({ children, title }: MainLayoutProps) {
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border z-50">
-        <div className="flex items-center justify-around h-16">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border z-50 overflow-hidden">
+        <div className="flex items-center h-16">
           {mobileNavItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
               className={({ isActive }) =>
-                `flex flex-col items-center gap-1 px-3 py-2 ${
+                `flex flex-1 min-w-0 flex-col items-center gap-1 px-1 py-2 ${
                   isActive ? "text-primary" : "text-muted-foreground"
                 }`
               }
             >
-              <item.icon className="h-5 w-5" />
-              <span className="text-xs">{item.label}</span>
+              <item.icon className="h-5 w-5 shrink-0" />
+              <span className="text-xs truncate max-w-full">{item.label}</span>
             </NavLink>
           ))}
         </div>
@@ -107,7 +107,7 @@ export function MainLayout({ children, title }: MainLayoutProps) {
         <SheetContent side="left" className="w-80 p-0">
           <SheetHeader className="p-4 border-b border-border">
             <SheetTitle className="flex items-center gap-3">
-              <img src={gudsLogo} alt="GUDS" className="h-10" />
+              <Logo className="h-10 text-primary" />
             </SheetTitle>
           </SheetHeader>
           

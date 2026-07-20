@@ -27,8 +27,10 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
+import { useCurrency } from "@/contexts/CurrencyContext";
 
 const ConfigMoneda = () => {
+  const { setExchangeRate } = useCurrency();
   const [tasaActual, setTasaActual] = useState("36.50");
   const [nuevaTasa, setNuevaTasa] = useState("");
   const [monedaPrincipal, setMonedaPrincipal] = useState("USD");
@@ -88,6 +90,8 @@ const ConfigMoneda = () => {
       setTasaActual(nuevaTasa);
       setNuevaTasa("");
       setLastUpdate(new Date().toISOString());
+      // Reflejar la nueva tasa en toda la app sin recargar
+      setExchangeRate(tasaNuevaNum);
 
       toast({
         title: "Tasa Actualizada",
@@ -98,11 +102,17 @@ const ConfigMoneda = () => {
   };
 
   const handleSaveMonedaPrincipal = async (moneda: string) => {
+    const anterior = monedaPrincipal;
     setMonedaPrincipal(moneda);
-    await supabase
+    const { error } = await supabase
       .from('configuracion')
       .update({ valor: moneda, updated_at: new Date().toISOString() })
       .eq('clave', 'moneda_principal');
+    if (error) {
+      setMonedaPrincipal(anterior); // revertir el cambio optimista
+      toast({ title: "No se pudo guardar", description: error.message, variant: "destructive" });
+      return;
+    }
     toast({ title: "Guardado", description: `Moneda principal: ${moneda}` });
   };
 

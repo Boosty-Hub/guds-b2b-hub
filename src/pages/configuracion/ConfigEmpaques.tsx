@@ -140,11 +140,15 @@ const ConfigEmpaques = () => {
   };
 
   const handleToggleActivo = async (empaque: TipoEmpaque) => {
-    await supabase
+    const { error } = await supabase
       .from('tipos_empaque')
       .update({ activo: !empaque.activo })
       .eq('id', empaque.id);
-    
+
+    if (error) {
+      toast({ title: "No se pudo actualizar", description: error.message, variant: "destructive" });
+      return;
+    }
     toast({
       title: empaque.activo ? "Empaque Desactivado" : "Empaque Activado",
       description: `"${empaque.nombre}" ha sido ${empaque.activo ? "desactivado" : "activado"}`,

@@ -20,7 +20,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import gudsLogo from "@/assets/guds-logo.png";
+import { Logo } from "@/components/Logo";
+import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -66,13 +67,8 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
           </button>
           <h1 className="font-semibold">{title}</h1>
           <div className="flex items-center gap-2">
-            <CurrencySwitch />
-            <Button variant="ghost" size="icon" className="relative text-white hover:bg-white/10">
-              <Bell className="h-5 w-5" />
-              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-xs text-emerald-500 font-bold">
-                2
-              </span>
-            </Button>
+            <CurrencySwitch variant="header" />
+            <NotificationsDropdown variant="header" />
           </div>
         </div>
       </header>
@@ -83,12 +79,7 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
           <h1 className="text-xl font-semibold text-foreground">{title}</h1>
           <div className="flex items-center gap-4">
             <CurrencySwitch />
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-xs text-white">
-                2
-              </span>
-            </Button>
+            <NotificationsDropdown />
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 rounded-full bg-emerald-500/20 flex items-center justify-center">
                 <span className="text-sm font-semibold text-emerald-500">
@@ -136,7 +127,7 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
         <SheetContent side="left" className="w-80 p-0">
           <SheetHeader className="p-4 border-b border-border">
             <SheetTitle className="flex items-center gap-3">
-              <img src={gudsLogo} alt="GUDS" className="h-8" />
+              <Logo className="h-8 text-primary" />
             </SheetTitle>
           </SheetHeader>
           

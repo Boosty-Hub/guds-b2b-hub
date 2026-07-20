@@ -9,6 +9,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -28,15 +29,33 @@ interface NotificationsDropdownProps {
 
 export const NotificationsDropdown = ({ variant = "default" }: NotificationsDropdownProps) => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (user?.id) {
-      fetchNotifications();
-    }
+    if (!user?.id) return;
+    fetchNotifications();
+    // Realtime: refresca al recibir nuevas notificaciones o marcarlas leídas
+    const channel = supabase
+      .channel(`notif-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "notificaciones", filter: `usuario_id=eq.${user.id}` },
+        () => fetchNotifications()
+      )
+      .subscribe();
+    // Respaldo: refresca cada 60s por si realtime no está disponible
+    const poll = setInterval(fetchNotifications, 60000);
+    return () => { supabase.removeChannel(channel); clearInterval(poll); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  const handleClick = (n: Notification) => {
+    if (!n.leida) markAsRead(n.id);
+    if (n.link) { setOpen(false); navigate(n.link); }
+  };
 
   const fetchNotifications = async () => {
     if (!user?.id) return;
@@ -161,11 +180,7 @@ export const NotificationsDropdown = ({ variant = "default" }: NotificationsDrop
                   className={`px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors ${
                     !notification.leida ? "bg-primary/5" : ""
                   }`}
-                  onClick={() => {
-                    if (!notification.leida) {
-                      markAsRead(notification.id);
-                    }
-                  }}
+                  onClick={() => handleClick(notification)}
                 >
                   <div className="flex gap-3">
                     <div className="flex-shrink-0 mt-0.5">

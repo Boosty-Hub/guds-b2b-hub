@@ -87,9 +87,9 @@ const ConfigEnvios = () => {
               {zonasEnvio.map((zona) => (
                 <div
                   key={zona.id}
-                  className="flex items-center justify-between rounded-lg border border-border p-4"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4"
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
                     <div className={`h-10 w-10 rounded-full flex items-center justify-center ${zona.activo ? "bg-emerald-500/10" : "bg-muted"}`}>
                       <Truck className={`h-5 w-5 ${zona.activo ? "text-emerald-500" : "text-muted-foreground"}`} />
                     </div>
