@@ -162,7 +162,7 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const addBanner = async (banner: Omit<Banner, "id">) => {
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('banners')
       .insert({
         titulo: banner.title,
@@ -177,10 +177,9 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
       })
       .select()
       .single();
-    
-    if (data) {
-      fetchData(); // Recargar datos
-    }
+
+    if (error) throw new Error(error.message); // el caller lo captura y avisa
+    await fetchData();
   };
 
   const updateBanner = async (id: string, updates: Partial<Banner>) => {
@@ -195,17 +194,19 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
     if (updates.fechaInicio !== undefined) dbUpdates.fecha_inicio = updates.fechaInicio;
     if (updates.fechaFin !== undefined) dbUpdates.fecha_fin = updates.fechaFin;
 
-    await supabase.from('banners').update(dbUpdates).eq('id', id);
-    fetchData();
+    const { error } = await supabase.from('banners').update(dbUpdates).eq('id', id);
+    if (error) throw new Error(error.message);
+    await fetchData();
   };
 
   const deleteBanner = async (id: string) => {
-    await supabase.from('banners').delete().eq('id', id);
-    fetchData();
+    const { error } = await supabase.from('banners').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    await fetchData();
   };
 
   const addCategoria = async (categoria: Omit<Categoria, "id">) => {
-    await supabase
+    const { error } = await supabase
       .from('categorias')
       .insert({
         nombre: categoria.nombre,
@@ -214,7 +215,8 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
         activo: categoria.activo,
         orden: categoria.orden,
       });
-    fetchData();
+    if (error) throw new Error(error.message);
+    await fetchData();
   };
 
   const updateCategoria = async (id: string, updates: Partial<Categoria>) => {
@@ -225,15 +227,14 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
     if (updates.activo !== undefined) dbUpdates.activo = updates.activo;
     if (updates.orden !== undefined) dbUpdates.orden = updates.orden;
 
-    await supabase.from('categorias').update(dbUpdates).eq('id', id);
-    fetchData();
+    const { error } = await supabase.from('categorias').update(dbUpdates).eq('id', id);
+    if (error) throw new Error(error.message);
+    await fetchData();
   };
 
   const deleteCategoria = async (id: string) => {
     const { error } = await supabase.from('categorias').delete().eq('id', id);
-    if (error) {
-      console.error('Error eliminando categoría:', error);
-    }
+    if (error) throw new Error(error.message);
     await fetchData();
   };
 

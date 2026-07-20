@@ -14,7 +14,8 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import gudsLogo from "@/assets/guds-logo.png";
+import { supabase } from "@/lib/supabase";
+import { Logo } from "@/components/Logo";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -26,9 +27,31 @@ const Login = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  const handleForgotPassword = async () => {
+    if (!email) {
+      toast({
+        title: "Ingresa tu email",
+        description: "Escribe tu email arriba y vuelve a pulsar para enviarte el enlace de recuperación.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/login`,
+    });
+    if (error) {
+      toast({ title: "No se pudo enviar", description: error.message, variant: "destructive" });
+    } else {
+      toast({
+        title: "Revisa tu correo",
+        description: `Si ${email} tiene una cuenta, te enviamos un enlace para restablecer la contraseña.`,
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!email || !password) {
       toast({
         title: "Campos requeridos",
@@ -98,7 +121,7 @@ const Login = () => {
 
           {/* Logo */}
           <div className="mb-8">
-            <img src={gudsLogo} alt="GUDS" className="h-12 mb-6" />
+            <Logo className="h-12 mb-6 text-primary" />
             <h1 className="text-2xl font-bold text-foreground">Iniciar Sesión</h1>
             <p className="text-muted-foreground">
               Ingresa tus credenciales para acceder a tu cuenta
@@ -155,9 +178,9 @@ const Login = () => {
                   Recordarme
                 </Label>
               </div>
-              <a href="#" className="text-sm text-primary hover:underline">
+              <button type="button" onClick={handleForgotPassword} className="text-sm text-primary hover:underline">
                 ¿Olvidaste tu contraseña?
-              </a>
+              </button>
             </div>
 
             <Button type="submit" className="w-full" size="lg" disabled={isLoading}>

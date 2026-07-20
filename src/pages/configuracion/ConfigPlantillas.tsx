@@ -116,9 +116,9 @@ const ConfigPlantillas = () => {
               {plantillas.filter(p => p.tipo === "email").map((plantilla) => (
                 <div
                   key={plantilla.id}
-                  className="flex items-center justify-between rounded-lg border border-border p-4 hover:bg-muted/50 transition-colors"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4 hover:bg-muted/50 transition-colors"
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
                     <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center">
                       {getTipoIcon(plantilla.tipo)}
                     </div>
@@ -158,9 +158,9 @@ const ConfigPlantillas = () => {
               {plantillas.filter(p => p.tipo === "documento").map((plantilla) => (
                 <div
                   key={plantilla.id}
-                  className="flex items-center justify-between rounded-lg border border-border p-4 hover:bg-muted/50 transition-colors"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4 hover:bg-muted/50 transition-colors"
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
                     <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center">
                       {getTipoIcon(plantilla.tipo)}
                     </div>

@@ -34,6 +34,8 @@ interface CartItemDB {
   usuario_id: string;
   producto_id: string;
   cantidad: number;
+  precio_unitario: number | null;
+  tipo_empaque_id: string | null;
   producto: Producto;
 }
 
@@ -60,6 +62,8 @@ const PortalCarrito = () => {
   const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Config de negocio (IVA / envío) leída de la BD; los defaults coinciden con el servidor.
+  const [cfg, setCfg] = useState({ iva: 16, envio: 50, envioGratis: 500 });
   const { formatPrice } = useCurrency();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -69,7 +73,23 @@ const PortalCarrito = () => {
     if (user?.id) {
       fetchCart();
     }
+    fetchConfig();
   }, [user]);
+
+  const fetchConfig = async () => {
+    const { data } = await supabase
+      .from('configuracion')
+      .select('clave, valor')
+      .in('clave', ['iva_porcentaje', 'costo_envio', 'envio_gratis_minimo']);
+    if (data) {
+      const map = Object.fromEntries(data.map((r: { clave: string; valor: unknown }) => [r.clave, Number(r.valor)]));
+      setCfg({
+        iva: Number.isFinite(map.iva_porcentaje) ? map.iva_porcentaje : 16,
+        envio: Number.isFinite(map.costo_envio) ? map.costo_envio : 50,
+        envioGratis: Number.isFinite(map.envio_gratis_minimo) ? map.envio_gratis_minimo : 500,
+      });
+    }
+  };
 
   const fetchCart = async () => {
     setLoading(true);
@@ -143,19 +163,26 @@ const PortalCarrito = () => {
     }
   };
 
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
   const getItemPrice = (item: CartItemDB) => {
+    // precio_unitario (precio del empaque elegido) es la fuente de verdad y coincide
+    // con lo que calcula el checkout en el servidor. Fallback al precio del producto.
+    if (item.precio_unitario != null) return Number(item.precio_unitario);
     const product = item.producto;
-    return product.en_oferta && product.precio_oferta 
-      ? product.precio_oferta 
+    return product.en_oferta && product.precio_oferta
+      ? product.precio_oferta
       : product.precio_base;
   };
 
   const subtotal = cart.reduce((sum, item) => sum + getItemPrice(item) * item.cantidad, 0);
-  const discount = cuponApplied 
+  const discount = cuponApplied
     ? (cuponApplied.tipo === 'porcentaje' ? subtotal * (cuponApplied.valor / 100) : cuponApplied.valor)
     : 0;
-  const shipping = subtotal >= 500 ? 0 : 50;
-  const total = subtotal - discount + shipping;
+  const base = Math.max(0, subtotal - discount);
+  const impuesto = round2(base * (cfg.iva / 100));
+  const shipping = base >= cfg.envioGratis ? 0 : cfg.envio;
+  const total = round2(base + impuesto + shipping);
   const cartCount = cart.reduce((sum, item) => sum + item.cantidad, 0);
 
   const handleCheckout = async () => {
@@ -171,63 +198,28 @@ const PortalCarrito = () => {
 
     setSubmitting(true);
 
-    // Generate order number
-    const numeroOrden = `ORD-${Date.now().toString(36).toUpperCase()}`;
+    // Crear la orden de forma atómica en el servidor: numera, calcula IVA/envío,
+    // inserta cabecera + items y vacía el carrito en una sola transacción.
+    const { data, error } = await supabase.rpc('crear_orden_desde_carrito', {
+      p_metodo_pago: selectedPayment,
+      p_notas: '',
+      p_cupon_id: cuponApplied?.id || null,
+    });
 
-    // Create order
-    const { data: orden, error: ordenError } = await supabase
-      .from('ordenes')
-      .insert({
-        cliente_id: user.cliente_id,
-        usuario_id: user.id,
-        numero_orden: numeroOrden,
-        estado: 'pendiente',
-        subtotal: subtotal,
-        descuento: discount,
-        total: total,
-        metodo_pago: selectedPayment,
-        cupon_id: cuponApplied?.id || null,
-        notas: '',
-      })
-      .select()
-      .single();
-
-    if (ordenError || !orden) {
-      toast({ title: "Error", description: ordenError?.message || "Error al crear la orden", variant: "destructive" });
+    if (error) {
+      toast({ title: "No se pudo confirmar el pedido", description: error.message, variant: "destructive" });
       setSubmitting(false);
       return;
     }
 
-    // Create order items
-    const orderItems = cart.map(item => ({
-      orden_id: orden.id,
-      producto_id: item.producto_id,
-      cantidad: item.cantidad,
-      precio_unitario: getItemPrice(item),
-      subtotal: getItemPrice(item) * item.cantidad,
-    }));
-
-    const { error: itemsError } = await supabase
-      .from('orden_items')
-      .insert(orderItems);
-
-    if (itemsError) {
-      toast({ title: "Error", description: itemsError.message, variant: "destructive" });
-      setSubmitting(false);
-      return;
-    }
-
-    // Clear cart
-    await supabase
-      .from('carrito')
-      .delete()
-      .eq('usuario_id', user.id);
+    const creada = Array.isArray(data) ? data[0] : data;
 
     toast({
       title: "¡Pedido confirmado!",
-      description: `Tu pedido ${numeroOrden} ha sido enviado para procesamiento`,
+      description: `Tu pedido ${creada?.numero ?? ''} ha sido enviado para procesamiento`,
     });
-    
+
+    setCart([]);
     setSubmitting(false);
     navigate("/portal/pedidos");
   };
@@ -279,7 +271,7 @@ const PortalCarrito = () => {
           <Truck className="h-5 w-5 text-green-500" />
           <div className="flex-1">
             <p className="text-sm font-medium text-green-700">
-              {shipping === 0 ? "¡Envío gratis!" : `Agrega ${formatPrice(500 - subtotal)} más para envío gratis`}
+              {shipping === 0 ? "¡Envío gratis!" : `Agrega ${formatPrice(cfg.envioGratis - base)} más para envío gratis`}
             </p>
           </div>
         </div>
@@ -426,6 +418,10 @@ const PortalCarrito = () => {
                   <span>-{formatPrice(discount)}</span>
                 </div>
               )}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">IVA ({cfg.iva}%)</span>
+                <span>{formatPrice(impuesto)}</span>
+              </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Envío</span>
                 <span className={shipping === 0 ? "text-green-600" : ""}>

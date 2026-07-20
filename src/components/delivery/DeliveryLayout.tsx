@@ -18,7 +18,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import gudsLogo from "@/assets/guds-logo.png";
+import { Logo } from "@/components/Logo";
+import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -62,12 +63,7 @@ export const DeliveryLayout = ({ children, title }: DeliveryLayoutProps) => {
             <Menu className="h-6 w-6" />
           </button>
           <h1 className="font-semibold">{title}</h1>
-          <Button variant="ghost" size="icon" className="relative text-white hover:bg-white/10">
-            <Bell className="h-5 w-5" />
-            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-xs text-amber-500 font-bold">
-              4
-            </span>
-          </Button>
+          <NotificationsDropdown variant="header" />
         </div>
       </header>
 
@@ -76,12 +72,7 @@ export const DeliveryLayout = ({ children, title }: DeliveryLayoutProps) => {
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card px-6">
           <h1 className="text-xl font-semibold text-foreground">{title}</h1>
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-xs text-white">
-                4
-              </span>
-            </Button>
+            <NotificationsDropdown />
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 rounded-full bg-amber-500/20 flex items-center justify-center">
                 <span className="text-sm font-semibold text-amber-500">
@@ -129,7 +120,7 @@ export const DeliveryLayout = ({ children, title }: DeliveryLayoutProps) => {
         <SheetContent side="left" className="w-80 p-0">
           <SheetHeader className="p-4 border-b border-border">
             <SheetTitle className="flex items-center gap-3">
-              <img src={gudsLogo} alt="GUDS" className="h-8" />
+              <Logo className="h-8 text-primary" />
             </SheetTitle>
           </SheetHeader>
           

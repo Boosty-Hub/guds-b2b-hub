@@ -7,8 +7,9 @@ import {
   LogOut,
   Truck
 } from "lucide-react";
-import gudsLogo from "@/assets/guds-logo.png";
+import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/delivery" },
@@ -19,6 +20,7 @@ const navItems = [
 
 export const DeliverySidebar = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -30,7 +32,7 @@ export const DeliverySidebar = () => {
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-border px-6">
-          <img src={gudsLogo} alt="GUDS" className="h-10 w-auto" />
+          <Logo className="h-10 text-primary" />
         </div>
 
         {/* Driver Info */}
@@ -40,8 +42,8 @@ export const DeliverySidebar = () => {
               <Truck className="h-4 w-4 text-amber-500" />
               <p className="text-xs font-medium text-amber-500">Portal Delivery</p>
             </div>
-            <p className="font-semibold text-foreground">Carlos Ruiz</p>
-            <p className="text-xs text-muted-foreground mt-1">Camioneta Ford • Zona Centro</p>
+            <p className="font-semibold text-foreground">{user ? `${user.nombre} ${user.apellido || ""}` : "Repartidor"}</p>
+            <p className="text-xs text-muted-foreground mt-1">{user?.email || "Portal de entregas"}</p>
           </div>
         </div>
 

@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { CurrencyProvider } from "@/contexts/CurrencyContext";
 import { StoreConfigProvider } from "@/contexts/StoreConfigContext";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { PermissionsProvider } from "@/contexts/PermissionsContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
 // Public Pages
@@ -24,6 +25,8 @@ import Productos from "./pages/Productos";
 import Inventario from "./pages/Inventario";
 import Precios from "./pages/Precios";
 import Cuentas from "./pages/Cuentas";
+import Pagos from "./pages/Pagos";
+import Bancos from "./pages/Bancos";
 import Perfil from "./pages/Perfil";
 import NotFound from "./pages/NotFound";
 
@@ -94,6 +97,7 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
+      <PermissionsProvider>
       <CurrencyProvider>
         <StoreConfigProvider>
           <TooltipProvider>
@@ -111,33 +115,35 @@ const App = () => (
                 
                 {/* Admin Dashboard - Solo admin */}
                 <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><Index /></ProtectedRoute>} />
-                <Route path="/admin/ordenes" element={<ProtectedRoute allowedRoles={["admin"]}><Ordenes /></ProtectedRoute>} />
-                <Route path="/admin/clientes" element={<ProtectedRoute allowedRoles={["admin"]}><Clientes /></ProtectedRoute>} />
-                <Route path="/admin/clientes/:clienteId/usuarios" element={<ProtectedRoute allowedRoles={["admin"]}><ClienteUsuarios /></ProtectedRoute>} />
-                <Route path="/admin/productos" element={<ProtectedRoute allowedRoles={["admin"]}><Productos /></ProtectedRoute>} />
-                <Route path="/admin/inventario" element={<ProtectedRoute allowedRoles={["admin"]}><Inventario /></ProtectedRoute>} />
-                <Route path="/admin/precios" element={<ProtectedRoute allowedRoles={["admin"]}><Precios /></ProtectedRoute>} />
-                <Route path="/admin/cuentas" element={<ProtectedRoute allowedRoles={["admin"]}><Cuentas /></ProtectedRoute>} />
-                <Route path="/admin/cupones" element={<ProtectedRoute allowedRoles={["admin"]}><Cupones /></ProtectedRoute>} />
-                <Route path="/admin/banners" element={<ProtectedRoute allowedRoles={["admin"]}><Banners /></ProtectedRoute>} />
-                <Route path="/admin/categorias" element={<ProtectedRoute allowedRoles={["admin"]}><Categorias /></ProtectedRoute>} />
-                <Route path="/admin/delivery" element={<ProtectedRoute allowedRoles={["admin"]}><Delivery /></ProtectedRoute>} />
-                <Route path="/admin/registros" element={<ProtectedRoute allowedRoles={["admin"]}><RegistrosClientes /></ProtectedRoute>} />
+                <Route path="/admin/ordenes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="ordenes"><Ordenes /></ProtectedRoute>} />
+                <Route path="/admin/clientes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="clientes"><Clientes /></ProtectedRoute>} />
+                <Route path="/admin/clientes/:clienteId/usuarios" element={<ProtectedRoute allowedRoles={["admin"]} modulo="clientes"><ClienteUsuarios /></ProtectedRoute>} />
+                <Route path="/admin/productos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="productos"><Productos /></ProtectedRoute>} />
+                <Route path="/admin/inventario" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><Inventario /></ProtectedRoute>} />
+                <Route path="/admin/precios" element={<ProtectedRoute allowedRoles={["admin"]} modulo="precios"><Precios /></ProtectedRoute>} />
+                <Route path="/admin/cuentas" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Cuentas /></ProtectedRoute>} />
+                <Route path="/admin/pagos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Pagos /></ProtectedRoute>} />
+                <Route path="/admin/bancos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="bancos"><Bancos /></ProtectedRoute>} />
+                <Route path="/admin/cupones" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cupones"><Cupones /></ProtectedRoute>} />
+                <Route path="/admin/banners" element={<ProtectedRoute allowedRoles={["admin"]} modulo="banners"><Banners /></ProtectedRoute>} />
+                <Route path="/admin/categorias" element={<ProtectedRoute allowedRoles={["admin"]} modulo="categorias"><Categorias /></ProtectedRoute>} />
+                <Route path="/admin/delivery" element={<ProtectedRoute allowedRoles={["admin"]} modulo="delivery"><Delivery /></ProtectedRoute>} />
+                <Route path="/admin/registros" element={<ProtectedRoute allowedRoles={["admin"]} modulo="registros"><RegistrosClientes /></ProtectedRoute>} />
                 <Route path="/admin/perfil" element={<ProtectedRoute allowedRoles={["admin"]}><Perfil /></ProtectedRoute>} />
           
                 {/* Configuración Admin - Solo admin */}
                 <Route path="/admin/configuracion" element={<ProtectedRoute allowedRoles={["admin"]}><Navigate to="/admin/configuracion/usuarios" replace /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/usuarios" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigUsuarios /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/empresa" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigEmpresa /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/metodos-pago" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigMetodosPago /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/notificaciones" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigNotificaciones /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/seguridad" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigSeguridad /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/facturacion" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigFacturacion /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/envios" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigEnvios /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/plantillas" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigPlantillas /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/moneda" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigMoneda /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/empaques" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigEmpaques /></ProtectedRoute>} />
-                <Route path="/admin/configuracion/iconos" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigIconos /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/usuarios" element={<ProtectedRoute allowedRoles={["admin"]} modulo="usuarios"><ConfigUsuarios /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/empresa" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigEmpresa /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/metodos-pago" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigMetodosPago /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/notificaciones" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigNotificaciones /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/seguridad" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigSeguridad /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/facturacion" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigFacturacion /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/envios" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigEnvios /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/plantillas" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigPlantillas /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/moneda" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigMoneda /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/empaques" element={<ProtectedRoute allowedRoles={["admin"]} modulo="productos"><ConfigEmpaques /></ProtectedRoute>} />
+                <Route path="/admin/configuracion/iconos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigIconos /></ProtectedRoute>} />
           
                 {/* Portal de Cliente - Solo cliente */}
                 <Route path="/portal" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalDashboard /></ProtectedRoute>} />
@@ -176,6 +182,7 @@ const App = () => (
           </TooltipProvider>
         </StoreConfigProvider>
       </CurrencyProvider>
+      </PermissionsProvider>
     </AuthProvider>
   </QueryClientProvider>
 );

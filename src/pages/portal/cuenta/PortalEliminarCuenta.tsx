@@ -37,50 +37,28 @@ const PortalEliminarCuenta = () => {
 
   const handleDeleteAccount = async () => {
     setDeleting(true);
-    
-    try {
-      // Delete the user's auth account - this will cascade delete related data based on your RLS policies
-      const { error } = await supabase.auth.admin.deleteUser(user?.id || "");
-      
-      if (error) {
-        // If admin delete fails, try signing out and show message
-        toast({ 
-          title: "Solicitud recibida", 
-          description: "Tu solicitud de eliminación ha sido registrada. Procesaremos la eliminación de tu cuenta en los próximos días.",
-        });
-        setDeleted(true);
-        
-        setTimeout(async () => {
-          await logout();
-          navigate("/");
-        }, 3000);
-      } else {
-        setDeleted(true);
-        toast({ 
-          title: "Cuenta eliminada", 
-          description: "Tu cuenta ha sido eliminada correctamente" 
-        });
-        
-        setTimeout(async () => {
-          await logout();
-          navigate("/");
-        }, 2000);
-      }
-    } catch (error) {
-      // Handle case where admin API is not available from client
-      toast({ 
-        title: "Solicitud recibida", 
-        description: "Tu solicitud de eliminación ha sido registrada. Procesaremos la eliminación de tu cuenta en los próximos días hábiles.",
-      });
-      setDeleted(true);
-      
-      setTimeout(async () => {
-        await logout();
-        navigate("/");
-      }, 3000);
-    }
-    
+    setShowDialog(false);
+
+    // Cierre real de la cuenta en el servidor: revoca el acceso, desactiva el
+    // usuario y limpia carrito/favoritos.
+    const { error } = await supabase.rpc("cerrar_mi_cuenta");
     setDeleting(false);
+
+    if (error) {
+      toast({
+        title: "No se pudo cerrar la cuenta",
+        description: error.message || "Intenta de nuevo o contacta a soporte.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setDeleted(true);
+    toast({ title: "Cuenta cerrada", description: "Tu acceso ha sido revocado. Lamentamos verte partir." });
+    setTimeout(async () => {
+      await logout();
+      navigate("/");
+    }, 2500);
   };
 
   if (deleted) {
@@ -133,13 +111,13 @@ const PortalEliminarCuenta = () => {
             <li className="flex items-start gap-2">
               <span className="text-destructive">•</span>
               <span className="text-muted-foreground">
-                Se eliminarán todos tus datos personales y de perfil
+                Tu cuenta se cerrará y perderás el acceso de forma permanente
               </span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-destructive">•</span>
               <span className="text-muted-foreground">
-                Perderás acceso al historial de pedidos
+                Tu historial de pedidos se archiva por motivos fiscales (ya no lo verás)
               </span>
             </li>
             <li className="flex items-start gap-2">

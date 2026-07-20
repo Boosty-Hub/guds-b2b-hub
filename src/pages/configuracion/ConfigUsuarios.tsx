@@ -101,6 +101,8 @@ const ConfigUsuarios = () => {
   const [selectedUsuario, setSelectedUsuario] = useState<UsuarioConRol | null>(null);
   const [selectedRol, setSelectedRol] = useState<Rol | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  // Credenciales temporales del usuario recién creado
+  const [credencialesNuevo, setCredencialesNuevo] = useState<{ email: string; password: string } | null>(null);
   const { toast } = useToast();
 
   // Form states
@@ -195,46 +197,49 @@ const ConfigUsuarios = () => {
 
   // User CRUD
   const handleCreateUser = async () => {
-    if (!userForm.nombre || !userForm.email || !userForm.password || !userForm.rol_id) {
-      toast({ title: "Error", description: "Completa todos los campos requeridos", variant: "destructive" });
+    if (!userForm.nombre || !userForm.email || !userForm.rol_id) {
+      toast({ title: "Error", description: "Completa nombre, email y rol", variant: "destructive" });
       return;
     }
 
-    // Crear usuario en auth de Supabase
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: userForm.email,
-      password: userForm.password,
-    });
-
-    if (authError) {
-      toast({ title: "Error", description: authError.message, variant: "destructive" });
-      return;
-    }
-
-    // Crear registro en tabla usuarios
     const rol = roles.find(r => r.id === userForm.rol_id);
-    const { error } = await supabase.from('usuarios').insert({
-      auth_id: authData.user?.id,
-      email: userForm.email,
-      nombre: userForm.nombre,
-      apellido: userForm.apellido || null,
-      telefono: userForm.telefono || null,
-      role: rol?.nombre.toLowerCase() === 'administrador' ? 'admin' : 
-            rol?.nombre.toLowerCase() === 'vendedor' ? 'vendedor' : 
-            rol?.nombre.toLowerCase() === 'delivery' ? 'delivery' : 'cliente',
-      rol_id: userForm.rol_id,
-      activo: true,
+    const roleEnum: 'admin' | 'vendedor' | 'delivery' | 'cliente' =
+      rol?.nombre.toLowerCase() === 'administrador' ? 'admin' :
+      rol?.nombre.toLowerCase() === 'vendedor' ? 'vendedor' :
+      rol?.nombre.toLowerCase() === 'delivery' ? 'delivery' : 'cliente';
+
+    // Crear la cuenta en el servidor (sin signUp en el navegador, que cerraría
+    // la sesión del admin). Devuelve una contraseña temporal para comunicar.
+    const { data, error } = await supabase.rpc('crear_usuario_admin', {
+      p_email: userForm.email,
+      p_nombre: userForm.nombre,
+      p_apellido: userForm.apellido || null,
+      p_role: roleEnum,
+      p_telefono: userForm.telefono || null,
+      p_cliente_id: null,
     });
 
     if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      toast({ title: "No se pudo crear el usuario", description: error.message, variant: "destructive" });
       return;
     }
 
-    toast({ title: "Usuario Creado", description: `${userForm.nombre} ha sido creado exitosamente` });
+    const row = Array.isArray(data) ? data[0] : data;
+    // Enlazar el rol granular seleccionado
+    if (userForm.rol_id && row?.usuario_id) {
+      const { error: rolError } = await supabase.from('usuarios').update({ rol_id: userForm.rol_id }).eq('id', row.usuario_id);
+      if (rolError) {
+        toast({ title: "Usuario creado, pero sin rol", description: `No se pudo asignar el rol: ${rolError.message}. Edítalo para asignarlo.`, variant: "destructive" });
+      }
+    }
+
     resetUserForm();
     setIsCreateUserOpen(false);
     fetchData();
+    if (row?.password_temporal) {
+      setCredencialesNuevo({ email: userForm.email, password: row.password_temporal });
+    }
+    toast({ title: "Usuario Creado", description: `${userForm.nombre} ha sido creado exitosamente` });
   };
 
   const handleEditUser = async () => {
@@ -283,7 +288,11 @@ const ConfigUsuarios = () => {
   };
 
   const handleToggleUserStatus = async (usuario: UsuarioConRol) => {
-    await supabase.from('usuarios').update({ activo: !usuario.activo }).eq('id', usuario.id);
+    const { error } = await supabase.from('usuarios').update({ activo: !usuario.activo }).eq('id', usuario.id);
+    if (error) {
+      toast({ title: "No se pudo cambiar el estado", description: error.message, variant: "destructive" });
+      return;
+    }
     toast({
       title: usuario.activo ? "Usuario Desactivado" : "Usuario Activado",
       description: `${usuario.nombre} ha sido ${usuario.activo ? "desactivado" : "activado"}`,
@@ -325,7 +334,14 @@ const ConfigUsuarios = () => {
       puede_eliminar: rolPermisos[m.id]?.eliminar || false,
     }));
     
-    await supabase.from('permisos').insert(permisosInsert);
+    const { error: permError } = await supabase.from('permisos').insert(permisosInsert);
+    if (permError) {
+      toast({ title: "Rol creado, pero sin permisos", description: `El rol se creó pero no se guardaron sus permisos: ${permError.message}. Edítalo para reintentar.`, variant: "destructive" });
+      resetRolForm();
+      setIsCreateRolOpen(false);
+      fetchData();
+      return;
+    }
 
     toast({ title: "Rol Creado", description: `${rolForm.nombre} ha sido creado` });
     resetRolForm();
@@ -350,9 +366,15 @@ const ConfigUsuarios = () => {
       return;
     }
 
-    // Actualizar permisos
-    await supabase.from('permisos').delete().eq('rol_id', selectedRol.id);
-    
+    // Actualizar permisos (borrar + reinsertar). Comprobamos ambos pasos para no
+    // dejar el rol sin permisos por un fallo silencioso.
+    const { error: delError } = await supabase.from('permisos').delete().eq('rol_id', selectedRol.id);
+    if (delError) {
+      toast({ title: "No se pudieron actualizar los permisos", description: delError.message, variant: "destructive" });
+      fetchData();
+      return;
+    }
+
     const permisosInsert = modulos.map(m => ({
       rol_id: selectedRol.id,
       modulo_id: m.id,
@@ -361,8 +383,13 @@ const ConfigUsuarios = () => {
       puede_editar: rolPermisos[m.id]?.editar || false,
       puede_eliminar: rolPermisos[m.id]?.eliminar || false,
     }));
-    
-    await supabase.from('permisos').insert(permisosInsert);
+
+    const { error: insError } = await supabase.from('permisos').insert(permisosInsert);
+    if (insError) {
+      toast({ title: "Atención: permisos incompletos", description: `El rol quedó sin permisos por un error: ${insError.message}. Vuelve a guardarlo.`, variant: "destructive" });
+      fetchData();
+      return;
+    }
 
     toast({ title: "Rol Actualizado", description: `${rolForm.nombre} ha sido actualizado` });
     resetRolForm();
@@ -1017,6 +1044,43 @@ const ConfigUsuarios = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Credenciales del usuario recién creado */}
+      <Dialog open={!!credencialesNuevo} onOpenChange={(o) => { if (!o) setCredencialesNuevo(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Usuario creado — credenciales de acceso</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-sm">
+            <p className="text-muted-foreground">
+              Comunícale estas credenciales al usuario por un canal seguro. La contraseña temporal
+              <b> solo se muestra una vez</b>.
+            </p>
+            <div className="rounded-lg border border-border bg-muted p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Email</span>
+                <code className="font-medium">{credencialesNuevo?.email}</code>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Contraseña temporal</span>
+                <code className="font-bold text-primary">{credencialesNuevo?.password}</code>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard?.writeText(`Email: ${credencialesNuevo?.email}\nContraseña temporal: ${credencialesNuevo?.password}`);
+                toast({ title: "Copiado", description: "Credenciales copiadas al portapapeles" });
+              }}
+            >
+              Copiar
+            </Button>
+            <Button onClick={() => setCredencialesNuevo(null)}>Entendido</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ConfiguracionLayout>
   );
 };

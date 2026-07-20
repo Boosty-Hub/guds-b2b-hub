@@ -21,7 +21,7 @@ import { Link } from "react-router-dom";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useStoreConfig } from "@/contexts/StoreConfigContext";
 import { supabase, Producto } from "@/lib/supabase";
-import gudsLogo from "@/assets/guds-logo.png";
+import { Logo } from "@/components/Logo";
 
 interface ProductoLanding {
   id: string;
@@ -88,7 +88,7 @@ const Landing = () => {
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <Link to="/" className="flex items-center gap-2">
-              <img src={gudsLogo} alt="GUDS" className="h-10" />
+              <Logo className="h-10 text-primary-foreground" />
             </Link>
 
             {/* Desktop Navigation */}
@@ -407,7 +407,7 @@ const Landing = () => {
         <div className="container mx-auto px-4">
           <div className="grid md:grid-cols-4 gap-8">
             <div>
-              <img src={gudsLogo} alt="GUDS" className="h-12 mb-4" />
+              <Logo className="h-12 mb-4 text-primary" />
               <p className="text-sm text-muted-foreground">
                 Tu distribuidor mayorista de confianza. Calidad y servicio garantizado.
               </p>

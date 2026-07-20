@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { supabase, Producto, TipoEmpaque } from "@/lib/supabase";
 import { ProductImage } from "@/components/portal/ProductImage";
+import { notifyCartChanged } from "@/components/portal/PortalCartWidget";
 import { useToast } from "@/hooks/use-toast";
 
 interface ProductoConEmpaques extends Producto {
@@ -63,7 +64,9 @@ const PortalCatalogo = () => {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [productos, setProductos] = useState<ProductoConEmpaques[]>([]);
   const [loading, setLoading] = useState(true);
-  
+  // Precios negociados de la lista del cliente: { producto_id: precio }
+  const [precioLista, setPrecioLista] = useState<Record<string, number>>({});
+
   // Empaque selection dialog
   const [isEmpaqueDialogOpen, setIsEmpaqueDialogOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<ProductoConEmpaques | null>(null);
@@ -97,8 +100,27 @@ const PortalCatalogo = () => {
     if (user?.id) {
       fetchCart();
       fetchFavorites();
+      fetchPrecioLista();
     }
   }, [user]);
+
+  // Carga los precios de la lista asignada al cliente (P7)
+  const fetchPrecioLista = async () => {
+    if (!user?.cliente_id) return;
+    const { data: cli } = await supabase
+      .from('clientes')
+      .select('lista_precios_id')
+      .eq('id', user.cliente_id)
+      .maybeSingle();
+    if (!cli?.lista_precios_id) return;
+    const { data } = await supabase
+      .from('precios_lista')
+      .select('producto_id, precio')
+      .eq('lista_precios_id', cli.lista_precios_id);
+    if (data) {
+      setPrecioLista(Object.fromEntries(data.map((r: { producto_id: string; precio: number }) => [r.producto_id, Number(r.precio)])));
+    }
+  };
 
   const fetchProductos = async () => {
     setLoading(true);
@@ -150,11 +172,22 @@ const PortalCatalogo = () => {
 
   const addToCartWithEmpaque = async (product: ProductoConEmpaques, empaque: TipoEmpaque | null) => {
     if (!user?.id) return;
-    
-    const unidades = empaque?.unidades || 1;
-    const precioBase = product.en_oferta && product.precio_oferta ? product.precio_oferta : product.precio_base;
-    const precioUnitario = precioBase * unidades;
-    
+
+    // Precio efectivo autoritativo (lista de cliente / empaque / oferta / base).
+    // Es la misma función que usa el checkout, así el carrito nunca miente.
+    let precioUnitario: number;
+    const { data: precioRpc } = await supabase.rpc('precio_efectivo', {
+      p_producto_id: product.id,
+      p_tipo_empaque_id: empaque?.id || null,
+      p_cliente_id: user.cliente_id || null,
+    });
+    if (precioRpc != null) {
+      precioUnitario = Number(precioRpc);
+    } else {
+      // Fallback defensivo si el RPC no responde: precio del empaque (P4), sin ×unidades.
+      precioUnitario = product.en_oferta && product.precio_oferta ? product.precio_oferta : product.precio_base;
+    }
+
     // Check if same product with same empaque exists in cart
     const existing = cart.find((item) => 
       item.producto_id === product.id && item.tipo_empaque_id === (empaque?.id || null)
@@ -201,6 +234,7 @@ const PortalCatalogo = () => {
     
     const empaqueNombre = empaque ? ` (${empaque.nombre})` : '';
     toast({ title: "Agregado", description: `${product.nombre}${empaqueNombre} agregado al carrito` });
+    notifyCartChanged();
   };
 
   const updateQuantity = async (productId: string, delta: number) => {
@@ -215,11 +249,12 @@ const PortalCatalogo = () => {
       await supabase.from('carrito').delete().eq('id', item.id);
     } else {
       // Update quantity
-      setCart(prev => prev.map(i => 
+      setCart(prev => prev.map(i =>
         i.producto_id === productId ? { ...i, cantidad: newCantidad } : i
       ));
       await supabase.from('carrito').update({ cantidad: newCantidad }).eq('id', item.id);
     }
+    notifyCartChanged();
   };
 
   const getCartQuantity = (productId: string) => {
@@ -247,6 +282,8 @@ const PortalCatalogo = () => {
   };
 
   const getProductPrice = (product: ProductoConEmpaques) => {
+    // Precedencia (display): lista del cliente > oferta > precio base
+    if (precioLista[product.id] != null) return precioLista[product.id];
     return product.en_oferta && product.precio_oferta ? product.precio_oferta : product.precio_base;
   };
 
@@ -339,7 +376,7 @@ const PortalCatalogo = () => {
             {filteredProducts.map((product) => {
               const quantity = getCartQuantity(product.id);
               const isFavorite = favorites.includes(product.id);
-              const precio = product.en_oferta && product.precio_oferta ? product.precio_oferta : product.precio_base;
+              const precio = getProductPrice(product);
               const inStock = product.stock_actual > 0;
 
               return (

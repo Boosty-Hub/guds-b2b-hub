@@ -8,8 +8,9 @@ import {
   LogOut,
   TrendingUp
 } from "lucide-react";
-import gudsLogo from "@/assets/guds-logo.png";
+import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/vendedor" },
@@ -21,6 +22,7 @@ const navItems = [
 
 export const VendedorSidebar = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -32,7 +34,7 @@ export const VendedorSidebar = () => {
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-border px-6">
-          <img src={gudsLogo} alt="GUDS" className="h-10 w-auto" />
+          <Logo className="h-10 text-primary" />
         </div>
 
         {/* Seller Info */}
@@ -42,8 +44,8 @@ export const VendedorSidebar = () => {
               <TrendingUp className="h-4 w-4 text-emerald-500" />
               <p className="text-xs font-medium text-emerald-500">Portal Vendedor</p>
             </div>
-            <p className="font-semibold text-foreground">Carlos Mendoza</p>
-            <p className="text-xs text-muted-foreground mt-1">Zona Norte • 12 clientes</p>
+            <p className="font-semibold text-foreground">{user ? `${user.nombre} ${user.apellido || ""}` : "Vendedor"}</p>
+            <p className="text-xs text-muted-foreground mt-1">{user?.email || "Portal de ventas"}</p>
           </div>
         </div>
 

@@ -1,14 +1,18 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePermissions } from "@/contexts/PermissionsContext";
 import { Loader2 } from "lucide-react";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: string[];
+  /** Código de módulo requerido (permisos granulares del área admin) */
+  modulo?: string;
 }
 
-export const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) => {
+export const ProtectedRoute = ({ children, allowedRoles, modulo }: ProtectedRouteProps) => {
   const { user, isAuthenticated, loading } = useAuth();
+  const { can, loading: permsLoading } = usePermissions();
   const location = useLocation();
 
   // Mostrar loader mientras se verifica la autenticación
@@ -31,9 +35,22 @@ export const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) 
   // Si hay roles permitidos definidos, verificar que el usuario tenga uno de ellos
   if (allowedRoles && allowedRoles.length > 0) {
     if (!user || !allowedRoles.includes(user.role)) {
-      // Redirigir al dashboard correspondiente según el rol del usuario
       const redirectPath = getRedirectPath(user?.role);
       return <Navigate to={redirectPath} replace />;
+    }
+  }
+
+  // Permiso granular de módulo (área admin): esperar a que carguen los permisos
+  if (modulo && user?.role === "admin") {
+    if (permsLoading) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      );
+    }
+    if (!can(modulo, "ver")) {
+      return <Navigate to="/admin/dashboard" replace />;
     }
   }
 

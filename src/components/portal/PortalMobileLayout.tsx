@@ -8,6 +8,7 @@ import { useDeviceType } from "@/hooks/use-mobile";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { CurrencySwitch } from "@/components/CurrencySwitch";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
+import { PortalCartWidget } from "@/components/portal/PortalCartWidget";
 
 interface PortalMobileLayoutProps {
   children: ReactNode;
@@ -101,12 +102,15 @@ export const PortalMobileLayout = ({
                   </Link>
                 </>
               ) : (
-                <button
-                  onClick={() => setCurrency(currency === "USD" ? "BS" : "USD")}
-                  className="bg-white/20 px-2 py-1 rounded text-xs font-medium"
-                >
-                  {currency === "USD" ? "$ USD" : "Bs."}
-                </button>
+                <>
+                  <button
+                    onClick={() => setCurrency(currency === "USD" ? "BS" : "USD")}
+                    className="bg-white/20 px-2 py-1 rounded text-xs font-medium"
+                  >
+                    {currency === "USD" ? "$ USD" : "Bs."}
+                  </button>
+                  <NotificationsDropdown variant="header" />
+                </>
               )}
             </div>
           </div>
@@ -154,6 +158,9 @@ export const PortalMobileLayout = ({
           <div className={`${isTablet ? 'h-3' : 'h-2'} bg-card`} />
         </nav>
       )}
+
+      {/* Carrito flotante siempre accesible (panel deslizante desde la derecha) */}
+      {showNav && <PortalCartWidget maxWidthClass={isTablet ? "max-w-3xl" : "max-w-md"} />}
     </div>
   );
 };

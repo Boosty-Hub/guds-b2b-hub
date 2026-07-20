@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, ShoppingCart, Package, CreditCard, User, LogOut } from "lucide-react";
-import gudsLogo from "@/assets/guds-logo.png";
+import { Logo } from "@/components/Logo";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Inicio", path: "/portal" },
@@ -16,7 +16,7 @@ export const PortalSidebar = () => {
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-border px-6">
-          <img src={gudsLogo} alt="GUDS" className="h-10 w-auto" />
+          <Logo className="h-10 text-primary" />
         </div>
 
         {/* Client Info */}

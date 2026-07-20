@@ -207,12 +207,18 @@ const ConfigMetodosPago = () => {
     
     const newActivo = !metodo.activo;
     setMetodos(metodos.map(m => m.id === id ? { ...m, activo: newActivo } : m));
-    
-    await supabase
+
+    const { error } = await supabase
       .from('metodos_pago')
       .update({ activo: newActivo })
       .eq('id', id);
-    
+
+    if (error) {
+      // revertir el cambio optimista
+      setMetodos(metodos.map(m => m.id === id ? { ...m, activo: metodo.activo } : m));
+      toast({ title: "No se pudo actualizar", description: error.message, variant: "destructive" });
+      return;
+    }
     toast({
       title: newActivo ? "Método Habilitado" : "Método Deshabilitado",
       description: `${metodo.nombre} ha sido ${newActivo ? "habilitado" : "deshabilitado"}`,
@@ -421,18 +427,19 @@ const ConfigMetodosPago = () => {
         {metodos.sort((a, b) => a.orden - b.orden).map((metodo) => (
           <Card key={metodo.id} className={`border-border ${!metodo.activo ? "opacity-60" : ""}`}>
             <CardContent className="p-4">
-              <div className="flex items-center gap-4">
-                <div className="cursor-grab text-muted-foreground hover:text-foreground">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <div className="flex flex-1 items-center gap-4 min-w-0">
+                <div className="hidden sm:block cursor-grab text-muted-foreground hover:text-foreground">
                   <GripVertical className="h-5 w-5" />
                 </div>
-                
-                <div className={`h-12 w-12 rounded-lg flex items-center justify-center ${
+
+                <div className={`h-12 w-12 shrink-0 rounded-lg flex items-center justify-center ${
                   metodo.activo ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
                 }`}>
                   {getIconComponent(metodo.tipo)}
                 </div>
 
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold">{metodo.nombre}</h3>
                     {!metodo.activo && (
@@ -440,7 +447,7 @@ const ConfigMetodosPago = () => {
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground">{metodo.descripcion}</p>
-                  <div className="flex items-center gap-4 mt-2">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
                     {metodo.disponiblePortalCliente && (
                       <div className="flex items-center gap-1 text-xs text-muted-foreground">
                         <Globe className="h-3 w-3" />
@@ -458,8 +465,9 @@ const ConfigMetodosPago = () => {
                     )}
                   </div>
                 </div>
+                </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center justify-between gap-4 sm:justify-start">
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground">
                       {metodo.activo ? "Activo" : "Inactivo"}

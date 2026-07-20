@@ -837,11 +837,12 @@ const Productos = () => {
     setIsImporting(true);
 
     try {
-      // Obtener el primer empaque disponible para asignar
       const defaultEmpaque = empaques[0];
+      let importados = 0;
+      const fallidos: { sku: string; motivo: string }[] = [];
 
       for (const row of validRows) {
-        // Crear producto
+        // Crear producto — y COMPROBAR el error (antes se ignoraba)
         const { data: newProduct, error } = await supabase
           .from('productos')
           .insert({
@@ -861,22 +862,39 @@ const Productos = () => {
           .select()
           .single();
 
-        if (!error && newProduct && defaultEmpaque) {
-          // Crear relación con empaque
-          await supabase.from('producto_empaques').insert({
+        if (error || !newProduct) {
+          const dup = error?.code === "23505" || /duplicate|ya existe/i.test(error?.message || "");
+          fallidos.push({ sku: row.sku, motivo: dup ? "SKU ya existe" : (error?.message || "error al insertar") });
+          continue;
+        }
+
+        if (defaultEmpaque) {
+          // Relación con empaque usando las columnas reales (no cantidad/es_principal)
+          const { error: eErr } = await supabase.from('producto_empaques').insert({
             producto_id: newProduct.id,
             tipo_empaque_id: defaultEmpaque.id,
-            cantidad: 1,
-            es_principal: true,
+            precio_empaque: null,
+            activo: true,
           });
+          if (eErr) {
+            // el producto quedó creado; solo avisamos del empaque
+            fallidos.push({ sku: row.sku, motivo: `producto creado, pero falló el empaque: ${eErr.message}` });
+          }
         }
+        importados++;
       }
 
-      toast({ 
-        title: "Importación Exitosa", 
-        description: `${validRows.length} productos importados correctamente` 
-      });
-      
+      if (fallidos.length === 0) {
+        toast({ title: "Importación exitosa", description: `${importados} productos importados correctamente` });
+      } else {
+        const detalle = fallidos.slice(0, 5).map(f => `${f.sku}: ${f.motivo}`).join(" · ");
+        toast({
+          title: `Importación parcial: ${importados} ok, ${fallidos.length} con problemas`,
+          description: detalle + (fallidos.length > 5 ? ` … y ${fallidos.length - 5} más` : ""),
+          variant: "destructive",
+        });
+      }
+
       setIsImportOpen(false);
       setImportData([]);
       setImportErrors([]);

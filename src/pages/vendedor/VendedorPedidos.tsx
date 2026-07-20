@@ -1,413 +1,293 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { VendedorLayout } from "@/components/vendedor/VendedorLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  Plus, 
-  Search, 
-  Package, 
-  ShoppingCart,
-  Trash2,
-  Eye
-} from "lucide-react";
+import { Plus, Minus, Trash2, ShoppingCart, Loader2, Package } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { useCurrency } from "@/contexts/CurrencyContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 
-interface Producto {
-  id: string;
-  nombre: string;
-  sku: string;
-  precio: number;
-  stock: number;
-  categoria: string;
-}
+interface Orden { id: string; numero: string; total: number; estado: string; created_at: string; cliente?: { nombre_negocio: string } | null; }
+interface Cli { id: string; nombre_negocio: string; }
+interface TipoEmpaque { id: string; nombre: string; unidades: number; }
+interface ProductoEmp { id: string; tipo_empaque_id: string; precio_empaque: number; activo: boolean; tipo_empaque: TipoEmpaque | null; }
+interface Prod { id: string; nombre: string; precio_base: number; en_oferta: boolean | null; precio_oferta: number | null; producto_empaques?: ProductoEmp[]; }
+interface Linea { producto_id: string; tipo_empaque_id: string | null; nombre: string; empaque: string | null; precio: number; cantidad: number; }
 
-interface ItemCarrito {
-  producto: Producto;
-  cantidad: number;
-}
-
-interface Pedido {
-  id: string;
-  cliente: string;
-  fecha: string;
-  items: number;
-  total: number;
-  estado: "pendiente" | "procesando" | "enviado" | "entregado" | "cancelado";
-}
-
-const clientesDisponibles = [
-  { id: "CLI-001", nombre: "Walmart Centro" },
-  { id: "CLI-002", nombre: "Soriana Norte" },
-  { id: "CLI-003", nombre: "OXXO Zona 5" },
-  { id: "CLI-004", nombre: "Bodega Aurrera" },
-  { id: "CLI-005", nombre: "Chedraui Express" },
-  { id: "CLI-006", nombre: "7-Eleven Centro" },
-];
-
-const productosDisponibles: Producto[] = [
-  { id: "PRD-001", nombre: "Aceite de Oliva Extra Virgen 1L", sku: "AOL-001", precio: 189.00, stock: 150, categoria: "Aceites" },
-  { id: "PRD-002", nombre: "Arroz Grano Largo 1kg", sku: "ARR-001", precio: 32.50, stock: 500, categoria: "Granos" },
-  { id: "PRD-003", nombre: "Frijol Negro 1kg", sku: "FRJ-001", precio: 45.00, stock: 300, categoria: "Granos" },
-  { id: "PRD-004", nombre: "Azúcar Estándar 1kg", sku: "AZU-001", precio: 28.00, stock: 400, categoria: "Endulzantes" },
-  { id: "PRD-005", nombre: "Harina de Trigo 1kg", sku: "HAR-001", precio: 22.00, stock: 350, categoria: "Harinas" },
-  { id: "PRD-006", nombre: "Leche Entera 1L", sku: "LEC-001", precio: 26.50, stock: 200, categoria: "Lácteos" },
-  { id: "PRD-007", nombre: "Café Molido Premium 500g", sku: "CAF-001", precio: 145.00, stock: 100, categoria: "Bebidas" },
-  { id: "PRD-008", nombre: "Atún en Agua 140g", sku: "ATU-001", precio: 24.00, stock: 600, categoria: "Enlatados" },
-];
-
-const pedidosExistentes: Pedido[] = [
-  { id: "PED-2024-001", cliente: "Walmart Centro", fecha: "2024-01-15", items: 12, total: 15680.00, estado: "enviado" },
-  { id: "PED-2024-002", cliente: "Soriana Norte", fecha: "2024-01-14", items: 8, total: 8920.00, estado: "procesando" },
-  { id: "PED-2024-003", cliente: "OXXO Zona 5", fecha: "2024-01-13", items: 5, total: 3450.00, estado: "entregado" },
-  { id: "PED-2024-004", cliente: "Bodega Aurrera", fecha: "2024-01-12", items: 15, total: 22100.00, estado: "pendiente" },
-  { id: "PED-2024-005", cliente: "7-Eleven Centro", fecha: "2024-01-10", items: 6, total: 4200.00, estado: "entregado" },
-];
-
-const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
-  pendiente: { label: "Pendiente", variant: "secondary" },
-  procesando: { label: "Procesando", variant: "default" },
-  enviado: { label: "Enviado", variant: "outline" },
-  entregado: { label: "Entregado", variant: "default" },
-  cancelado: { label: "Cancelado", variant: "destructive" },
+const estadoConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  pendiente: { label: "Pendiente", variant: "secondary" }, confirmado: { label: "Confirmado", variant: "default" },
+  procesando: { label: "Procesando", variant: "default" }, enviado: { label: "Enviado", variant: "outline" },
+  completado: { label: "Completado", variant: "default" }, cancelado: { label: "Cancelado", variant: "destructive" },
 };
 
 const VendedorPedidos = () => {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [clienteSeleccionado, setClienteSeleccionado] = useState("");
-  const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
-  const [searchProducto, setSearchProducto] = useState("");
+  const { formatPrice } = useCurrency();
+  const { user } = useAuth();
   const { toast } = useToast();
+  const [ordenes, setOrdenes] = useState<Orden[]>([]);
+  const [clientes, setClientes] = useState<Cli[]>([]);
+  const [productos, setProductos] = useState<Prod[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [clienteId, setClienteId] = useState("");
+  const [metodo, setMetodo] = useState("transferencia");
+  const [lineas, setLineas] = useState<Linea[]>([]);
+  const [addProd, setAddProd] = useState("");
+  const [pendingEmpaque, setPendingEmpaque] = useState<Prod | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const filteredPedidos = pedidosExistentes.filter(
-    (pedido) =>
-      pedido.cliente.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      pedido.id.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const fetchData = useCallback(async () => {
+    if (!user?.id) return;
+    setLoading(true);
+    const [oRes, cRes, pRes] = await Promise.all([
+      supabase.from("ordenes").select("id, numero, total, estado, created_at, cliente:clientes(nombre_negocio)").order("created_at", { ascending: false }),
+      // Solo los clientes asignados a este vendedor
+      supabase.from("clientes").select("id, nombre_negocio").eq("activo", true).eq("vendedor_asignado_id", user.id).order("nombre_negocio"),
+      supabase.from("productos").select("id, nombre, precio_base, en_oferta, precio_oferta, producto_empaques(id, tipo_empaque_id, precio_empaque, activo, tipo_empaque:tipos_empaque(id, nombre, unidades))").eq("activo", true).order("nombre"),
+    ]);
+    if (oRes.data) setOrdenes(oRes.data as unknown as Orden[]);
+    if (cRes.data) setClientes(cRes.data as Cli[]);
+    if (pRes.data) setProductos(pRes.data as unknown as Prod[]);
+    setLoading(false);
+  }, [user?.id]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  const filteredProductos = productosDisponibles.filter(
-    (producto) =>
-      producto.nombre.toLowerCase().includes(searchProducto.toLowerCase()) ||
-      producto.sku.toLowerCase().includes(searchProducto.toLowerCase())
-  );
+  // Al cambiar de cliente, recalcular el precio de las líneas ya agregadas: el
+  // cliente puede tener una lista de precios distinta. El servidor recalcula el
+  // total al confirmar, pero así el vendedor ve el precio correcto de una vez.
+  useEffect(() => {
+    if (lineas.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const recalculadas = await Promise.all(lineas.map(async (l) => {
+        const { data } = await supabase.rpc("precio_efectivo", {
+          p_producto_id: l.producto_id,
+          p_tipo_empaque_id: l.tipo_empaque_id,
+          p_cliente_id: clienteId || null,
+        });
+        return data != null ? { ...l, precio: Number(data) } : l;
+      }));
+      if (!cancelled) setLineas(recalculadas);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteId]);
 
-  const agregarAlCarrito = (producto: Producto) => {
-    const existente = carrito.find((item) => item.producto.id === producto.id);
-    if (existente) {
-      setCarrito(
-        carrito.map((item) =>
-          item.producto.id === producto.id
-            ? { ...item, cantidad: item.cantidad + 1 }
-            : item
-        )
-      );
-    } else {
-      setCarrito([...carrito, { producto, cantidad: 1 }]);
-    }
-  };
+  const empaquesDe = (p: Prod) => (p.producto_empaques || []).filter((e) => e.activo && e.tipo_empaque);
 
-  const actualizarCantidad = (productoId: string, cantidad: number) => {
-    if (cantidad <= 0) {
-      setCarrito(carrito.filter((item) => item.producto.id !== productoId));
-    } else {
-      setCarrito(
-        carrito.map((item) =>
-          item.producto.id === productoId ? { ...item, cantidad } : item
-        )
-      );
-    }
-  };
-
-  const eliminarDelCarrito = (productoId: string) => {
-    setCarrito(carrito.filter((item) => item.producto.id !== productoId));
-  };
-
-  const totalCarrito = carrito.reduce(
-    (acc, item) => acc + item.producto.precio * item.cantidad,
-    0
-  );
-
-  const crearPedido = () => {
-    if (!clienteSeleccionado) {
-      toast({
-        title: "Error",
-        description: "Selecciona un cliente para el pedido",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (carrito.length === 0) {
-      toast({
-        title: "Error",
-        description: "Agrega productos al carrito",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    toast({
-      title: "Pedido Creado",
-      description: `Pedido para ${clientesDisponibles.find(c => c.id === clienteSeleccionado)?.nombre} por $${totalCarrito.toLocaleString()}`,
+  // Precio autoritativo (lista de cliente / empaque / oferta / base), igual que el checkout.
+  const precioEfectivo = async (productoId: string, tipoEmpaqueId: string | null, fallback: number) => {
+    const { data } = await supabase.rpc("precio_efectivo", {
+      p_producto_id: productoId,
+      p_tipo_empaque_id: tipoEmpaqueId,
+      p_cliente_id: clienteId || null,
     });
-
-    setCarrito([]);
-    setClienteSeleccionado("");
-    setIsDialogOpen(false);
+    return data != null ? Number(data) : fallback;
   };
+
+  const pushLinea = (l: Linea) => setLineas((prev) => {
+    const ex = prev.find((x) => x.producto_id === l.producto_id && x.tipo_empaque_id === l.tipo_empaque_id);
+    if (ex) return prev.map((x) => x === ex ? { ...x, cantidad: x.cantidad + 1 } : x);
+    return [...prev, l];
+  });
+
+  const agregarConEmpaque = async (p: Prod, emp: ProductoEmp | null) => {
+    const baseFallback = p.en_oferta && p.precio_oferta ? Number(p.precio_oferta) : Number(p.precio_base);
+    const precio = await precioEfectivo(p.id, emp?.tipo_empaque_id || null, emp ? Number(emp.precio_empaque) : baseFallback);
+    pushLinea({
+      producto_id: p.id,
+      tipo_empaque_id: emp?.tipo_empaque_id || null,
+      nombre: p.nombre,
+      empaque: emp?.tipo_empaque?.nombre || null,
+      precio,
+      cantidad: 1,
+    });
+    setPendingEmpaque(null);
+    setAddProd("");
+  };
+
+  const seleccionarProducto = (pid: string) => {
+    const p = productos.find((x) => x.id === pid); if (!p) return;
+    const emps = empaquesDe(p);
+    if (emps.length > 1) {
+      // Tiene varias presentaciones (unidad/pack/caja...): pedir cuál
+      setPendingEmpaque(p);
+    } else if (emps.length === 1) {
+      agregarConEmpaque(p, emps[0]);
+    } else {
+      agregarConEmpaque(p, null);
+    }
+    setAddProd("");
+  };
+
+  const cambiarCant = (key: string, d: number) => setLineas((prev) => prev.flatMap((l) => {
+    const k = l.producto_id + "|" + (l.tipo_empaque_id || "");
+    if (k !== key) return [l];
+    const n = l.cantidad + d; return n <= 0 ? [] : [{ ...l, cantidad: n }];
+  }));
+  const subtotal = lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
+
+  const resetForm = () => { setClienteId(""); setLineas([]); setMetodo("transferencia"); setPendingEmpaque(null); setAddProd(""); };
+
+  const crear = async () => {
+    if (!clienteId || lineas.length === 0) { toast({ title: "Faltan datos", description: "Elige cliente y agrega productos", variant: "destructive" }); return; }
+    setSaving(true);
+    const { data, error } = await supabase.rpc("crear_orden_vendedor", {
+      p_cliente_id: clienteId, p_metodo_pago: metodo, p_notas: "Pedido tomado por vendedor",
+      p_items: lineas.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad, tipo_empaque_id: l.tipo_empaque_id })),
+    });
+    setSaving(false);
+    if (error) { toast({ title: "No se pudo crear el pedido", description: error.message, variant: "destructive" }); return; }
+    const row = Array.isArray(data) ? data[0] : data;
+    toast({ title: "Pedido creado", description: `${row?.numero ?? ""} · ${formatPrice(Number(row?.total || 0))}` });
+    setOpen(false); resetForm();
+    fetchData();
+  };
+
+  const fmt = (s: string) => new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
   return (
     <VendedorLayout title="Pedidos">
-      <Tabs defaultValue="lista" className="space-y-6">
-        <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="lista">Mis Pedidos</TabsTrigger>
-            <TabsTrigger value="nuevo">Nuevo Pedido</TabsTrigger>
-          </TabsList>
-        </div>
+      <div className="flex items-center justify-between mb-4">
+        <div><h2 className="text-lg font-semibold">Pedidos de mis clientes</h2><p className="text-sm text-muted-foreground">{ordenes.length} pedidos</p></div>
+        <Button className="bg-emerald-500 hover:bg-emerald-600" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1" />Nuevo Pedido</Button>
+      </div>
 
-        {/* Lista de Pedidos */}
-        <TabsContent value="lista" className="space-y-4">
-          <Card className="border-border">
-            <CardContent className="p-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por cliente o número de pedido..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </CardContent>
-          </Card>
+      <div className="rounded-xl border border-border bg-card">
+        {loading ? <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-emerald-500" /></div>
+        : ordenes.length === 0 ? <div className="py-16 text-center text-muted-foreground">Aún no hay pedidos. Crea el primero con "Nuevo Pedido".</div>
+        : (
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>Pedido</TableHead><TableHead>Cliente</TableHead><TableHead>Fecha</TableHead>
+              <TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {ordenes.map((o) => (
+                <TableRow key={o.id} className="hover:bg-muted/50">
+                  <TableCell className="font-medium text-emerald-600">{o.numero}</TableCell>
+                  <TableCell>{o.cliente?.nombre_negocio || "—"}</TableCell>
+                  <TableCell className="text-muted-foreground">{fmt(o.created_at)}</TableCell>
+                  <TableCell className="text-right font-semibold">{formatPrice(Number(o.total))}</TableCell>
+                  <TableCell><Badge variant={estadoConfig[o.estado]?.variant || "outline"}>{estadoConfig[o.estado]?.label || o.estado}</Badge></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
 
-          <Card className="border-border">
-            <CardHeader>
-              <CardTitle>Historial de Pedidos</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Pedido</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Fecha</TableHead>
-                    <TableHead>Items</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredPedidos.map((pedido) => (
-                    <TableRow key={pedido.id}>
-                      <TableCell className="font-medium">{pedido.id}</TableCell>
-                      <TableCell>{pedido.cliente}</TableCell>
-                      <TableCell>{pedido.fecha}</TableCell>
-                      <TableCell>{pedido.items} productos</TableCell>
-                      <TableCell className="font-medium">${pedido.total.toLocaleString()}</TableCell>
-                      <TableCell>
-                        <Badge variant={statusConfig[pedido.estado].variant}>
-                          {statusConfig[pedido.estado].label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm">
-                          <Eye className="h-4 w-4 mr-1" />
-                          Ver
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+      {/* Nuevo pedido */}
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Nuevo pedido</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div><Label>Cliente</Label>
+              <Select value={clienteId} onValueChange={setClienteId}>
+                <SelectTrigger><SelectValue placeholder="Selecciona tu cliente" /></SelectTrigger>
+                <SelectContent>
+                  {clientes.length === 0
+                    ? <div className="px-3 py-2 text-sm text-muted-foreground">No tienes clientes asignados</div>
+                    : clientes.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre_negocio}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Agregar producto</Label>
+              <Select value={addProd} onValueChange={seleccionarProducto}>
+                <SelectTrigger><SelectValue placeholder="Buscar y agregar producto" /></SelectTrigger>
+                <SelectContent>
+                  {productos.map((p) => {
+                    const n = empaquesDe(p).length;
+                    return (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.nombre} · {formatPrice(Number(p.precio_base))}{n > 1 ? ` · ${n} presentaciones` : ""}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Selección de presentación (empaque) cuando el producto tiene varias */}
+            {pendingEmpaque && (
+              <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Package className="h-4 w-4 text-emerald-600" />
+                  Presentación de {pendingEmpaque.nombre}
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  {empaquesDe(pendingEmpaque).map((emp) => (
+                    <button
+                      key={emp.id}
+                      onClick={() => agregarConEmpaque(pendingEmpaque, emp)}
+                      className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-left text-sm hover:border-emerald-500"
+                    >
+                      <span>
+                        <span className="font-medium">{emp.tipo_empaque?.nombre}</span>
+                        <span className="text-muted-foreground"> · {emp.tipo_empaque?.unidades} u.</span>
+                      </span>
+                      <span className="font-semibold">{formatPrice(Number(emp.precio_empaque))}</span>
+                    </button>
                   ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
+                </div>
+                <button className="text-xs text-muted-foreground underline" onClick={() => setPendingEmpaque(null)}>Cancelar</button>
+              </div>
+            )}
 
-        {/* Nuevo Pedido */}
-        <TabsContent value="nuevo" className="space-y-4">
-          <div className="grid gap-6 lg:grid-cols-3">
-            {/* Selección de Cliente y Productos */}
-            <div className="lg:col-span-2 space-y-4">
-              {/* Cliente */}
-              <Card className="border-border">
-                <CardHeader>
-                  <CardTitle className="text-lg">1. Seleccionar Cliente</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Select value={clienteSeleccionado} onValueChange={setClienteSeleccionado}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecciona un cliente" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {clientesDisponibles.map((cliente) => (
-                        <SelectItem key={cliente.id} value={cliente.id}>
-                          {cliente.nombre}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </CardContent>
-              </Card>
-
-              {/* Productos */}
-              <Card className="border-border">
-                <CardHeader>
-                  <CardTitle className="text-lg">2. Agregar Productos</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      placeholder="Buscar producto por nombre o SKU..."
-                      value={searchProducto}
-                      onChange={(e) => setSearchProducto(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-
-                  <div className="grid gap-3 max-h-96 overflow-y-auto">
-                    {filteredProductos.map((producto) => (
-                      <div
-                        key={producto.id}
-                        className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
-                            <Package className="h-5 w-5 text-muted-foreground" />
-                          </div>
-                          <div>
-                            <p className="font-medium text-sm">{producto.nombre}</p>
-                            <p className="text-xs text-muted-foreground">
-                              SKU: {producto.sku} • Stock: {producto.stock}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <p className="font-semibold">${producto.precio.toFixed(2)}</p>
-                          <Button
-                            size="sm"
-                            onClick={() => agregarAlCarrito(producto)}
-                            className="bg-emerald-500 hover:bg-emerald-600"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </div>
+            {lineas.length > 0 && (
+              <div className="rounded-lg border border-border divide-y">
+                {lineas.map((l) => {
+                  const key = l.producto_id + "|" + (l.tipo_empaque_id || "");
+                  return (
+                    <div key={key} className="flex items-center justify-between gap-2 p-2 text-sm">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate">{l.nombre}{l.empaque ? <span className="text-muted-foreground"> · {l.empaque}</span> : null}</p>
+                        <p className="text-xs text-muted-foreground">{formatPrice(l.precio)} c/u</p>
                       </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+                      <div className="flex items-center gap-1">
+                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => cambiarCant(key, -1)}><Minus className="h-3.5 w-3.5" /></Button>
+                        <span className="w-6 text-center tabular-nums">{l.cantidad}</span>
+                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => cambiarCant(key, 1)}><Plus className="h-3.5 w-3.5" /></Button>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => cambiarCant(key, -l.cantidad)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="flex justify-between p-2 font-semibold"><span>Subtotal</span><span>{formatPrice(subtotal)}</span></div>
+              </div>
+            )}
+            <div><Label>Método de pago</Label>
+              <Select value={metodo} onValueChange={setMetodo}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="transferencia">Transferencia</SelectItem>
+                  <SelectItem value="efectivo">Efectivo</SelectItem>
+                  <SelectItem value="pago_movil">Pago Móvil</SelectItem>
+                  <SelectItem value="credito">Crédito</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-
-            {/* Carrito */}
-            <div className="lg:col-span-1">
-              <Card className="border-border sticky top-24">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <ShoppingCart className="h-5 w-5" />
-                    Carrito ({carrito.length})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {carrito.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-8">
-                      No hay productos en el carrito
-                    </p>
-                  ) : (
-                    <>
-                      <div className="space-y-3 max-h-80 overflow-y-auto">
-                        {carrito.map((item) => (
-                          <div
-                            key={item.producto.id}
-                            className="flex items-center justify-between rounded-lg border border-border p-3"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-sm truncate">{item.producto.nombre}</p>
-                              <p className="text-xs text-muted-foreground">
-                                ${item.producto.precio.toFixed(2)} c/u
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Input
-                                type="number"
-                                min="1"
-                                value={item.cantidad}
-                                onChange={(e) =>
-                                  actualizarCantidad(item.producto.id, parseInt(e.target.value) || 0)
-                                }
-                                className="w-16 h-8 text-center"
-                              />
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive"
-                                onClick={() => eliminarDelCarrito(item.producto.id)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="border-t pt-4 space-y-3">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Subtotal</span>
-                          <span>${totalCarrito.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">IVA (16%)</span>
-                          <span>${(totalCarrito * 0.16).toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between font-semibold text-lg">
-                          <span>Total</span>
-                          <span>${(totalCarrito * 1.16).toLocaleString()}</span>
-                        </div>
-
-                        <Button
-                          className="w-full bg-emerald-500 hover:bg-emerald-600"
-                          size="lg"
-                          onClick={crearPedido}
-                        >
-                          Crear Pedido
-                        </Button>
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+            <p className="text-xs text-muted-foreground">Se aplicará IVA y envío según la configuración. El total final se calcula en el servidor.</p>
           </div>
-        </TabsContent>
-      </Tabs>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setOpen(false); resetForm(); }} disabled={saving}>Cancelar</Button>
+            <Button className="bg-emerald-500 hover:bg-emerald-600" onClick={crear} disabled={saving || !clienteId || lineas.length === 0}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><ShoppingCart className="h-4 w-4 mr-1" />Crear pedido</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </VendedorLayout>
   );
 };

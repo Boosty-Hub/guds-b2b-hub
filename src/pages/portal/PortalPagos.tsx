@@ -37,19 +37,19 @@ import { useToast } from "@/hooks/use-toast";
 interface PagoDB {
   id: string;
   monto: number;
-  metodo_pago: string;
+  metodo: string;
   referencia: string;
   estado: string;
   created_at: string;
   orden_id?: string;
   orden?: {
-    numero_orden: string;
+    numero: string;
   };
 }
 
 interface OrdenPendiente {
   id: string;
-  numero_orden: string;
+  numero: string;
   total: number;
   estado: string;
   created_at: string;
@@ -71,7 +71,7 @@ const metodosPago = [
 ];
 
 const PortalPagos = () => {
-  const { formatPrice } = useCurrency();
+  const { formatPrice, exchangeRate } = useCurrency();
   const { user } = useAuth();
   const { toast } = useToast();
   
@@ -86,9 +86,11 @@ const PortalPagos = () => {
   const [formData, setFormData] = useState({
     orden_id: "",
     monto: "",
-    metodo_pago: "",
+    banco_id: "",
+    tasa: "",
     referencia: "",
   });
+  const [bancos, setBancos] = useState<{ id: string; nombre: string; metodo_pago: string; moneda: string; numero_cuenta: string | null }[]>([]);
 
   useEffect(() => {
     if (user?.cliente_id) {
@@ -98,59 +100,75 @@ const PortalPagos = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    
+
     // Fetch pagos
     const { data: pagosData } = await supabase
       .from('pagos')
       .select(`
         *,
-        orden:ordenes(numero_orden)
+        orden:ordenes(numero)
       `)
       .eq('cliente_id', user?.cliente_id)
       .order('created_at', { ascending: false });
-    
+
     if (pagosData) setPagos(pagosData);
 
     // Fetch órdenes pendientes de pago
     const { data: ordenesData } = await supabase
       .from('ordenes')
-      .select('id, numero_orden, total, estado, created_at')
+      .select('id, numero, total, estado, created_at')
       .eq('cliente_id', user?.cliente_id)
       .in('estado', ['pendiente', 'confirmado', 'procesando', 'enviado'])
       .order('created_at', { ascending: false });
-    
+
     if (ordenesData) setOrdenesPendientes(ordenesData);
+
+    // Bancos activos (a dónde puede pagar el cliente)
+    const { data: bancosData } = await supabase
+      .from('bancos')
+      .select('id, nombre, metodo_pago, moneda, numero_cuenta')
+      .eq('activo', true)
+      .order('nombre');
+    if (bancosData) setBancos(bancosData);
 
     setLoading(false);
   };
 
+  const bancoSel = bancos.find((b) => b.id === formData.banco_id);
+  const esBS = bancoSel?.moneda === "BS";
+
   const handleSubmitPayment = async () => {
-    if (!formData.orden_id || !formData.monto || !formData.metodo_pago || !formData.referencia) {
-      toast({ title: "Error", description: "Completa todos los campos", variant: "destructive" });
+    if (!formData.orden_id || !formData.monto || !formData.banco_id || !formData.referencia) {
+      toast({ title: "Error", description: "Completa la orden, el banco, el monto y la referencia", variant: "destructive" });
+      return;
+    }
+    if (esBS && (!formData.tasa || Number(formData.tasa) <= 0)) {
+      toast({ title: "Falta la tasa", description: "Indica la tasa (Bs. por USD) para un pago en bolívares.", variant: "destructive" });
       return;
     }
 
     setSaving(true);
 
-    const { error } = await supabase.from('pagos').insert({
-      cliente_id: user?.cliente_id,
-      orden_id: formData.orden_id,
-      monto: parseFloat(formData.monto),
-      metodo_pago: formData.metodo_pago,
-      referencia: formData.referencia,
-      estado: 'pendiente',
+    const { error } = await supabase.rpc("registrar_pago", {
+      p_cliente_id: user?.cliente_id,
+      p_orden_id: formData.orden_id,
+      p_banco_id: formData.banco_id,
+      p_metodo: bancoSel?.metodo_pago || "transferencia",
+      p_monto_moneda: parseFloat(formData.monto),
+      p_moneda: bancoSel?.moneda || "USD",
+      p_tasa_cambio: esBS ? Number(formData.tasa) : null,
+      p_referencia: formData.referencia,
     });
 
+    setSaving(false);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Pago registrado", description: "Tu pago está pendiente de verificación" });
-      setFormData({ orden_id: "", monto: "", metodo_pago: "", referencia: "" });
+      toast({ title: "Pago reportado", description: "Tu pago está pendiente de verificación" });
+      setFormData({ orden_id: "", monto: "", banco_id: "", tasa: "", referencia: "" });
       setIsPaymentOpen(false);
       fetchData();
     }
-
-    setSaving(false);
   };
 
   const formatDate = (dateStr: string) => {
@@ -269,7 +287,7 @@ const PortalPagos = () => {
                     <div>
                       <p className="font-semibold">{formatPrice(pago.monto)}</p>
                       <p className="text-xs text-muted-foreground">
-                        {pago.orden?.numero_orden || 'Sin orden'}
+                        {pago.orden?.numero || 'Sin orden'}
                       </p>
                     </div>
                   </div>
@@ -281,7 +299,7 @@ const PortalPagos = () => {
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div>
                     <p className="text-muted-foreground">Método</p>
-                    <p className="font-medium capitalize">{pago.metodo_pago.replace('_', ' ')}</p>
+                    <p className="font-medium capitalize">{pago.metodo?.replace('_', ' ')}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Referencia</p>
@@ -313,7 +331,7 @@ const PortalPagos = () => {
                     <Banknote className="h-5 w-5 text-primary" />
                   </div>
                   <div>
-                    <p className="font-medium">{orden.numero_orden}</p>
+                    <p className="font-medium">{orden.numero}</p>
                     <p className="text-xs text-muted-foreground">{formatDate(orden.created_at)}</p>
                   </div>
                 </div>
@@ -354,37 +372,39 @@ const PortalPagos = () => {
                 <SelectContent>
                   {ordenesPendientes.map((orden) => (
                     <SelectItem key={orden.id} value={orden.id}>
-                      {orden.numero_orden} - {formatPrice(orden.total)}
+                      {orden.numero} - {formatPrice(orden.total)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Payment Method */}
+            {/* Banco al que se paga */}
             <div className="space-y-2">
-              <Label>Método de pago</Label>
-              <div className="grid grid-cols-2 gap-2">
-                {metodosPago.map((metodo) => (
+              <Label>Banco / cuenta donde pagaste</Label>
+              <div className="grid grid-cols-1 gap-2">
+                {bancos.map((b) => (
                   <button
-                    key={metodo.id}
-                    onClick={() => setFormData({ ...formData, metodo_pago: metodo.id })}
+                    key={b.id}
+                    onClick={() => setFormData({ ...formData, banco_id: b.id, tasa: b.moneda === "BS" && exchangeRate > 0 ? String(exchangeRate) : "" })}
                     className={`p-3 rounded-xl border text-left transition-colors ${
-                      formData.metodo_pago === metodo.id
-                        ? "border-primary bg-primary/5"
-                        : "border-border"
+                      formData.banco_id === b.id ? "border-primary bg-primary/5" : "border-border"
                     }`}
                   >
-                    <span className="text-xl">{metodo.icon}</span>
-                    <p className="text-sm font-medium mt-1">{metodo.name}</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">{b.nombre}</p>
+                      <span className="text-xs font-semibold">{b.moneda === "USD" ? "USD $" : "Bs."}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{b.numero_cuenta || b.metodo_pago.replace("_", " ")}</p>
                   </button>
                 ))}
+                {bancos.length === 0 && <p className="text-sm text-muted-foreground">No hay cuentas de pago disponibles.</p>}
               </div>
             </div>
 
             {/* Amount */}
             <div className="space-y-2">
-              <Label>Monto</Label>
+              <Label>{esBS ? "Monto pagado (Bs.)" : "Monto pagado (USD $)"}</Label>
               <Input
                 type="number"
                 placeholder="0.00"
@@ -392,6 +412,28 @@ const PortalPagos = () => {
                 onChange={(e) => setFormData({ ...formData, monto: e.target.value })}
               />
             </div>
+
+            {/* Tasa (si BS) */}
+            {esBS && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Tasa de cambio (Bs. por 1 USD)</Label>
+                  <span className="text-[11px] text-muted-foreground">Tasa BCV precargada</span>
+                </div>
+                <Input
+                  type="number"
+                  placeholder="Ej: 400"
+                  value={formData.tasa}
+                  onChange={(e) => setFormData({ ...formData, tasa: e.target.value })}
+                />
+                {formData.monto && formData.tasa && Number(formData.tasa) > 0 && (
+                  <div className="flex items-center justify-between rounded-md bg-muted/60 px-3 py-2">
+                    <span className="text-xs text-muted-foreground">Equivale a</span>
+                    <span className="text-sm font-semibold">{formatPrice(Number(formData.monto) / Number(formData.tasa))}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Reference */}
             <div className="space-y-2">

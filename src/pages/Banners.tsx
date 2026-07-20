@@ -91,7 +91,7 @@ const Banners = () => {
     });
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!formData.title || !formData.subtitle) {
       toast({
         title: "Error",
@@ -101,17 +101,22 @@ const Banners = () => {
       return;
     }
 
-    addBanner({
-      title: formData.title,
-      subtitle: formData.subtitle,
-      bgColor: formData.bgColor,
-      textColor: "white",
-      link: formData.link || "/portal/catalogo",
-      activo: true,
-      orden: banners.length + 1,
-      fechaInicio: formData.fechaInicio || new Date().toISOString().split("T")[0],
-      fechaFin: formData.fechaFin || "2024-12-31",
-    });
+    try {
+      await addBanner({
+        title: formData.title,
+        subtitle: formData.subtitle,
+        bgColor: formData.bgColor,
+        textColor: "white",
+        link: formData.link || "/portal/catalogo",
+        activo: true,
+        orden: banners.length + 1,
+        fechaInicio: formData.fechaInicio || new Date().toISOString().split("T")[0],
+        fechaFin: formData.fechaFin || "2024-12-31",
+      });
+    } catch (e) {
+      toast({ title: "No se pudo crear el banner", description: (e as Error).message, variant: "destructive" });
+      return;
+    }
 
     toast({
       title: "Banner Creado",
@@ -121,17 +126,22 @@ const Banners = () => {
     setIsCreateOpen(false);
   };
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (!selectedBanner) return;
 
-    updateBanner(selectedBanner.id, {
-      title: formData.title,
-      subtitle: formData.subtitle,
-      bgColor: formData.bgColor,
-      link: formData.link,
-      fechaInicio: formData.fechaInicio,
-      fechaFin: formData.fechaFin,
-    });
+    try {
+      await updateBanner(selectedBanner.id, {
+        title: formData.title,
+        subtitle: formData.subtitle,
+        bgColor: formData.bgColor,
+        link: formData.link,
+        fechaInicio: formData.fechaInicio,
+        fechaFin: formData.fechaFin,
+      });
+    } catch (e) {
+      toast({ title: "No se pudo actualizar el banner", description: (e as Error).message, variant: "destructive" });
+      return;
+    }
 
     toast({
       title: "Banner Actualizado",
@@ -142,10 +152,15 @@ const Banners = () => {
     setSelectedBanner(null);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!selectedBanner) return;
 
-    deleteBanner(selectedBanner.id);
+    try {
+      await deleteBanner(selectedBanner.id);
+    } catch (e) {
+      toast({ title: "No se pudo eliminar el banner", description: (e as Error).message, variant: "destructive" });
+      return;
+    }
     toast({
       title: "Banner Eliminado",
       description: "El banner ha sido eliminado",
@@ -168,8 +183,13 @@ const Banners = () => {
     setIsEditOpen(true);
   };
 
-  const handleToggleActivo = (banner: Banner) => {
-    updateBanner(banner.id, { activo: !banner.activo });
+  const handleToggleActivo = async (banner: Banner) => {
+    try {
+      await updateBanner(banner.id, { activo: !banner.activo });
+    } catch (e) {
+      toast({ title: "No se pudo actualizar", description: (e as Error).message, variant: "destructive" });
+      return;
+    }
     toast({
       title: banner.activo ? "Banner Desactivado" : "Banner Activado",
       description: `"${banner.title}" ha sido ${banner.activo ? "desactivado" : "activado"}`,
@@ -268,13 +288,13 @@ const Banners = () => {
         {banners.sort((a, b) => a.orden - b.orden).map((banner) => (
           <Card key={banner.id} className={`border-border ${!banner.activo ? "opacity-60" : ""}`}>
             <CardContent className="p-4">
-              <div className="flex items-center gap-4">
-                <div className="cursor-grab text-muted-foreground hover:text-foreground">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <div className="hidden sm:block cursor-grab text-muted-foreground hover:text-foreground">
                   <GripVertical className="h-5 w-5" />
                 </div>
-                
+
                 {/* Banner Preview */}
-                <div className={`bg-gradient-to-r ${banner.bgColor} rounded-lg p-3 min-w-[150px] text-white`}>
+                <div className={`bg-gradient-to-r ${banner.bgColor} rounded-lg p-3 sm:min-w-[150px] text-white`}>
                   <p className="font-bold text-sm">{banner.title}</p>
                   <p className="text-xs opacity-90">{banner.subtitle}</p>
                 </div>
@@ -296,7 +316,7 @@ const Banners = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center justify-between gap-4 sm:justify-start">
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground">
                       {banner.activo ? "Activo" : "Inactivo"}
