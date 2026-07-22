@@ -201,6 +201,10 @@ const ConfigUsuarios = () => {
       toast({ title: "Error", description: "Completa nombre, email y rol", variant: "destructive" });
       return;
     }
+    if (!userForm.password || userForm.password.length < 6) {
+      toast({ title: "Error", description: "La contraseña debe tener al menos 6 caracteres", variant: "destructive" });
+      return;
+    }
 
     const rol = roles.find(r => r.id === userForm.rol_id);
     const roleEnum: 'admin' | 'vendedor' | 'delivery' | 'cliente' =
@@ -217,6 +221,7 @@ const ConfigUsuarios = () => {
       p_role: roleEnum,
       p_telefono: userForm.telefono || null,
       p_cliente_id: null,
+      p_password: userForm.password,
     });
 
     if (error) {
@@ -1053,7 +1058,7 @@ const ConfigUsuarios = () => {
           </DialogHeader>
           <div className="space-y-3 py-2 text-sm">
             <p className="text-muted-foreground">
-              Comunícale estas credenciales al usuario por un canal seguro. La contraseña temporal
+              Comunícale estas credenciales al usuario por un canal seguro. La contraseña
               <b> solo se muestra una vez</b>.
             </p>
             <div className="rounded-lg border border-border bg-muted p-3 space-y-2">
@@ -1062,7 +1067,7 @@ const ConfigUsuarios = () => {
                 <code className="font-medium">{credencialesNuevo?.email}</code>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Contraseña temporal</span>
+                <span className="text-muted-foreground">Contraseña</span>
                 <code className="font-bold text-primary">{credencialesNuevo?.password}</code>
               </div>
             </div>
@@ -1071,7 +1076,7 @@ const ConfigUsuarios = () => {
             <Button
               variant="outline"
               onClick={() => {
-                navigator.clipboard?.writeText(`Email: ${credencialesNuevo?.email}\nContraseña temporal: ${credencialesNuevo?.password}`);
+                navigator.clipboard?.writeText(`Email: ${credencialesNuevo?.email}\nContraseña: ${credencialesNuevo?.password}`);
                 toast({ title: "Copiado", description: "Credenciales copiadas al portapapeles" });
               }}
             >

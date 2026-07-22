@@ -7,7 +7,9 @@ import { CurrencyProvider } from "@/contexts/CurrencyContext";
 import { StoreConfigProvider } from "@/contexts/StoreConfigContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { PermissionsProvider } from "@/contexts/PermissionsContext";
+import { NotificationsProvider } from "@/contexts/NotificationsContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // Public Pages
 import Landing from "./pages/Landing";
@@ -98,12 +100,14 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <PermissionsProvider>
+      <NotificationsProvider>
       <CurrencyProvider>
         <StoreConfigProvider>
           <TooltipProvider>
             <Toaster />
             <Sonner />
             <BrowserRouter>
+              <ErrorBoundary>
               <Routes>
                 {/* Public Pages */}
                 <Route path="/" element={<Landing />} />
@@ -178,10 +182,12 @@ const App = () => (
           
           <Route path="*" element={<NotFound />} />
               </Routes>
+              </ErrorBoundary>
             </BrowserRouter>
           </TooltipProvider>
         </StoreConfigProvider>
       </CurrencyProvider>
+      </NotificationsProvider>
       </PermissionsProvider>
     </AuthProvider>
   </QueryClientProvider>

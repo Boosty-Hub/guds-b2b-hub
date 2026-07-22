@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Bell, Package, CheckCircle, AlertCircle, Info, X } from "lucide-react";
+import { useState } from "react";
+import { Bell, Package, CheckCircle, AlertCircle, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -7,95 +7,23 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
-
-interface Notification {
-  id: string;
-  titulo: string;
-  mensaje: string | null;
-  tipo: string | null;
-  leida: boolean | null;
-  created_at: string | null;
-  link: string | null;
-}
+import { useNotifications, Notification } from "@/contexts/NotificationsContext";
 
 interface NotificationsDropdownProps {
   variant?: "default" | "header";
 }
 
 export const NotificationsDropdown = ({ variant = "default" }: NotificationsDropdownProps) => {
-  const { user } = useAuth();
   const navigate = useNavigate();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    fetchNotifications();
-    // Realtime: refresca al recibir nuevas notificaciones o marcarlas leídas
-    const channel = supabase
-      .channel(`notif-${user.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "notificaciones", filter: `usuario_id=eq.${user.id}` },
-        () => fetchNotifications()
-      )
-      .subscribe();
-    // Respaldo: refresca cada 60s por si realtime no está disponible
-    const poll = setInterval(fetchNotifications, 60000);
-    return () => { supabase.removeChannel(channel); clearInterval(poll); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
 
   const handleClick = (n: Notification) => {
     if (!n.leida) markAsRead(n.id);
     if (n.link) { setOpen(false); navigate(n.link); }
-  };
-
-  const fetchNotifications = async () => {
-    if (!user?.id) return;
-
-    const { data, error } = await supabase
-      .from("notificaciones")
-      .select("*")
-      .eq("usuario_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    if (!error && data) {
-      setNotifications(data);
-      setUnreadCount(data.filter((n) => !n.leida).length);
-    }
-  };
-
-  const markAsRead = async (notificationId: string) => {
-    await supabase
-      .from("notificaciones")
-      .update({ leida: true })
-      .eq("id", notificationId);
-
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === notificationId ? { ...n, leida: true } : n))
-    );
-    setUnreadCount((prev) => Math.max(0, prev - 1));
-  };
-
-  const markAllAsRead = async () => {
-    if (!user?.id) return;
-
-    await supabase
-      .from("notificaciones")
-      .update({ leida: true })
-      .eq("usuario_id", user.id)
-      .eq("leida", false);
-
-    setNotifications((prev) => prev.map((n) => ({ ...n, leida: true })));
-    setUnreadCount(0);
   };
 
   const getIcon = (tipo: string | null) => {
