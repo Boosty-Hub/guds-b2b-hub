@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,17 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { 
-  CreditCard, 
-  Upload, 
-  Clock, 
-  CheckCircle, 
+import {
+  CreditCard,
+  Upload,
+  Clock,
+  CheckCircle,
   AlertCircle,
   ChevronRight,
   Plus,
   Loader2,
   Receipt,
-  Banknote
+  Banknote,
+  Paperclip
 } from "lucide-react";
 import {
   Sheet,
@@ -32,7 +33,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabase } from "@/lib/supabase";
+import { compressImage } from "@/lib/image";
 import { useToast } from "@/hooks/use-toast";
+
+const MAX_COMPROBANTE_SIZE = 5 * 1024 * 1024;
+const ALLOWED_COMPROBANTE_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 
 interface PagoDB {
   id: string;
@@ -91,6 +96,9 @@ const PortalPagos = () => {
     referencia: "",
   });
   const [bancos, setBancos] = useState<{ id: string; nombre: string; metodo_pago: string; moneda: string; numero_cuenta: string | null }[]>([]);
+  const [comprobanteFile, setComprobanteFile] = useState<File | null>(null);
+  const [uploadingComprobante, setUploadingComprobante] = useState(false);
+  const comprobanteInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (user?.cliente_id) {
@@ -137,6 +145,32 @@ const PortalPagos = () => {
   const bancoSel = bancos.find((b) => b.id === formData.banco_id);
   const esBS = bancoSel?.moneda === "BS";
 
+  const handleComprobanteSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!ALLOWED_COMPROBANTE_TYPES.includes(file.type)) {
+      toast({ title: "Formato no permitido", description: "Solo se aceptan PDF, JPG o PNG", variant: "destructive" });
+      return;
+    }
+    if (file.size > MAX_COMPROBANTE_SIZE) {
+      toast({ title: "Archivo muy grande", description: "El máximo es 5 MB", variant: "destructive" });
+      return;
+    }
+    setComprobanteFile(file);
+  };
+
+  const uploadComprobante = async (file: File): Promise<string> => {
+    const isImage = file.type.startsWith("image/");
+    const body = isImage ? await compressImage(file, 1600, 0.85) : file;
+    const ext = isImage ? "jpg" : "pdf";
+    const path = `comprobantes/${user?.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage.from("documentos").upload(path, body, {
+      contentType: isImage ? "image/jpeg" : "application/pdf",
+    });
+    if (error) throw error;
+    return path;
+  };
+
   const handleSubmitPayment = async () => {
     if (!formData.orden_id || !formData.monto || !formData.banco_id || !formData.referencia) {
       toast({ title: "Error", description: "Completa la orden, el banco, el monto y la referencia", variant: "destructive" });
@@ -149,6 +183,20 @@ const PortalPagos = () => {
 
     setSaving(true);
 
+    let comprobanteUrl: string | null = null;
+    if (comprobanteFile) {
+      setUploadingComprobante(true);
+      try {
+        comprobanteUrl = await uploadComprobante(comprobanteFile);
+      } catch (err) {
+        toast({ title: "No se pudo subir el comprobante", description: (err as Error).message, variant: "destructive" });
+        setSaving(false);
+        setUploadingComprobante(false);
+        return;
+      }
+      setUploadingComprobante(false);
+    }
+
     const { error } = await supabase.rpc("registrar_pago", {
       p_cliente_id: user?.cliente_id,
       p_orden_id: formData.orden_id,
@@ -158,6 +206,7 @@ const PortalPagos = () => {
       p_moneda: bancoSel?.moneda || "USD",
       p_tasa_cambio: esBS ? Number(formData.tasa) : null,
       p_referencia: formData.referencia,
+      p_comprobante_url: comprobanteUrl,
     });
 
     setSaving(false);
@@ -166,6 +215,7 @@ const PortalPagos = () => {
     } else {
       toast({ title: "Pago reportado", description: "Tu pago está pendiente de verificación" });
       setFormData({ orden_id: "", monto: "", banco_id: "", tasa: "", referencia: "" });
+      setComprobanteFile(null);
       setIsPaymentOpen(false);
       fetchData();
     }
@@ -448,12 +498,33 @@ const PortalPagos = () => {
             {/* Upload Section */}
             <div className="space-y-2">
               <Label>Comprobante (opcional)</Label>
-              <div className="border-2 border-dashed border-border rounded-xl p-6 text-center">
-                <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                <p className="text-sm text-muted-foreground">
-                  Toca para subir comprobante
-                </p>
-              </div>
+              <input
+                ref={comprobanteInputRef}
+                type="file"
+                accept="application/pdf,image/jpeg,image/png"
+                className="hidden"
+                onChange={handleComprobanteSelect}
+              />
+              <button
+                type="button"
+                onClick={() => comprobanteInputRef.current?.click()}
+                disabled={uploadingComprobante}
+                className="w-full border-2 border-dashed border-border rounded-xl p-6 text-center disabled:opacity-50"
+              >
+                {comprobanteFile ? (
+                  <span className="flex items-center justify-center gap-2 text-sm">
+                    <Paperclip className="h-4 w-4 text-primary" />
+                    {comprobanteFile.name}
+                  </span>
+                ) : (
+                  <>
+                    <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      {uploadingComprobante ? "Subiendo..." : "Toca para subir comprobante"}
+                    </p>
+                  </>
+                )}
+              </button>
             </div>
 
             {/* Submit Button */}

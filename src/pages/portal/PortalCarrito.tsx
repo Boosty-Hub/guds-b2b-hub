@@ -1,22 +1,25 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { 
-  ChevronLeft, 
-  Plus, 
-  Minus, 
-  Trash2, 
+import {
+  ChevronLeft,
+  Plus,
+  Minus,
+  Trash2,
   Ticket,
   Truck,
   CreditCard,
   ChevronRight,
   ShoppingBag,
   Clock,
-  Loader2
+  Loader2,
+  Upload,
+  Paperclip
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -27,7 +30,12 @@ import {
 } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { supabase, Producto } from "@/lib/supabase";
+import { compressImage } from "@/lib/image";
 import { ProductImage } from "@/components/portal/ProductImage";
+
+const METODOS_CON_COMPROBANTE = ["transferencia", "pago_movil"];
+const MAX_COMPROBANTE_SIZE = 5 * 1024 * 1024;
+const ALLOWED_COMPROBANTE_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 
 interface CartItemDB {
   id: string;
@@ -62,6 +70,9 @@ const PortalCarrito = () => {
   const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [referenciaPago, setReferenciaPago] = useState("");
+  const [comprobanteFile, setComprobanteFile] = useState<File | null>(null);
+  const comprobanteInputRef = useRef<HTMLInputElement>(null);
   // Config de negocio (IVA / envío) leída de la BD; los defaults coinciden con el servidor.
   const [cfg, setCfg] = useState({ iva: 16, envio: 50, envioGratis: 500 });
   const { formatPrice } = useCurrency();
@@ -185,18 +196,69 @@ const PortalCarrito = () => {
   const total = round2(base + impuesto + shipping);
   const cartCount = cart.reduce((sum, item) => sum + item.cantidad, 0);
 
+  const requiereComprobante = selectedPayment ? METODOS_CON_COMPROBANTE.includes(selectedPayment) : false;
+
+  const handleComprobanteSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!ALLOWED_COMPROBANTE_TYPES.includes(file.type)) {
+      toast({ title: "Formato no permitido", description: "Solo se aceptan PDF, JPG o PNG", variant: "destructive" });
+      return;
+    }
+    if (file.size > MAX_COMPROBANTE_SIZE) {
+      toast({ title: "Archivo muy grande", description: "El máximo es 5 MB", variant: "destructive" });
+      return;
+    }
+    setComprobanteFile(file);
+  };
+
+  const uploadComprobante = async (file: File): Promise<string> => {
+    // Guarda la RUTA, no una URL firmada: el bucket `documentos` es privado y
+    // solo un admin puede leerlo (createSignedUrl se genera al momento de ver,
+    // igual que con el documento del RIF en el registro).
+    const isImage = file.type.startsWith("image/");
+    const body = isImage ? await compressImage(file, 1600, 0.85) : file;
+    const ext = isImage ? "jpg" : "pdf";
+    const path = `comprobantes/${user?.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage.from("documentos").upload(path, body, {
+      contentType: isImage ? "image/jpeg" : "application/pdf",
+    });
+    if (error) throw error;
+    return path;
+  };
+
   const handleCheckout = async () => {
     if (!selectedPayment) {
       setIsPaymentOpen(true);
       return;
     }
-    
+
     if (!user?.cliente_id) {
       toast({ title: "Error", description: "No tienes un cliente asociado", variant: "destructive" });
       return;
     }
 
+    if (requiereComprobante && (!referenciaPago || !comprobanteFile)) {
+      toast({
+        title: "Falta el comprobante",
+        description: "Ingresa la referencia y adjunta el comprobante de pago para continuar",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setSubmitting(true);
+
+    let comprobanteUrl: string | null = null;
+    if (requiereComprobante && comprobanteFile) {
+      try {
+        comprobanteUrl = await uploadComprobante(comprobanteFile);
+      } catch (err) {
+        toast({ title: "No se pudo subir el comprobante", description: (err as Error).message, variant: "destructive" });
+        setSubmitting(false);
+        return;
+      }
+    }
 
     // Crear la orden de forma atómica en el servidor: numera, calcula IVA/envío,
     // inserta cabecera + items y vacía el carrito en una sola transacción.
@@ -204,6 +266,8 @@ const PortalCarrito = () => {
       p_metodo_pago: selectedPayment,
       p_notas: '',
       p_cupon_id: cuponApplied?.id || null,
+      p_comprobante_url: comprobanteUrl,
+      p_referencia: requiereComprobante ? referenciaPago : null,
     });
 
     if (error) {
@@ -391,6 +455,50 @@ const PortalCarrito = () => {
             <ChevronRight className="h-5 w-5 text-muted-foreground" />
           </button>
         </div>
+
+        {/* Comprobante de pago — requerido antes de confirmar cuando el método lo exige */}
+        {requiereComprobante && (
+          <div className="px-4 mt-4">
+            <div className="bg-card rounded-xl border border-border p-4 space-y-3">
+              <p className="font-medium">Comprobante de pago</p>
+              <div className="space-y-2">
+                <Label>Número de referencia *</Label>
+                <Input
+                  placeholder="Ej: 123456789"
+                  value={referenciaPago}
+                  onChange={(e) => setReferenciaPago(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Adjuntar comprobante *</Label>
+                <input
+                  ref={comprobanteInputRef}
+                  type="file"
+                  accept="application/pdf,image/jpeg,image/png"
+                  className="hidden"
+                  onChange={handleComprobanteSelect}
+                />
+                <button
+                  type="button"
+                  onClick={() => comprobanteInputRef.current?.click()}
+                  className="w-full border-2 border-dashed border-border rounded-xl p-4 text-center hover:border-primary transition-colors"
+                >
+                  {comprobanteFile ? (
+                    <span className="flex items-center justify-center gap-2 text-sm">
+                      <Paperclip className="h-4 w-4 text-primary" />
+                      {comprobanteFile.name}
+                    </span>
+                  ) : (
+                    <span className="flex flex-col items-center gap-1 text-sm text-muted-foreground">
+                      <Upload className="h-6 w-6" />
+                      Toca para subir el comprobante (PDF, JPG o PNG, máx. 5 MB)
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Delivery Time */}
         <div className="px-4 mt-4">

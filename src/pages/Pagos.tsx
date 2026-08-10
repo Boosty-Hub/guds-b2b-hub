@@ -18,7 +18,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { CheckCircle, XCircle, Clock, Loader2, Wallet } from "lucide-react";
+import { CheckCircle, XCircle, Clock, Loader2, Wallet, Eye } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
@@ -29,6 +29,7 @@ interface PagoAdmin {
   monto: number;
   metodo: string;
   referencia: string | null;
+  comprobante_url: string | null;
   banco: string | null;
   estado: "pendiente" | "verificado" | "rechazado";
   notas: string | null;
@@ -63,7 +64,7 @@ const Pagos = () => {
     const { data, error } = await supabase
       .from("pagos")
       .select(`
-        id, numero, monto, metodo, referencia, banco, estado, notas, created_at, fecha_verificacion,
+        id, numero, monto, metodo, referencia, comprobante_url, banco, estado, notas, created_at, fecha_verificacion,
         orden:ordenes(numero, total),
         cliente:clientes(nombre_negocio)
       `)
@@ -104,6 +105,15 @@ const Pagos = () => {
 
   const formatDate = (s: string) =>
     new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+
+  const verComprobante = async (path: string) => {
+    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 120);
+    if (error || !data?.signedUrl) {
+      toast({ title: "No se pudo abrir el comprobante", description: error?.message, variant: "destructive" });
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
 
   const visibles = filtro === "pendiente" ? pagos.filter((p) => p.estado === "pendiente") : pagos;
   const pendientes = pagos.filter((p) => p.estado === "pendiente");
@@ -194,7 +204,22 @@ const Pagos = () => {
                     <TableCell className="text-muted-foreground">{pago.orden?.numero || "—"}</TableCell>
                     <TableCell className="text-right font-semibold">{formatPrice(pago.monto)}</TableCell>
                     <TableCell className="capitalize">{pago.metodo?.replace("_", " ")}</TableCell>
-                    <TableCell className="text-muted-foreground">{pago.referencia || "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        {pago.referencia || "—"}
+                        {pago.comprobante_url && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            title="Ver comprobante"
+                            onClick={() => verComprobante(pago.comprobante_url!)}
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{formatDate(pago.created_at)}</TableCell>
                     <TableCell>
                       <Badge variant={estadoConfig[pago.estado]?.variant || "secondary"}>

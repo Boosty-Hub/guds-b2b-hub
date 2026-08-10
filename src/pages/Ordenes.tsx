@@ -45,6 +45,8 @@ interface OrdenDB {
   descuento: number;
   total: number;
   metodo_pago: string;
+  comprobante_url: string | null;
+  referencia_pago: string | null;
   notas: string;
   fecha_entrega: string | null;
   created_at: string;
@@ -225,11 +227,20 @@ const Ordenes = () => {
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('es-ES', { 
-      day: '2-digit', 
-      month: 'short', 
-      year: 'numeric' 
+    return new Date(dateStr).toLocaleDateString('es-ES', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
     });
+  };
+
+  const verComprobanteOrden = async (path: string) => {
+    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 120);
+    if (error || !data?.signedUrl) {
+      toast({ title: "No se pudo abrir el comprobante", description: error?.message, variant: "destructive" });
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
   const filteredOrdenes = ordenes.filter(orden => {
@@ -363,6 +374,29 @@ const Ordenes = () => {
                     <span className="text-muted-foreground">Método:</span>
                     <p className="font-medium capitalize">{selectedOrder.metodo_pago?.replace('_', ' ')}</p>
                   </div>
+                  {selectedOrder.referencia_pago && (
+                    <div>
+                      <span className="text-muted-foreground">Referencia:</span>
+                      <p className="font-medium font-mono">{selectedOrder.referencia_pago}</p>
+                    </div>
+                  )}
+                  {selectedOrder.comprobante_url && (
+                    <div>
+                      <span className="text-muted-foreground">Comprobante:</span>
+                      <div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="mt-1"
+                          onClick={() => verComprobanteOrden(selectedOrder.comprobante_url!)}
+                        >
+                          <Eye className="h-4 w-4 mr-2" />
+                          Ver comprobante
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
