@@ -18,7 +18,9 @@ import { useStoreConfig } from "@/contexts/StoreConfigContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase, Producto, Cliente } from "@/lib/supabase";
 import { ProductImage } from "@/components/portal/ProductImage";
+import { BannerVisual } from "@/components/BannerVisual";
 import { useDeviceType } from "@/hooks/use-mobile";
+import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
 
 interface Orden {
   id: string;
@@ -87,6 +89,8 @@ const PortalDashboard = () => {
     setLoading(false);
   };
 
+  useRealtimeRefetch('productos', fetchData, !!user?.cliente_id);
+
   const creditoDisponible = cliente ? cliente.limite_credito - cliente.credito_utilizado : 0;
   const porcentajeCredito = cliente && cliente.limite_credito > 0 
     ? (cliente.credito_utilizado / cliente.limite_credito) * 100 
@@ -112,13 +116,13 @@ const PortalDashboard = () => {
       <div className={`${paddingX} mb-4`}>
         <div className={`flex ${gapSize} overflow-x-auto pb-2 scrollbar-hide`}>
           {banners.map((banner) => (
-            <Link
-              key={banner.id}
-              to={banner.link}
-              className={`bg-gradient-to-r ${banner.bgColor} rounded-xl text-white flex-shrink-0 ${isTablet ? 'p-5 min-w-[280px]' : 'p-4 min-w-[200px]'}`}
-            >
-              <p className={`font-bold ${isTablet ? 'text-3xl' : 'text-2xl'}`}>{banner.title}</p>
-              <p className={`opacity-90 ${isTablet ? 'text-base' : 'text-sm'}`}>{banner.subtitle}</p>
+            <Link key={banner.id} to={banner.link} className="flex-shrink-0">
+              <BannerVisual
+                banner={banner}
+                className={`rounded-xl ${isTablet ? 'p-5 min-w-[280px]' : 'p-4 min-w-[200px]'}`}
+                titleClassName={`font-bold ${isTablet ? 'text-3xl' : 'text-2xl'}`}
+                subtitleClassName={`opacity-90 ${isTablet ? 'text-base' : 'text-sm'}`}
+              />
             </Link>
           ))}
         </div>

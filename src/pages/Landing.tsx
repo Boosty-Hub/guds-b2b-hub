@@ -22,6 +22,8 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { useStoreConfig } from "@/contexts/StoreConfigContext";
 import { supabase, Producto } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
+import { BannerVisual } from "@/components/BannerVisual";
+import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
 
 interface ProductoLanding {
   id: string;
@@ -75,6 +77,8 @@ const Landing = () => {
     }
     setLoading(false);
   };
+
+  useRealtimeRefetch('productos', fetchProductos);
 
   const filteredProducts = productos.filter(p => 
     p.nombre.toLowerCase().includes(searchTerm.toLowerCase())
@@ -212,18 +216,19 @@ const Landing = () => {
           <div className="container mx-auto px-4">
             <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
               {banners.map((banner) => (
-                <div
+                <BannerVisual
                   key={banner.id}
-                  className={`bg-gradient-to-r ${banner.bgColor} rounded-2xl p-6 min-w-[280px] md:min-w-[350px] text-white flex-shrink-0`}
+                  banner={banner}
+                  className="rounded-2xl p-6 min-w-[280px] md:min-w-[350px] flex-shrink-0"
+                  titleClassName="text-3xl font-bold"
+                  subtitleClassName="text-lg opacity-90"
                 >
-                  <p className="text-3xl font-bold">{banner.title}</p>
-                  <p className="text-lg opacity-90">{banner.subtitle}</p>
                   <Link to="/registro">
                     <Button size="sm" className="mt-4 bg-white/20 hover:bg-white/30">
                       Ver más
                     </Button>
                   </Link>
-                </div>
+                </BannerVisual>
               ))}
             </div>
           </div>

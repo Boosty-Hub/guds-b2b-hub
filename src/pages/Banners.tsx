@@ -37,8 +37,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { 
-  Plus, 
+import {
+  Plus,
   MoreHorizontal,
   Edit,
   Trash2,
@@ -47,10 +47,18 @@ import {
   EyeOff,
   Image,
   Smartphone,
-  Calendar
+  Calendar,
+  Upload,
+  X
 } from "lucide-react";
+import { useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useStoreConfig, Banner } from "@/contexts/StoreConfigContext";
+import { supabase } from "@/lib/supabase";
+import { compressImage } from "@/lib/image";
+import { BannerVisual } from "@/components/BannerVisual";
+
+const MAX_BANNER_IMAGE_SIZE = 2 * 1024 * 1024;
 
 const gradientOptions = [
   { value: "from-yellow-500 to-orange-500", label: "Amarillo → Naranja", preview: "bg-gradient-to-r from-yellow-500 to-orange-500" },
@@ -75,20 +83,52 @@ const Banners = () => {
     title: "",
     subtitle: "",
     bgColor: "from-yellow-500 to-orange-500",
+    imagenUrl: null as string | null,
     link: "",
     fechaInicio: "",
     fechaFin: "",
   });
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const resetForm = () => {
     setFormData({
       title: "",
       subtitle: "",
       bgColor: "from-yellow-500 to-orange-500",
+      imagenUrl: null,
       link: "",
       fechaInicio: "",
       fechaFin: "",
     });
+  };
+
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Formato no permitido", description: "Solo se aceptan imágenes", variant: "destructive" });
+      return;
+    }
+    if (file.size > MAX_BANNER_IMAGE_SIZE) {
+      toast({ title: "Imagen muy grande", description: "El máximo es 2 MB", variant: "destructive" });
+      return;
+    }
+
+    setUploadingImage(true);
+    try {
+      const compressed = await compressImage(file, 1200, 0.85);
+      const path = `banners/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const { error } = await supabase.storage.from("imagenes").upload(path, compressed, { contentType: "image/jpeg" });
+      if (error) throw error;
+      const { data } = supabase.storage.from("imagenes").getPublicUrl(path);
+      setFormData((prev) => ({ ...prev, imagenUrl: data.publicUrl }));
+    } catch (err) {
+      toast({ title: "No se pudo subir la imagen", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setUploadingImage(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   const handleCreate = async () => {
@@ -107,6 +147,7 @@ const Banners = () => {
         subtitle: formData.subtitle,
         bgColor: formData.bgColor,
         textColor: "white",
+        imagenUrl: formData.imagenUrl,
         link: formData.link || "/portal/catalogo",
         activo: true,
         orden: banners.length + 1,
@@ -134,6 +175,7 @@ const Banners = () => {
         title: formData.title,
         subtitle: formData.subtitle,
         bgColor: formData.bgColor,
+        imagenUrl: formData.imagenUrl,
         link: formData.link,
         fechaInicio: formData.fechaInicio,
         fechaFin: formData.fechaFin,
@@ -176,6 +218,7 @@ const Banners = () => {
       title: banner.title,
       subtitle: banner.subtitle,
       bgColor: banner.bgColor,
+      imagenUrl: banner.imagenUrl,
       link: banner.link,
       fechaInicio: banner.fechaInicio,
       fechaFin: banner.fechaFin,
@@ -270,13 +313,11 @@ const Banners = () => {
           <div className="bg-muted rounded-xl p-4 max-w-md mx-auto">
             <div className="flex gap-3 overflow-x-auto pb-2">
               {banners.filter(b => b.activo).sort((a, b) => a.orden - b.orden).map((banner) => (
-                <div
+                <BannerVisual
                   key={banner.id}
-                  className={`bg-gradient-to-r ${banner.bgColor} rounded-xl p-4 min-w-[180px] text-white flex-shrink-0`}
-                >
-                  <p className="text-xl font-bold">{banner.title}</p>
-                  <p className="text-sm opacity-90">{banner.subtitle}</p>
-                </div>
+                  banner={banner}
+                  className="rounded-xl p-4 min-w-[180px] flex-shrink-0"
+                />
               ))}
             </div>
           </div>
@@ -294,10 +335,7 @@ const Banners = () => {
                 </div>
 
                 {/* Banner Preview */}
-                <div className={`bg-gradient-to-r ${banner.bgColor} rounded-lg p-3 sm:min-w-[150px] text-white`}>
-                  <p className="font-bold text-sm">{banner.title}</p>
-                  <p className="text-xs opacity-90">{banner.subtitle}</p>
-                </div>
+                <BannerVisual banner={banner} className="rounded-lg p-3 sm:min-w-[150px] text-sm" />
 
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
@@ -398,7 +436,7 @@ const Banners = () => {
             </div>
 
             <div className="space-y-2">
-              <Label>Color de Fondo</Label>
+              <Label>Color de Fondo (respaldo si no hay imagen)</Label>
               <Select
                 value={formData.bgColor}
                 onValueChange={(value) => setFormData({ ...formData, bgColor: value })}
@@ -419,13 +457,50 @@ const Banners = () => {
               </Select>
             </div>
 
+            <div className="space-y-2">
+              <Label>Imagen de Diseño</Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageSelect}
+              />
+              {formData.imagenUrl ? (
+                <div className="relative">
+                  <img src={formData.imagenUrl} alt="Banner" className="w-full h-32 object-cover rounded-lg" />
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="icon"
+                    className="absolute top-2 right-2 h-7 w-7"
+                    onClick={() => setFormData({ ...formData, imagenUrl: null })}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={uploadingImage}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full border-2 border-dashed border-border rounded-xl p-4 text-center hover:border-primary transition-colors disabled:opacity-50"
+                >
+                  <span className="flex flex-col items-center gap-1 text-sm text-muted-foreground">
+                    <Upload className="h-6 w-6" />
+                    {uploadingImage ? "Subiendo..." : "Toca para subir una imagen (máx. 2 MB)"}
+                  </span>
+                </button>
+              )}
+            </div>
+
             {/* Preview */}
             <div className="space-y-2">
               <Label>Vista Previa</Label>
-              <div className={`bg-gradient-to-r ${formData.bgColor} rounded-xl p-4 text-white`}>
-                <p className="text-2xl font-bold">{formData.title || "Título"}</p>
-                <p className="text-sm opacity-90">{formData.subtitle || "Subtítulo"}</p>
-              </div>
+              <BannerVisual
+                banner={{ bgColor: formData.bgColor, imagenUrl: formData.imagenUrl, title: formData.title || "Título", subtitle: formData.subtitle || "Subtítulo" }}
+                className="rounded-xl p-4"
+              />
             </div>
 
             <div className="space-y-2">
@@ -492,7 +567,7 @@ const Banners = () => {
             </div>
 
             <div className="space-y-2">
-              <Label>Color de Fondo</Label>
+              <Label>Color de Fondo (respaldo si no hay imagen)</Label>
               <Select
                 value={formData.bgColor}
                 onValueChange={(value) => setFormData({ ...formData, bgColor: value })}
@@ -513,13 +588,50 @@ const Banners = () => {
               </Select>
             </div>
 
+            <div className="space-y-2">
+              <Label>Imagen de Diseño</Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageSelect}
+              />
+              {formData.imagenUrl ? (
+                <div className="relative">
+                  <img src={formData.imagenUrl} alt="Banner" className="w-full h-32 object-cover rounded-lg" />
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="icon"
+                    className="absolute top-2 right-2 h-7 w-7"
+                    onClick={() => setFormData({ ...formData, imagenUrl: null })}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={uploadingImage}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full border-2 border-dashed border-border rounded-xl p-4 text-center hover:border-primary transition-colors disabled:opacity-50"
+                >
+                  <span className="flex flex-col items-center gap-1 text-sm text-muted-foreground">
+                    <Upload className="h-6 w-6" />
+                    {uploadingImage ? "Subiendo..." : "Toca para subir una imagen (máx. 2 MB)"}
+                  </span>
+                </button>
+              )}
+            </div>
+
             {/* Preview */}
             <div className="space-y-2">
               <Label>Vista Previa</Label>
-              <div className={`bg-gradient-to-r ${formData.bgColor} rounded-xl p-4 text-white`}>
-                <p className="text-2xl font-bold">{formData.title || "Título"}</p>
-                <p className="text-sm opacity-90">{formData.subtitle || "Subtítulo"}</p>
-              </div>
+              <BannerVisual
+                banner={{ bgColor: formData.bgColor, imagenUrl: formData.imagenUrl, title: formData.title || "Título", subtitle: formData.subtitle || "Subtítulo" }}
+                className="rounded-xl p-4"
+              />
             </div>
 
             <div className="space-y-2">

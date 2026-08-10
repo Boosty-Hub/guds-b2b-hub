@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
+import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
 
 export interface Banner {
   id: string;
@@ -7,6 +8,7 @@ export interface Banner {
   subtitle: string;
   bgColor: string;
   textColor: string;
+  imagenUrl: string | null;
   link: string;
   activo: boolean;
   orden: number;
@@ -41,69 +43,6 @@ interface StoreConfigContextType {
   getActiveCategories: () => Categoria[];
 }
 
-const defaultBanners: Banner[] = [
-  { 
-    id: "BAN-001", 
-    title: "20% OFF", 
-    subtitle: "En aceites", 
-    bgColor: "from-yellow-500 to-orange-500", 
-    textColor: "white",
-    link: "/portal/catalogo?cat=Aceites",
-    activo: true,
-    orden: 1,
-    fechaInicio: "2024-01-01",
-    fechaFin: "2024-12-31"
-  },
-  { 
-    id: "BAN-002", 
-    title: "Envío Gratis", 
-    subtitle: "Compras +$500", 
-    bgColor: "from-blue-500 to-purple-500", 
-    textColor: "white",
-    link: "/portal/catalogo",
-    activo: true,
-    orden: 2,
-    fechaInicio: "2024-01-01",
-    fechaFin: "2024-12-31"
-  },
-  { 
-    id: "BAN-003", 
-    title: "2x1", 
-    subtitle: "Productos seleccionados", 
-    bgColor: "from-green-500 to-emerald-500", 
-    textColor: "white",
-    link: "/portal/catalogo?promo=2x1",
-    activo: true,
-    orden: 3,
-    fechaInicio: "2024-01-01",
-    fechaFin: "2024-12-31"
-  },
-  { 
-    id: "BAN-004", 
-    title: "Nuevos Productos", 
-    subtitle: "Descubre lo nuevo", 
-    bgColor: "from-pink-500 to-rose-500", 
-    textColor: "white",
-    link: "/portal/catalogo?nuevo=true",
-    activo: false,
-    orden: 4,
-    fechaInicio: "2024-01-01",
-    fechaFin: "2024-12-31"
-  },
-];
-
-const defaultCategorias: Categoria[] = [
-  { id: "CAT-001", nombre: "Aceites", icono: "🫒", color: "bg-yellow-500", activo: true, orden: 1, productosCount: 12 },
-  { id: "CAT-002", nombre: "Granos", icono: "🍚", color: "bg-amber-500", activo: true, orden: 2, productosCount: 18 },
-  { id: "CAT-003", nombre: "Harinas", icono: "🌾", color: "bg-orange-500", activo: true, orden: 3, productosCount: 8 },
-  { id: "CAT-004", nombre: "Enlatados", icono: "🥫", color: "bg-red-500", activo: true, orden: 4, productosCount: 24 },
-  { id: "CAT-005", nombre: "Lácteos", icono: "🥛", color: "bg-blue-500", activo: true, orden: 5, productosCount: 15 },
-  { id: "CAT-006", nombre: "Bebidas", icono: "🧃", color: "bg-green-500", activo: true, orden: 6, productosCount: 20 },
-  { id: "CAT-007", nombre: "Condimentos", icono: "🧂", color: "bg-purple-500", activo: true, orden: 7, productosCount: 10 },
-  { id: "CAT-008", nombre: "Pastas", icono: "🍝", color: "bg-pink-500", activo: true, orden: 8, productosCount: 6 },
-  { id: "CAT-009", nombre: "Limpieza", icono: "🧹", color: "bg-cyan-500", activo: false, orden: 9, productosCount: 14 },
-];
-
 const StoreConfigContext = createContext<StoreConfigContextType | undefined>(undefined);
 
 export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
@@ -132,6 +71,7 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
         subtitle: b.subtitulo || '',
         bgColor: b.color_fondo,
         textColor: b.color_texto || 'white',
+        imagenUrl: b.imagen_url,
         link: b.link || '',
         activo: b.activo,
         orden: b.orden,
@@ -161,6 +101,9 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
     setLoading(false);
   };
 
+  useRealtimeRefetch('banners', fetchData);
+  useRealtimeRefetch('categorias', fetchData);
+
   const addBanner = async (banner: Omit<Banner, "id">) => {
     const { error } = await supabase
       .from('banners')
@@ -169,6 +112,7 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
         subtitulo: banner.subtitle,
         color_fondo: banner.bgColor,
         color_texto: banner.textColor,
+        imagen_url: banner.imagenUrl,
         link: banner.link,
         activo: banner.activo,
         orden: banner.orden,
@@ -188,6 +132,7 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
     if (updates.subtitle !== undefined) dbUpdates.subtitulo = updates.subtitle;
     if (updates.bgColor !== undefined) dbUpdates.color_fondo = updates.bgColor;
     if (updates.textColor !== undefined) dbUpdates.color_texto = updates.textColor;
+    if (updates.imagenUrl !== undefined) dbUpdates.imagen_url = updates.imagenUrl;
     if (updates.link !== undefined) dbUpdates.link = updates.link;
     if (updates.activo !== undefined) dbUpdates.activo = updates.activo;
     if (updates.orden !== undefined) dbUpdates.orden = updates.orden;
