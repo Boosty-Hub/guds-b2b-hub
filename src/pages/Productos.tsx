@@ -46,7 +46,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Search, Package, Edit, Trash2, Loader2, MoreHorizontal, CheckSquare, XSquare, Tag, FolderOpen, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, ImagePlus, X } from "lucide-react";
+import { Plus, Search, Package, Edit, Trash2, Loader2, MoreHorizontal, CheckSquare, XSquare, Tag, FolderOpen, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownMenu,
@@ -58,9 +58,7 @@ import {
 import { supabase, Producto, Categoria, TipoEmpaque, ProductoEmpaque } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
-
-// Image upload helper
-const MAX_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
+import { ProductImagesInput } from "@/components/products/ProductImagesInput";
 
 interface ProductoConRelaciones extends Producto {
   categoria: Categoria | null;
@@ -117,14 +115,10 @@ const Productos = () => {
     costo: 0,
     stock_actual: 0,
     stock_minimo: 0,
-    imagen_url: "" as string,
     activo: true,
     destacado: false,
   });
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [imagenes, setImagenes] = useState<string[]>([]);
 
   useEffect(() => {
     fetchData();
@@ -155,57 +149,10 @@ const Productos = () => {
       costo: 0,
       stock_actual: 0,
       stock_minimo: 0,
-      imagen_url: "",
       activo: true,
       destacado: false,
     });
-    setImageFile(null);
-    setImagePreview(null);
-  };
-
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > MAX_IMAGE_SIZE) {
-      toast({ title: "Error", description: "La imagen no puede superar 2MB", variant: "destructive" });
-      return;
-    }
-
-    if (!file.type.startsWith('image/')) {
-      toast({ title: "Error", description: "Solo se permiten archivos de imagen", variant: "destructive" });
-      return;
-    }
-
-    setImageFile(file);
-    const reader = new FileReader();
-    reader.onload = (e) => setImagePreview(e.target?.result as string);
-    reader.readAsDataURL(file);
-  };
-
-  const uploadImage = async (file: File): Promise<string | null> => {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-    const filePath = `productos/${fileName}`;
-
-    const { error } = await supabase.storage
-      .from('imagenes')
-      .upload(filePath, file);
-
-    if (error) {
-      console.error('Error uploading image:', error);
-      return null;
-    }
-
-    const { data } = supabase.storage.from('imagenes').getPublicUrl(filePath);
-    return data.publicUrl;
-  };
-
-  const removeImage = () => {
-    setImageFile(null);
-    setImagePreview(null);
-    setFormData({ ...formData, imagen_url: "" });
-    if (imageInputRef.current) imageInputRef.current.value = "";
+    setImagenes([]);
   };
 
   const generateSKU = () => {
@@ -226,15 +173,6 @@ const Productos = () => {
 
     const sku = formData.sku || generateSKU();
 
-    // Upload image if selected
-    let imagenUrl = formData.imagen_url;
-    if (imageFile) {
-      setUploadingImage(true);
-      const uploadedUrl = await uploadImage(imageFile);
-      if (uploadedUrl) imagenUrl = uploadedUrl;
-      setUploadingImage(false);
-    }
-
     // Crear producto
     const { data: newProduct, error } = await supabase
       .from('productos')
@@ -248,7 +186,8 @@ const Productos = () => {
         costo: formData.costo || null,
         stock_actual: formData.stock_actual,
         stock_minimo: formData.stock_minimo,
-        imagen_url: imagenUrl || null,
+        imagen_url: imagenes[0] || null,
+        imagenes,
         activo: formData.activo,
         destacado: formData.destacado,
       })
@@ -281,15 +220,6 @@ const Productos = () => {
       return;
     }
 
-    // Upload image if selected
-    let imagenUrl = formData.imagen_url;
-    if (imageFile) {
-      setUploadingImage(true);
-      const uploadedUrl = await uploadImage(imageFile);
-      if (uploadedUrl) imagenUrl = uploadedUrl;
-      setUploadingImage(false);
-    }
-
     const { error } = await supabase
       .from('productos')
       .update({
@@ -302,7 +232,8 @@ const Productos = () => {
         costo: formData.costo || null,
         stock_actual: formData.stock_actual,
         stock_minimo: formData.stock_minimo,
-        imagen_url: imagenUrl || null,
+        imagen_url: imagenes[0] || null,
+        imagenes,
         activo: formData.activo,
         destacado: formData.destacado,
       })
@@ -479,12 +410,11 @@ const Productos = () => {
       costo: producto.costo || 0,
       stock_actual: producto.stock_actual,
       stock_minimo: producto.stock_minimo,
-      imagen_url: producto.imagen_url || "",
       activo: producto.activo,
       destacado: producto.destacado,
     });
-    setImagePreview(producto.imagen_url || null);
-    setImageFile(null);
+    const existentes = Array.isArray(producto.imagenes) ? (producto.imagenes as string[]) : [];
+    setImagenes(existentes.length > 0 ? existentes : (producto.imagen_url ? [producto.imagen_url] : []));
     setIsEditOpen(true);
   };
 
@@ -1206,46 +1136,8 @@ const Productos = () => {
           <div className="grid gap-4 py-4">
             {/* Image Upload */}
             <div className="space-y-2">
-              <Label>Imagen del Producto</Label>
-              <div className="flex items-center gap-4">
-                <div className="relative h-24 w-24 rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center overflow-hidden bg-muted/50">
-                  {imagePreview ? (
-                    <>
-                      <img src={imagePreview} alt="Preview" className="h-full w-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={removeImage}
-                        className="absolute top-1 right-1 h-5 w-5 rounded-full bg-destructive text-white flex items-center justify-center"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </>
-                  ) : (
-                    <Package className="h-10 w-10 text-muted-foreground" />
-                  )}
-                </div>
-                <div className="flex-1">
-                  <input
-                    ref={imageInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageSelect}
-                    className="hidden"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => imageInputRef.current?.click()}
-                    className="gap-2"
-                  >
-                    <ImagePlus className="h-4 w-4" />
-                    {imagePreview ? 'Cambiar Imagen' : 'Subir Imagen'}
-                  </Button>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    JPG, PNG o GIF. Máximo 2MB.
-                  </p>
-                </div>
-              </div>
+              <Label>Imágenes del Producto</Label>
+              <ProductImagesInput images={imagenes} onChange={setImagenes} />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -1395,46 +1287,8 @@ const Productos = () => {
           <div className="grid gap-4 py-4">
             {/* Image Upload */}
             <div className="space-y-2">
-              <Label>Imagen del Producto</Label>
-              <div className="flex items-center gap-4">
-                <div className="relative h-24 w-24 rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center overflow-hidden bg-muted/50">
-                  {imagePreview ? (
-                    <>
-                      <img src={imagePreview} alt="Preview" className="h-full w-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={removeImage}
-                        className="absolute top-1 right-1 h-5 w-5 rounded-full bg-destructive text-white flex items-center justify-center"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </>
-                  ) : (
-                    <Package className="h-10 w-10 text-muted-foreground" />
-                  )}
-                </div>
-                <div className="flex-1">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageSelect}
-                    className="hidden"
-                    id="edit-image-input"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => document.getElementById('edit-image-input')?.click()}
-                    className="gap-2"
-                  >
-                    <ImagePlus className="h-4 w-4" />
-                    {imagePreview ? 'Cambiar Imagen' : 'Subir Imagen'}
-                  </Button>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    JPG, PNG o GIF. Máximo 2MB.
-                  </p>
-                </div>
-              </div>
+              <Label>Imágenes del Producto</Label>
+              <ProductImagesInput images={imagenes} onChange={setImagenes} />
             </div>
 
             <div className="grid grid-cols-2 gap-4">

@@ -34,6 +34,7 @@ import { supabase, Producto, TipoEmpaque } from "@/lib/supabase";
 import { ProductImage } from "@/components/portal/ProductImage";
 import { notifyCartChanged } from "@/components/portal/PortalCartWidget";
 import { useToast } from "@/hooks/use-toast";
+import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
 
 interface ProductoConEmpaques extends Producto {
   producto_empaques?: {
@@ -133,6 +134,8 @@ const PortalCatalogo = () => {
     if (data) setProductos(data);
     setLoading(false);
   };
+
+  useRealtimeRefetch('productos', fetchProductos);
 
   const fetchCart = async () => {
     const { data } = await supabase
@@ -550,11 +553,12 @@ const PortalCatalogo = () => {
           {selectedProduct && (
             <div className="space-y-3 py-2">
               <div className="flex items-center gap-3 pb-3 border-b">
-                <ProductImage 
+                <ProductImage
                   imageUrl={selectedProduct.imagen_url}
+                  images={selectedProduct.imagenes}
                   emoji={selectedProduct.imagen_emoji}
                   alt={selectedProduct.nombre}
-                  size="md"
+                  size="xl"
                 />
                 <div>
                   <p className="font-medium">{selectedProduct.nombre}</p>
