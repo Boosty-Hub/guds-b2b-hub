@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
 
 interface RefreshResult {
   ok: boolean;
@@ -49,6 +50,8 @@ export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     cargarTasa();
   }, [cargarTasa]);
+
+  useRealtimeRefetch('configuracion', cargarTasa);
 
   // Dispara la actualización de la tasa desde el BCV (misma Edge Function que el cron).
   const refreshTasa = useCallback(async (): Promise<RefreshResult> => {
