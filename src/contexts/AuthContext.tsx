@@ -22,8 +22,11 @@ export interface RegistroCliente {
   email: string;
   telefono: string;
   direccion: string;
+  direccionEntrega: string | null;
   ciudad: string;
   rif: string;
+  contribuyenteEspecial: boolean;
+  rifDocumentoPath: string | null;
   tipoNegocio: string;
   estado: "pendiente" | "aprobado" | "rechazado";
   fechaRegistro: string;
@@ -151,12 +154,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         id: r.id,
         nombreNegocio: r.nombre_negocio,
         nombreContacto: r.nombre_contacto,
-        apellidoContacto: r.apellido_contacto,
+        apellidoContacto: r.apellido_contacto || '',
         email: r.email,
         telefono: r.telefono,
         direccion: r.direccion,
+        direccionEntrega: r.direccion_entrega,
         ciudad: r.ciudad,
         rif: r.rif,
+        contribuyenteEspecial: r.contribuyente_especial,
+        rifDocumentoPath: r.rif_documento_path,
         tipoNegocio: r.tipo_negocio,
         estado: r.estado,
         fechaRegistro: r.created_at?.split('T')[0] || '',
@@ -287,12 +293,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .insert({
         nombre_negocio: registro.nombreNegocio,
         nombre_contacto: registro.nombreContacto,
-        apellido_contacto: registro.apellidoContacto,
+        apellido_contacto: registro.apellidoContacto || null,
         email: registro.email,
         telefono: registro.telefono,
         direccion: registro.direccion,
+        direccion_entrega: registro.direccionEntrega,
         ciudad: registro.ciudad,
         rif: registro.rif,
+        contribuyente_especial: registro.contribuyenteEspecial,
+        rif_documento_path: registro.rifDocumentoPath,
         tipo_negocio: registro.tipoNegocio,
         estado: 'pendiente',
       });

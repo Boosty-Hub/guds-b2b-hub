@@ -12,8 +12,72 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
+      bancos: {
+        Row: {
+          activo: boolean
+          created_at: string | null
+          documento: string | null
+          id: string
+          metodo_pago: Database["public"]["Enums"]["pago_metodo"]
+          moneda: string
+          nombre: string
+          numero_cuenta: string | null
+          titular: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          activo?: boolean
+          created_at?: string | null
+          documento?: string | null
+          id?: string
+          metodo_pago: Database["public"]["Enums"]["pago_metodo"]
+          moneda?: string
+          nombre: string
+          numero_cuenta?: string | null
+          titular?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          activo?: boolean
+          created_at?: string | null
+          documento?: string | null
+          id?: string
+          metodo_pago?: Database["public"]["Enums"]["pago_metodo"]
+          moneda?: string
+          nombre?: string
+          numero_cuenta?: string | null
+          titular?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       banners: {
         Row: {
           activo: boolean | null
@@ -23,6 +87,7 @@ export type Database = {
           fecha_fin: string | null
           fecha_inicio: string | null
           id: string
+          imagen_url: string | null
           link: string | null
           orden: number | null
           subtitulo: string | null
@@ -37,6 +102,7 @@ export type Database = {
           fecha_fin?: string | null
           fecha_inicio?: string | null
           id?: string
+          imagen_url?: string | null
           link?: string | null
           orden?: number | null
           subtitulo?: string | null
@@ -51,6 +117,7 @@ export type Database = {
           fecha_fin?: string | null
           fecha_inicio?: string | null
           id?: string
+          imagen_url?: string | null
           link?: string | null
           orden?: number | null
           subtitulo?: string | null
@@ -152,10 +219,12 @@ export type Database = {
           activo: boolean | null
           ciudad: string
           codigo: string
+          contribuyente_especial: boolean
           created_at: string | null
           credito_utilizado: number | null
           dias_credito: number | null
           direccion: string
+          direccion_entrega: string | null
           email: string
           id: string
           latitud: number | null
@@ -174,10 +243,12 @@ export type Database = {
           activo?: boolean | null
           ciudad: string
           codigo: string
+          contribuyente_especial?: boolean
           created_at?: string | null
           credito_utilizado?: number | null
           dias_credito?: number | null
           direccion: string
+          direccion_entrega?: string | null
           email: string
           id?: string
           latitud?: number | null
@@ -196,10 +267,12 @@ export type Database = {
           activo?: boolean | null
           ciudad?: string
           codigo?: string
+          contribuyente_especial?: boolean
           created_at?: string | null
           credito_utilizado?: number | null
           dias_credito?: number | null
           direccion?: string
+          direccion_entrega?: string | null
           email?: string
           id?: string
           latitud?: number | null
@@ -794,6 +867,7 @@ export type Database = {
         Row: {
           ciudad_entrega: string | null
           cliente_id: string
+          comprobante_url: string | null
           created_at: string | null
           descuento: number | null
           direccion_entrega: string | null
@@ -807,6 +881,8 @@ export type Database = {
           notas: string | null
           numero: string
           pagado: boolean | null
+          referencia_pago: string | null
+          stock_descontado: boolean
           subtotal: number
           total: number
           updated_at: string | null
@@ -816,6 +892,7 @@ export type Database = {
         Insert: {
           ciudad_entrega?: string | null
           cliente_id: string
+          comprobante_url?: string | null
           created_at?: string | null
           descuento?: number | null
           direccion_entrega?: string | null
@@ -829,6 +906,8 @@ export type Database = {
           notas?: string | null
           numero: string
           pagado?: boolean | null
+          referencia_pago?: string | null
+          stock_descontado?: boolean
           subtotal?: number
           total?: number
           updated_at?: string | null
@@ -838,6 +917,7 @@ export type Database = {
         Update: {
           ciudad_entrega?: string | null
           cliente_id?: string
+          comprobante_url?: string | null
           created_at?: string | null
           descuento?: number | null
           direccion_entrega?: string | null
@@ -851,6 +931,8 @@ export type Database = {
           notas?: string | null
           numero?: string
           pagado?: boolean | null
+          referencia_pago?: string | null
+          stock_descontado?: boolean
           subtotal?: number
           total?: number
           updated_at?: string | null
@@ -884,6 +966,7 @@ export type Database = {
       pagos: {
         Row: {
           banco: string | null
+          banco_id: string | null
           cliente_id: string
           comprobante_url: string | null
           created_at: string | null
@@ -891,16 +974,20 @@ export type Database = {
           fecha_verificacion: string | null
           id: string
           metodo: Database["public"]["Enums"]["pago_metodo"]
+          moneda: string
           monto: number
+          monto_moneda: number | null
           notas: string | null
           numero: string
           orden_id: string | null
           referencia: string | null
+          tasa_cambio: number | null
           updated_at: string | null
           verificado_por: string | null
         }
         Insert: {
           banco?: string | null
+          banco_id?: string | null
           cliente_id: string
           comprobante_url?: string | null
           created_at?: string | null
@@ -908,16 +995,20 @@ export type Database = {
           fecha_verificacion?: string | null
           id?: string
           metodo: Database["public"]["Enums"]["pago_metodo"]
+          moneda?: string
           monto: number
+          monto_moneda?: number | null
           notas?: string | null
           numero: string
           orden_id?: string | null
           referencia?: string | null
+          tasa_cambio?: number | null
           updated_at?: string | null
           verificado_por?: string | null
         }
         Update: {
           banco?: string | null
+          banco_id?: string | null
           cliente_id?: string
           comprobante_url?: string | null
           created_at?: string | null
@@ -925,15 +1016,25 @@ export type Database = {
           fecha_verificacion?: string | null
           id?: string
           metodo?: Database["public"]["Enums"]["pago_metodo"]
+          moneda?: string
           monto?: number
+          monto_moneda?: number | null
           notas?: string | null
           numero?: string
           orden_id?: string | null
           referencia?: string | null
+          tasa_cambio?: number | null
           updated_at?: string | null
           verificado_por?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "pagos_banco_id_fkey"
+            columns: ["banco_id"]
+            isOneToOne: false
+            referencedRelation: "bancos"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "pagos_cliente_id_fkey"
             columns: ["cliente_id"]
@@ -1101,6 +1202,7 @@ export type Database = {
           id: string
           imagen_emoji: string | null
           imagen_url: string | null
+          imagenes: Json
           nombre: string
           porcentaje_descuento: number | null
           precio_base: number
@@ -1124,6 +1226,7 @@ export type Database = {
           id?: string
           imagen_emoji?: string | null
           imagen_url?: string | null
+          imagenes?: Json
           nombre: string
           porcentaje_descuento?: number | null
           precio_base: number
@@ -1147,6 +1250,7 @@ export type Database = {
           id?: string
           imagen_emoji?: string | null
           imagen_url?: string | null
+          imagenes?: Json
           nombre?: string
           porcentaje_descuento?: number | null
           precio_base?: number
@@ -1178,11 +1282,13 @@ export type Database = {
       }
       registros_clientes: {
         Row: {
-          apellido_contacto: string
+          apellido_contacto: string | null
           ciudad: string
           cliente_creado_id: string | null
+          contribuyente_especial: boolean
           created_at: string | null
           direccion: string
+          direccion_entrega: string | null
           email: string
           estado: Database["public"]["Enums"]["registro_estado"] | null
           fecha_revision: string | null
@@ -1192,16 +1298,19 @@ export type Database = {
           notas: string | null
           revisado_por: string | null
           rif: string
+          rif_documento_path: string | null
           telefono: string
           tipo_negocio: string
           updated_at: string | null
         }
         Insert: {
-          apellido_contacto: string
+          apellido_contacto?: string | null
           ciudad: string
           cliente_creado_id?: string | null
+          contribuyente_especial?: boolean
           created_at?: string | null
           direccion: string
+          direccion_entrega?: string | null
           email: string
           estado?: Database["public"]["Enums"]["registro_estado"] | null
           fecha_revision?: string | null
@@ -1211,16 +1320,19 @@ export type Database = {
           notas?: string | null
           revisado_por?: string | null
           rif: string
+          rif_documento_path?: string | null
           telefono: string
           tipo_negocio: string
           updated_at?: string | null
         }
         Update: {
-          apellido_contacto?: string
+          apellido_contacto?: string | null
           ciudad?: string
           cliente_creado_id?: string | null
+          contribuyente_especial?: boolean
           created_at?: string | null
           direccion?: string
+          direccion_entrega?: string | null
           email?: string
           estado?: Database["public"]["Enums"]["registro_estado"] | null
           fecha_revision?: string | null
@@ -1230,6 +1342,7 @@ export type Database = {
           notas?: string | null
           revisado_por?: string | null
           rif?: string
+          rif_documento_path?: string | null
           telefono?: string
           tipo_negocio?: string
           updated_at?: string | null
@@ -1277,6 +1390,30 @@ export type Database = {
         }
         Relationships: []
       }
+      tasa_bcv: {
+        Row: {
+          created_at: string
+          fecha: string
+          fuente: string | null
+          id: string
+          tasa: number
+        }
+        Insert: {
+          created_at?: string
+          fecha?: string
+          fuente?: string | null
+          id?: string
+          tasa: number
+        }
+        Update: {
+          created_at?: string
+          fecha?: string
+          fuente?: string | null
+          id?: string
+          tasa?: number
+        }
+        Relationships: []
+      }
       tipos_empaque: {
         Row: {
           activo: boolean | null
@@ -1313,7 +1450,7 @@ export type Database = {
       usuarios: {
         Row: {
           activo: boolean | null
-          apellido: string
+          apellido: string | null
           auth_id: string | null
           avatar_url: string | null
           cliente_id: string | null
@@ -1328,7 +1465,7 @@ export type Database = {
         }
         Insert: {
           activo?: boolean | null
-          apellido: string
+          apellido?: string | null
           auth_id?: string | null
           avatar_url?: string | null
           cliente_id?: string | null
@@ -1343,7 +1480,7 @@ export type Database = {
         }
         Update: {
           activo?: boolean | null
-          apellido?: string
+          apellido?: string | null
           auth_id?: string | null
           avatar_url?: string | null
           cliente_id?: string | null
@@ -1378,33 +1515,209 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      actualizar_estado_entrega: {
+        Args: {
+          p_entrega_id: string
+          p_estado: Database["public"]["Enums"]["entrega_estado"]
+          p_firma_url?: string
+          p_foto_url?: string
+          p_motivo?: string
+          p_notas?: string
+          p_receptor?: string
+        }
+        Returns: undefined
+      }
       aprobar_registro_cliente: {
         Args: {
-          p_admin_id: string
+          p_admin_id?: string
           p_dias_credito?: number
           p_limite_credito?: number
           p_lista_precios_id?: string
           p_registro_id: string
           p_vendedor_id?: string
         }
+        Returns: {
+          cliente_id: string
+          email: string
+          password_temporal: string
+        }[]
+      }
+      asignar_entrega: {
+        Args: {
+          p_orden_id: string
+          p_prioridad?: string
+          p_repartidor_id: string
+        }
         Returns: string
       }
+      cerrar_mi_cuenta: { Args: never; Returns: undefined }
+      crear_auth_user: {
+        Args: { p_email: string; p_password: string }
+        Returns: string
+      }
+      crear_orden_admin: {
+        Args: {
+          p_cliente_id: string
+          p_items: Json
+          p_metodo_pago: Database["public"]["Enums"]["pago_metodo"]
+          p_notas: string
+        }
+        Returns: {
+          numero: string
+          orden_id: string
+          total: number
+        }[]
+      }
+      crear_orden_desde_carrito: {
+        Args: {
+          p_comprobante_url?: string
+          p_cupon_id?: string
+          p_metodo_pago: Database["public"]["Enums"]["pago_metodo"]
+          p_notas?: string
+          p_referencia?: string
+        }
+        Returns: {
+          numero: string
+          orden_id: string
+          total: number
+        }[]
+      }
+      crear_orden_vendedor: {
+        Args: {
+          p_cliente_id: string
+          p_items: Json
+          p_metodo_pago: Database["public"]["Enums"]["pago_metodo"]
+          p_notas: string
+        }
+        Returns: {
+          numero: string
+          orden_id: string
+          total: number
+        }[]
+      }
+      crear_usuario_admin: {
+        Args: {
+          p_apellido: string
+          p_cliente_id?: string
+          p_email: string
+          p_nombre: string
+          p_password?: string
+          p_role: Database["public"]["Enums"]["user_role"]
+          p_telefono?: string
+        }
+        Returns: {
+          password_temporal: string
+          usuario_id: string
+        }[]
+      }
+      es_admin_total: { Args: never; Returns: boolean }
+      es_vendedor_de: { Args: { p_cliente_id: string }; Returns: boolean }
+      fmt_usd: { Args: { n: number }; Returns: string }
       generar_codigo_cliente: { Args: never; Returns: string }
       generar_numero_orden: { Args: never; Returns: string }
       generar_numero_pago: { Args: never; Returns: string }
+      generar_password_temporal: { Args: never; Returns: string }
+      is_admin: { Args: never; Returns: boolean }
+      liquidar_orden: { Args: { p_orden_id: string }; Returns: undefined }
+      mis_clientes_reparto: { Args: never; Returns: string[] }
+      mis_clientes_vendedor: { Args: never; Returns: string[] }
+      mis_ordenes_reparto: { Args: never; Returns: string[] }
+      mis_permisos: { Args: never; Returns: Json }
+      notif_admins: {
+        Args: {
+          p_link: string
+          p_mensaje: string
+          p_tipo: string
+          p_titulo: string
+        }
+        Returns: undefined
+      }
+      notif_cliente: {
+        Args: {
+          p_cliente_id: string
+          p_link: string
+          p_mensaje: string
+          p_tipo: string
+          p_titulo: string
+        }
+        Returns: undefined
+      }
+      notif_crear: {
+        Args: {
+          p_link: string
+          p_mensaje: string
+          p_tipo: string
+          p_titulo: string
+          p_usuario_id: string
+        }
+        Returns: undefined
+      }
+      notif_vendedor: {
+        Args: {
+          p_cliente_id: string
+          p_link: string
+          p_mensaje: string
+          p_tipo: string
+          p_titulo: string
+        }
+        Returns: undefined
+      }
       obtener_precio_producto: {
         Args: { p_cliente_id: string; p_producto_id: string }
         Returns: number
       }
+      precio_efectivo: {
+        Args: {
+          p_cliente_id?: string
+          p_producto_id: string
+          p_tipo_empaque_id?: string
+        }
+        Returns: number
+      }
+      puede: { Args: { p_accion: string; p_codigo: string }; Returns: boolean }
+      recalcular_credito: { Args: { p_cliente_id: string }; Returns: undefined }
       rechazar_registro_cliente: {
         Args: { p_admin_id: string; p_notas?: string; p_registro_id: string }
         Returns: boolean
+      }
+      registrar_pago: {
+        Args: {
+          p_banco_id: string
+          p_cliente_id: string
+          p_comprobante_url?: string
+          p_metodo: Database["public"]["Enums"]["pago_metodo"]
+          p_moneda?: string
+          p_monto_moneda: number
+          p_orden_id: string
+          p_referencia?: string
+          p_tasa_cambio?: number
+        }
+        Returns: string
+      }
+      registrar_pago_vendedor: {
+        Args: {
+          p_cliente_id: string
+          p_metodo: Database["public"]["Enums"]["pago_metodo"]
+          p_monto: number
+          p_orden_id: string
+          p_referencia?: string
+        }
+        Returns: string
+      }
+      upsert_tasa_bcv: {
+        Args: { p_fuente?: string; p_tasa: number }
+        Returns: Json
+      }
+      verificar_pago: {
+        Args: { p_aprobar: boolean; p_notas?: string; p_pago_id: string }
+        Returns: undefined
       }
     }
     Enums: {
       entrega_estado: "asignada" | "en_camino" | "entregada" | "fallida"
       orden_estado:
         | "pendiente"
+        | "confirmado"
         | "procesando"
         | "enviado"
         | "completado"
@@ -1538,11 +1851,15 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       entrega_estado: ["asignada", "en_camino", "entregada", "fallida"],
       orden_estado: [
         "pendiente",
+        "confirmado",
         "procesando",
         "enviado",
         "completado",

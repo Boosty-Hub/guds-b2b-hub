@@ -27,6 +27,7 @@ export interface Producto {
   precio_base: number;
   costo: number | null;
   imagen_url: string | null;
+  imagenes: string[];
   imagen_emoji: string | null;
   stock_actual: number;
   stock_minimo: number;
@@ -47,9 +48,11 @@ export interface Cliente {
   nombre_negocio: string;
   tipo_negocio: string;
   rif: string;
+  contribuyente_especial: boolean;
   email: string;
   telefono: string | null;
   direccion: string;
+  direccion_entrega: string | null;
   ciudad: string;
   limite_credito: number;
   credito_utilizado: number;
@@ -65,11 +68,14 @@ export interface RegistroCliente {
   nombre_negocio: string;
   tipo_negocio: string;
   rif: string;
+  contribuyente_especial: boolean;
+  rif_documento_path: string | null;
   nombre_contacto: string;
-  apellido_contacto: string;
+  apellido_contacto: string | null;
   email: string;
   telefono: string;
   direccion: string;
+  direccion_entrega: string | null;
   ciudad: string;
   estado: 'pendiente' | 'aprobado' | 'rechazado';
   notas: string | null;

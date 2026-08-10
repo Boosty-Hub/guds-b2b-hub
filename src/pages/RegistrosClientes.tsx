@@ -56,6 +56,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, RegistroCliente } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
 
 const statusConfig = {
   pendiente: { label: "Pendiente", color: "bg-yellow-500", icon: Clock },
@@ -131,6 +132,15 @@ const RegistrosClientes = () => {
   const openViewDialog = (registro: RegistroCliente) => {
     setSelectedRegistro(registro);
     setIsViewOpen(true);
+  };
+
+  const handleViewDocumento = async (path: string) => {
+    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 120);
+    if (error || !data?.signedUrl) {
+      toast({ title: "No se pudo abrir el documento", description: error?.message, variant: "destructive" });
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -246,12 +256,15 @@ const RegistrosClientes = () => {
                     <TableCell>
                       <div>
                         <p className="font-medium">{registro.nombreNegocio}</p>
-                        <p className="text-sm text-muted-foreground">{registro.rif}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {registro.rif}
+                          {registro.contribuyenteEspecial && " · Contrib. especial"}
+                        </p>
                       </div>
                     </TableCell>
                     <TableCell>
                       <div>
-                        <p className="font-medium">{registro.nombreContacto} {registro.apellidoContacto}</p>
+                        <p className="font-medium">{registro.nombreContacto}</p>
                         <p className="text-sm text-muted-foreground">{registro.email}</p>
                       </div>
                     </TableCell>
@@ -338,7 +351,7 @@ const RegistrosClientes = () => {
                 </h4>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <p className="text-muted-foreground">Nombre</p>
+                    <p className="text-muted-foreground">Razón Social</p>
                     <p className="font-medium">{selectedRegistro.nombreNegocio}</p>
                   </div>
                   <div>
@@ -348,6 +361,26 @@ const RegistrosClientes = () => {
                   <div>
                     <p className="text-muted-foreground">RIF</p>
                     <p className="font-medium">{selectedRegistro.rif}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Contribuyente especial</p>
+                    <p className="font-medium">{selectedRegistro.contribuyenteEspecial ? "Sí" : "No"}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-muted-foreground mb-1">Documento RIF</p>
+                    {selectedRegistro.rifDocumentoPath ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleViewDocumento(selectedRegistro.rifDocumentoPath!)}
+                      >
+                        <Eye className="h-4 w-4 mr-2" />
+                        Ver documento
+                      </Button>
+                    ) : (
+                      <p className="font-medium text-muted-foreground">No adjuntado</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -360,8 +393,8 @@ const RegistrosClientes = () => {
                 </h4>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <p className="text-muted-foreground">Nombre</p>
-                    <p className="font-medium">{selectedRegistro.nombreContacto} {selectedRegistro.apellidoContacto}</p>
+                    <p className="text-muted-foreground">Persona de Contacto</p>
+                    <p className="font-medium">{selectedRegistro.nombreContacto}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Teléfono</p>
@@ -380,9 +413,19 @@ const RegistrosClientes = () => {
                   <MapPin className="h-4 w-4" />
                   Dirección
                 </h4>
-                <div className="text-sm">
-                  <p className="font-medium">{selectedRegistro.direccion}</p>
-                  <p className="text-muted-foreground">{selectedRegistro.ciudad}</p>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Fiscal</p>
+                    <p className="font-medium">{selectedRegistro.direccion}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Entrega</p>
+                    <p className="font-medium">{selectedRegistro.direccionEntrega || "Misma que la fiscal"}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-muted-foreground">Ciudad</p>
+                    <p className="font-medium">{selectedRegistro.ciudad}</p>
+                  </div>
                 </div>
               </div>
 
