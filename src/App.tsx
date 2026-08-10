@@ -71,6 +71,7 @@ import VendedorClientes from "./pages/vendedor/VendedorClientes";
 import VendedorPedidos from "./pages/vendedor/VendedorPedidos";
 import VendedorPagos from "./pages/vendedor/VendedorPagos";
 import VendedorMetas from "./pages/vendedor/VendedorMetas";
+import VendedorInventario from "./pages/vendedor/VendedorInventario";
 
 // Admin Delivery
 import Delivery from "./pages/Delivery";
@@ -173,7 +174,8 @@ const App = () => (
                 <Route path="/vendedor/pedidos" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorPedidos /></ProtectedRoute>} />
                 <Route path="/vendedor/pagos" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorPagos /></ProtectedRoute>} />
                 <Route path="/vendedor/metas" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorMetas /></ProtectedRoute>} />
-          
+                <Route path="/vendedor/inventario" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorInventario /></ProtectedRoute>} />
+
                 {/* Portal de Delivery - Solo delivery */}
                 <Route path="/delivery" element={<ProtectedRoute allowedRoles={["delivery"]}><DeliveryDashboard /></ProtectedRoute>} />
                 <Route path="/delivery/entregas" element={<ProtectedRoute allowedRoles={["delivery"]}><DeliveryEntregas /></ProtectedRoute>} />

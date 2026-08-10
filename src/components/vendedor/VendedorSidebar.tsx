@@ -1,12 +1,13 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { 
-  LayoutDashboard, 
-  Users, 
-  ShoppingCart, 
-  CreditCard, 
-  Target, 
+import {
+  LayoutDashboard,
+  Users,
+  ShoppingCart,
+  CreditCard,
+  Target,
   LogOut,
-  TrendingUp
+  TrendingUp,
+  Warehouse
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
@@ -18,6 +19,7 @@ const navItems = [
   { icon: ShoppingCart, label: "Pedidos", path: "/vendedor/pedidos" },
   { icon: CreditCard, label: "Pagos", path: "/vendedor/pagos" },
   { icon: Target, label: "Mis Metas", path: "/vendedor/metas" },
+  { icon: Warehouse, label: "Inventario", path: "/vendedor/inventario" },
 ];
 
 export const VendedorSidebar = () => {

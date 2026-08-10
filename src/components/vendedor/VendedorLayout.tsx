@@ -1,15 +1,16 @@
 import { ReactNode, useState } from "react";
 import { VendedorSidebar } from "./VendedorSidebar";
 import { NavLink, useNavigate } from "react-router-dom";
-import { 
-  Bell, 
-  Menu, 
-  X, 
-  LayoutDashboard, 
-  Users, 
-  ShoppingCart, 
-  CreditCard, 
+import {
+  Bell,
+  Menu,
+  X,
+  LayoutDashboard,
+  Users,
+  ShoppingCart,
+  CreditCard,
   Target,
+  Warehouse,
   LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,12 +31,19 @@ interface VendedorLayoutProps {
   title: string;
 }
 
+// Barra inferior: 5 items ya llenan el ancho en móvil (justify-around),
+// así que Inventario no entra ahí — solo en el menú hamburguesa (sheetNavItems).
 const mobileNavItems = [
   { icon: LayoutDashboard, label: "Inicio", path: "/vendedor" },
   { icon: Users, label: "Clientes", path: "/vendedor/clientes" },
   { icon: ShoppingCart, label: "Pedidos", path: "/vendedor/pedidos" },
   { icon: CreditCard, label: "Pagos", path: "/vendedor/pagos" },
   { icon: Target, label: "Metas", path: "/vendedor/metas" },
+];
+
+const sheetNavItems = [
+  ...mobileNavItems,
+  { icon: Warehouse, label: "Inventario", path: "/vendedor/inventario" },
 ];
 
 export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
@@ -150,7 +158,7 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
 
           {/* Navigation */}
           <nav className="p-4 space-y-1">
-            {mobileNavItems.map((item) => (
+            {sheetNavItems.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}
