@@ -22,6 +22,7 @@ import { Logo } from "@/components/Logo";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
 
 interface DeliveryLayoutProps {
   children: ReactNode;
@@ -63,7 +64,10 @@ export const DeliveryLayout = ({ children, title }: DeliveryLayoutProps) => {
             <Menu className="h-6 w-6" />
           </button>
           <h1 className="font-semibold">{title}</h1>
-          <NotificationsDropdown variant="header" />
+          <div className="flex items-center gap-2">
+            <BoostySupportSlot media="(max-width: 767.98px)" />
+            <NotificationsDropdown variant="header" />
+          </div>
         </div>
       </header>
 
@@ -73,6 +77,7 @@ export const DeliveryLayout = ({ children, title }: DeliveryLayoutProps) => {
           <h1 className="text-xl font-semibold text-foreground">{title}</h1>
           <div className="flex items-center gap-4">
             <NotificationsDropdown />
+            <BoostySupportSlot media="(min-width: 768px)" />
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 rounded-full bg-amber-500/20 flex items-center justify-center">
                 <span className="text-sm font-semibold text-amber-500">

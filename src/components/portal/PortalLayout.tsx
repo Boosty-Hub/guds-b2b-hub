@@ -7,6 +7,7 @@ import { TasaBcv } from "@/components/TasaBcv";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
 
 interface PortalLayoutProps {
   children: ReactNode;
@@ -34,6 +35,7 @@ export const PortalLayout = ({ children, title }: PortalLayoutProps) => {
             <TasaBcv showButton={false} />
             <CurrencySwitch />
             <NotificationsDropdown />
+            <BoostySupportSlot />
             <div className="flex items-center gap-3">
               <Avatar className="h-9 w-9">
                 <AvatarImage src={user?.avatar} alt={user?.nombre || "Usuario"} />

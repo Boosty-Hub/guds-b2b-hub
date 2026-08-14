@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { TasaBcv } from "@/components/TasaBcv";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
+import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
 
 interface HeaderProps {
   title: string;
@@ -52,6 +53,9 @@ export function Header({ title }: HeaderProps) {
 
         {/* Notifications */}
         <NotificationsDropdown />
+
+        {/* Boosty support */}
+        <BoostySupportSlot media="(min-width: 1024px)" />
 
         {/* User menu */}
         <DropdownMenu>

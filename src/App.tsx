@@ -10,6 +10,7 @@ import { PermissionsProvider } from "@/contexts/PermissionsContext";
 import { NotificationsProvider } from "@/contexts/NotificationsContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { BoostySupport } from "@/components/support/BoostySupport";
 
 // Public Pages
 import Landing from "./pages/Landing";
@@ -107,6 +108,7 @@ const App = () => (
           <TooltipProvider>
             <Toaster />
             <Sonner />
+            <BoostySupport />
             <BrowserRouter>
               <ErrorBoundary>
               <Routes>

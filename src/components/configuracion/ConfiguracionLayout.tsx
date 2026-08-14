@@ -6,6 +6,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { NavLink } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
+import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
 
 interface ConfiguracionLayoutProps {
   children: ReactNode;
@@ -45,8 +46,11 @@ export const ConfiguracionLayout = ({ children, title, description }: Configurac
             <Menu className="h-6 w-6" />
           </button>
           <h1 className="font-semibold truncate">{title}</h1>
-          <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center">
-            <span className="text-sm font-semibold">{getInitials()}</span>
+          <div className="flex items-center gap-2">
+            <BoostySupportSlot media="(max-width: 1023.98px)" />
+            <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center">
+              <span className="text-sm font-semibold">{getInitials()}</span>
+            </div>
           </div>
         </header>
 
@@ -60,6 +64,7 @@ export const ConfiguracionLayout = ({ children, title, description }: Configurac
           </div>
           <div className="flex items-center gap-4">
             <NotificationsDropdown />
+            <BoostySupportSlot media="(min-width: 1024px)" />
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 rounded-full bg-primary/20 flex items-center justify-center">
                 <span className="text-sm font-semibold text-primary">{getInitials()}</span>

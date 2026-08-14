@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { CurrencySwitch } from "@/components/CurrencySwitch";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { PortalCartWidget } from "@/components/portal/PortalCartWidget";
+import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
 
 interface PortalMobileLayoutProps {
   children: ReactNode;
@@ -92,6 +93,7 @@ export const PortalMobileLayout = ({
                 <>
                   <CurrencySwitch variant="header" />
                   <NotificationsDropdown variant="header" />
+                  <BoostySupportSlot />
                   <Link to="/portal/cuenta">
                     <Avatar className="h-9 w-9 border-2 border-white/30">
                       <AvatarImage src={user?.avatar} alt={user?.nombre || "Usuario"} />
@@ -109,6 +111,7 @@ export const PortalMobileLayout = ({
                   >
                     {currency === "USD" ? "$ USD" : "Bs."}
                   </button>
+                  <BoostySupportSlot />
                   <NotificationsDropdown variant="header" />
                 </>
               )}

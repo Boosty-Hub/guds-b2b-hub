@@ -25,6 +25,7 @@ import { Logo } from "@/components/Logo";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
 
 interface VendedorLayoutProps {
   children: ReactNode;
@@ -76,6 +77,7 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
           <h1 className="font-semibold">{title}</h1>
           <div className="flex items-center gap-2">
             <CurrencySwitch variant="header" />
+            <BoostySupportSlot media="(max-width: 767.98px)" />
             <NotificationsDropdown variant="header" />
           </div>
         </div>
@@ -88,6 +90,7 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
           <div className="flex items-center gap-4">
             <CurrencySwitch />
             <NotificationsDropdown />
+            <BoostySupportSlot media="(min-width: 768px)" />
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 rounded-full bg-emerald-500/20 flex items-center justify-center">
                 <span className="text-sm font-semibold text-emerald-500">

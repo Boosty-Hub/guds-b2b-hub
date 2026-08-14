@@ -21,6 +21,7 @@ import {
 import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -63,10 +64,13 @@ export function MainLayout({ children, title }: MainLayoutProps) {
             <Menu className="h-6 w-6" />
           </button>
           <h1 className="font-semibold truncate">{title}</h1>
-          <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center">
-            <span className="text-sm font-semibold">
-              {user ? getInitials(user.nombre, user.apellido) : 'U'}
-            </span>
+          <div className="flex items-center gap-2">
+            <BoostySupportSlot media="(max-width: 1023.98px)" />
+            <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center">
+              <span className="text-sm font-semibold">
+                {user ? getInitials(user.nombre, user.apellido) : 'U'}
+              </span>
+            </div>
           </div>
         </div>
       </header>
