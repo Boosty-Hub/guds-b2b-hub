@@ -15,7 +15,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Search, Loader2, HandCoins, Wallet, Users, FilePlus } from "lucide-react";
+import { Search, Loader2, HandCoins, Wallet, Users, FilePlus, Eye, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
@@ -31,6 +31,7 @@ const metodoLabel: Record<string, string> = {
 interface Deudor { cliente_id: string; nombre: string; docs: number; saldo: number; }
 interface Cobro { id: string; numero: string; monto: number; monto_moneda: number; moneda: string; created_at: string; cliente?: { nombre_negocio: string } | null; banco?: { nombre: string } | null; }
 interface CuentaManual { id: string; numero: string; cliente_id: string; concepto: string; monto: number; monto_pagado: number; estado_pago: string; fecha: string; }
+interface PagoPendiente { id: string; numero: string; monto: number; monto_moneda: number | null; moneda: string; metodo: string; referencia: string | null; comprobante_url: string | null; banco_id: string | null; created_at: string; cliente?: { nombre_negocio: string } | null; orden?: { numero: string } | null; }
 
 const CuentasPorCobrar = () => {
   const { formatPrice, exchangeRate } = useCurrency();
@@ -40,8 +41,14 @@ const CuentasPorCobrar = () => {
   const [bancos, setBancos] = useState<Banco[]>([]);
   const [cobros, setCobros] = useState<Cobro[]>([]);
   const [cuentas, setCuentas] = useState<CuentaManual[]>([]);
+  const [pendientes, setPendientes] = useState<PagoPendiente[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+
+  // Verificación de pagos pendientes
+  const [verif, setVerif] = useState<PagoPendiente | null>(null);
+  const [verifForm, setVerifForm] = useState({ banco_id: "", notas: "" });
+  const [verifSaving, setVerifSaving] = useState(false);
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -53,18 +60,20 @@ const CuentasPorCobrar = () => {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [{ data: ords }, { data: clis }, { data: bcs }, { data: cbs }, { data: cxc }] = await Promise.all([
+    const [{ data: ords }, { data: clis }, { data: bcs }, { data: cbs }, { data: cxc }, { data: pend }] = await Promise.all([
       supabase.from("ordenes").select("id, numero, cliente_id, total, monto_pagado, estado_pago, fecha_pedido, created_at").neq("estado", "cancelado"),
       supabase.from("clientes").select("id, nombre_negocio").order("nombre_negocio"),
       supabase.from("bancos").select("id, nombre, moneda, metodo_pago, metodos").eq("activo", true).order("nombre"),
-      supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, cliente:clientes(nombre_negocio), banco:bancos(nombre)").order("created_at", { ascending: false }).limit(5000),
+      supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("created_at", { ascending: false }).limit(5000),
       supabase.from("cuentas_cobrar").select("id, numero, cliente_id, concepto, monto, monto_pagado, estado_pago, fecha").order("fecha", { ascending: false }),
+      supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, metodo, referencia, comprobante_url, banco_id, created_at, cliente:clientes(nombre_negocio), orden:ordenes(numero)").eq("estado", "pendiente").order("created_at", { ascending: false }),
     ]);
     setOrdenes(((ords as (OrdenLite & { fecha_pedido: string | null; created_at: string })[]) ?? []).map((o) => ({ ...o, fecha: o.fecha_pedido || o.created_at })));
     setClientes(Object.fromEntries(((clis as { id: string; nombre_negocio: string }[]) ?? []).map((c) => [c.id, c.nombre_negocio])));
     setBancos((bcs as Banco[]) ?? []);
     setCobros((cbs as Cobro[]) ?? []);
     setCuentas((cxc as CuentaManual[]) ?? []);
+    setPendientes((pend as PagoPendiente[]) ?? []);
     setLoading(false);
   };
   useEffect(() => { fetchAll(); }, []);
@@ -184,6 +193,38 @@ const CuentasPorCobrar = () => {
     fetchAll();
   };
 
+  const pgPend = usePagination(pendientes, 25);
+
+  const abrirVerif = (p: PagoPendiente) => {
+    setVerif(p);
+    setVerifForm({ banco_id: p.banco_id || "", notas: "" });
+  };
+
+  const verComprobante = async (path: string) => {
+    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 120);
+    if (error || !data?.signedUrl) { toast({ title: "No se pudo abrir el comprobante", description: error?.message, variant: "destructive" }); return; }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const decidirVerif = async (aprobar: boolean) => {
+    if (!verif) return;
+    setVerifSaving(true);
+    const { error } = await supabase.rpc("verificar_pago", {
+      p_pago_id: verif.id,
+      p_aprobar: aprobar,
+      p_notas: verifForm.notas || null,
+      p_banco_id: aprobar ? (verifForm.banco_id || null) : null,
+    });
+    setVerifSaving(false);
+    if (error) { toast({ title: "No se pudo procesar", description: error.message, variant: "destructive" }); return; }
+    toast({
+      title: aprobar ? "Pago verificado" : "Pago rechazado",
+      description: aprobar ? "Se adjudicó a la deuda del cliente (más antiguo primero)." : "El pago quedó rechazado.",
+    });
+    setVerif(null);
+    fetchAll();
+  };
+
   return (
     <MainLayout title="Cuentas por Cobrar">
       <div className="mb-6 grid gap-4 md:grid-cols-3">
@@ -228,7 +269,49 @@ const CuentasPorCobrar = () => {
             <TabsTrigger value="cobrar">Por cobrar ({deudores.length})</TabsTrigger>
             <TabsTrigger value="manuales">Cuentas manuales ({cuentas.length})</TabsTrigger>
             <TabsTrigger value="cobros">Recibos ({cobros.length})</TabsTrigger>
+            <TabsTrigger value="verificar" className="gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5" /> Por verificar
+              {pendientes.length > 0 && <Badge variant="destructive" className="ml-1 px-1.5">{pendientes.length}</Badge>}
+            </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="verificar" className="mt-4">
+            <div className="rounded-xl border border-border bg-card shadow-sm">
+              {pendientes.length === 0 ? (
+                <p className="p-8 text-center text-muted-foreground">No hay pagos por verificar. Los pagos reportados por clientes y vendedores aparecen aquí.</p>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nº</TableHead><TableHead>Cliente</TableHead><TableHead>Orden</TableHead>
+                        <TableHead>Método</TableHead><TableHead>Referencia</TableHead>
+                        <TableHead className="text-right">Monto</TableHead><TableHead>Fecha</TableHead>
+                        <TableHead className="text-right">Acción</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pgPend.pageItems.map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-mono text-sm text-primary">{p.numero}</TableCell>
+                          <TableCell className="font-medium">{p.cliente?.nombre_negocio || "—"}</TableCell>
+                          <TableCell className="text-muted-foreground">{p.orden?.numero || "—"}</TableCell>
+                          <TableCell>{metodoLabel[p.metodo] || p.metodo}</TableCell>
+                          <TableCell className="font-mono text-sm text-muted-foreground">{p.referencia || "—"}</TableCell>
+                          <TableCell className="text-right font-semibold">{formatPrice(p.monto)}</TableCell>
+                          <TableCell className="text-muted-foreground">{new Date(p.created_at).toLocaleDateString("es-VE")}</TableCell>
+                          <TableCell className="text-right">
+                            <Button size="sm" onClick={() => abrirVerif(p)}>Verificar</Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <DataTablePagination pagination={pgPend} />
+                </>
+              )}
+            </div>
+          </TabsContent>
 
           <TabsContent value="cobrar" className="mt-4">
             <div className="rounded-xl border border-border bg-card shadow-sm">
@@ -463,6 +546,42 @@ const CuentasPorCobrar = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpenCxc(false)}>Cancelar</Button>
             <Button onClick={crearCuenta} disabled={savingCxc} className="gap-2">{savingCxc && <Loader2 className="h-4 w-4 animate-spin" />} Crear</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Verificar pago pendiente */}
+      <Dialog open={!!verif} onOpenChange={(o) => !o && setVerif(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Verificar pago {verif?.numero}</DialogTitle></DialogHeader>
+          {verif && (
+            <div className="space-y-4 py-2">
+              <div className="space-y-1 rounded-lg border bg-muted/40 p-3 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Cliente</span><span className="font-medium">{verif.cliente?.nombre_negocio || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Orden</span><span>{verif.orden?.numero || "— (se adjudica FIFO)"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Monto</span><span className="font-semibold">{formatPrice(verif.monto)}{verif.moneda !== "USD" && verif.monto_moneda ? ` · ${Number(verif.monto_moneda).toLocaleString("es-VE")} ${verif.moneda}` : ""}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Método</span><span>{metodoLabel[verif.metodo] || verif.metodo}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Referencia</span><span className="font-mono">{verif.referencia || "—"}</span></div>
+              </div>
+              {verif.comprobante_url && (
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => verComprobante(verif.comprobante_url!)}>
+                  <Eye className="h-4 w-4" /> Ver comprobante
+                </Button>
+              )}
+              <div className="space-y-2">
+                <Label>Banco donde ingresó (opcional)</Label>
+                <Select value={verifForm.banco_id} onValueChange={(v) => setVerifForm((f) => ({ ...f, banco_id: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Sin banco / asignar luego" /></SelectTrigger>
+                  <SelectContent>{bancos.map((b) => <SelectItem key={b.id} value={b.id}>{b.nombre} ({b.moneda})</SelectItem>)}</SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Si elegís banco, se registra el movimiento de entrada. Al aprobar, el monto se adjudica a la deuda del cliente (más antiguo primero).</p>
+              </div>
+              <div className="space-y-2"><Label>Notas</Label><Textarea rows={2} value={verifForm.notas} onChange={(e) => setVerifForm((f) => ({ ...f, notas: e.target.value }))} placeholder="Opcional (motivo de rechazo, observaciones…)" /></div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="destructive" onClick={() => decidirVerif(false)} disabled={verifSaving}>Rechazar</Button>
+            <Button onClick={() => decidirVerif(true)} disabled={verifSaving} className="gap-2">{verifSaving && <Loader2 className="h-4 w-4 animate-spin" />} Aprobar y adjudicar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

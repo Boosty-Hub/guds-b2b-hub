@@ -10,6 +10,28 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-08-14 · Unificación del flujo de pagos pendientes (3 portales → cola admin)
+
+Cierra los puntos 1 y 4 pendientes de la auditoría de compra: hoy todos los pagos pendientes (checkout, portal cliente, vendedor) fluyen a UNA cola de verificación admin, y al aprobar se aplican a la deuda real.
+
+### Backend (migración `supabase/migrations/20260814_unificar_pagos_pendientes.sql`, aplicada a prod)
+- **`verificar_pago(p_pago_id, p_aprobar, p_notas, p_banco_id?, p_tasa?)`** reescrito: al **aprobar** ya no solo setea el boolean `pagado` (vía `liquidar_orden`); ahora **adjudica el monto a la deuda real** (`monto_pagado`/`estado_pago`) igual que `registrar_cobro` — primero la orden ligada, luego FIFO por fecha (órdenes + `cuentas_cobrar`), y crea el **movimiento bancario** si se asigna banco. Al **rechazar**, marca `rechazado`. Solo admin (`is_admin()`).
+- **`crear_orden_desde_carrito`**: si el checkout llevó comprobante, inserta un **pago `pendiente`** ligado a la orden → entra a la cola (antes el comprobante quedaba solo en la orden, huérfano).
+- **`trg_pago_insert`**: la notificación al admin ahora apunta a `/admin/cuentas-por-cobrar`.
+
+### UI admin (`CuentasPorCobrar.tsx`)
+- Nueva pestaña **"Por verificar (N)"** con badge de conteo: lista los pagos `pendiente` (cliente, orden, método, referencia, monto, fecha).
+- Diálogo **Verificar pago**: muestra detalle + **Ver comprobante** (signed URL), permite asignar **banco** (opcional, registra el movimiento), notas, y **Aprobar y adjudicar** / **Rechazar**. La pestaña "Recibos" ahora filtra solo `verificado`.
+
+### Verificación end-to-end (Playwright)
+- Backend: verificar 60/100 → parcial, +40 → pagado (monto_pagado correcto).
+- Full: cliente hace checkout con **Transferencia + comprobante** → orden + **pago pendiente** (PAG-…) → admin lo ve en "Por verificar" → **Aprobar** → orden `monto_pagado=total, estado_pago=pagado, pagado=true`, pago `verificado`. 0 errores de consola en cliente y admin. Datos de prueba limpiados.
+
+### Resultado
+- **Un solo circuito**: checkout / portal cliente / vendedor crean pagos `pendiente` → admin verifica en un solo lugar → se refleja en la deuda real (Cuentas / Cuentas por Cobrar / portales). Cierra el desfase entre los dos modelos de contabilidad (`pagado` boolean vs `monto_pagado`).
+
+---
+
 ## 2026-08-14 · Auditoría del flujo de compra (portal del cliente)
 
 Recorrido Catálogo → Carrito → Checkout → Pago, verificado end-to-end.
