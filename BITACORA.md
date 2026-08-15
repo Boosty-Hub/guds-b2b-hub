@@ -14,9 +14,10 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 Revisión módulo por módulo del portal `/vendedor` tras las importaciones de Odoo y los cambios de estructura.
 
-### Hallazgo principal (requiere decisión de negocio)
-- **Ningún cliente tiene `vendedor_asignado_id`** (0 de 432). El import de Odoo solo guardó el vendedor como **texto** en `clientes.vendedor_odoo` (15 nombres: ANDERSON ALBORNOZ 87, ELIZABETH ARGOTES 70, MARIANA GRANADOS 45, …). Como el portal y las RLS filtran por `vendedor_asignado_id`, **cada vendedor ve su portal vacío**.
-- Los 4 usuarios vendedor del app (Andres Toro, Antonio Lima, + 2 QA) **no coinciden** con los nombres de Odoo → no hay mapeo automático. **Pendiente:** decidir qué usuario-app corresponde a cada vendedor de Odoo (o crear cuentas) para poblar `vendedor_asignado_id`.
+### Hallazgo principal → RESUELTO
+- **Ningún cliente tenía `vendedor_asignado_id`** (0 de 432). El import de Odoo solo guardó el vendedor como **texto** en `clientes.vendedor_odoo` (15 nombres). Como el portal y las RLS filtran por `vendedor_asignado_id`, cada vendedor veía su portal vacío.
+- **Solución (elegida por el usuario):** se crearon **15 usuarios vendedor** (uno por nombre de Odoo), email placeholder `<slug>@guds.test` (ej. `anderson.albornoz@guds.test`), password temporal común **`GudsVend-2026!`** (a cambiar), y se asignaron **367 clientes** por match de `vendedor_odoo`. Los otros 65 no traían vendedor en Odoo. **SOPORTE CORPOEUREKA** (4 clientes) probablemente no es un vendedor real → revisar/desactivar. Verificado: anderson.albornoz → 87 clientes, saldo cartera real $52.787,53, 0 errores.
+- **Pendiente menor:** reemplazar los emails placeholder por los reales de cada vendedor y que cambien su contraseña.
 
 ### Correcciones aplicadas (código)
 - **VendedorDashboard**: ahora filtra clientes por `vendedor_asignado_id`; "Saldo cartera" usa deuda **real** (saldos de órdenes + `cuentas_cobrar`) en vez de `credito_utilizado`.
