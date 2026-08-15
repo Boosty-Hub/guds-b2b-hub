@@ -73,9 +73,13 @@ const PortalCarrito = () => {
   const [referenciaPago, setReferenciaPago] = useState("");
   const [comprobanteFile, setComprobanteFile] = useState<File | null>(null);
   const comprobanteInputRef = useRef<HTMLInputElement>(null);
+  // Banco destino que el cliente indica (a dónde pagó), filtrado por moneda
+  const [bancos, setBancos] = useState<{ id: string; nombre: string; moneda: string; numero_cuenta: string | null; titular: string | null; metodo_pago: string }[]>([]);
+  const [monedaPago, setMonedaPago] = useState<"USD" | "BS">("USD");
+  const [bancoPagoId, setBancoPagoId] = useState<string>("");
   // Config de negocio (IVA / envío) leída de la BD; los defaults coinciden con el servidor.
   const [cfg, setCfg] = useState({ iva: 16, envio: 50, envioGratis: 500 });
-  const { formatPrice } = useCurrency();
+  const { formatPrice, exchangeRate } = useCurrency();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -85,7 +89,17 @@ const PortalCarrito = () => {
       fetchCart();
     }
     fetchConfig();
+    fetchBancos();
   }, [user]);
+
+  const fetchBancos = async () => {
+    const { data } = await supabase
+      .from('bancos')
+      .select('id, nombre, moneda, numero_cuenta, titular, metodo_pago')
+      .eq('activo', true)
+      .order('nombre');
+    if (data) setBancos(data);
+  };
 
   const fetchConfig = async () => {
     const { data } = await supabase
@@ -197,6 +211,9 @@ const PortalCarrito = () => {
   const cartCount = cart.reduce((sum, item) => sum + item.cantidad, 0);
 
   const requiereComprobante = selectedPayment ? METODOS_CON_COMPROBANTE.includes(selectedPayment) : false;
+  const bancosFiltrados = bancos.filter((b) => b.moneda === monedaPago);
+  const tasaPago = monedaPago === "BS" ? exchangeRate : 0;
+  const montoPagar = monedaPago === "BS" && tasaPago > 0 ? total * tasaPago : total;
 
   const handleComprobanteSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -238,6 +255,15 @@ const PortalCarrito = () => {
       return;
     }
 
+    if (requiereComprobante && !bancoPagoId) {
+      toast({
+        title: "Elige el banco",
+        description: "Indica a qué cuenta transferiste para continuar",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (requiereComprobante && (!referenciaPago || !comprobanteFile)) {
       toast({
         title: "Falta el comprobante",
@@ -268,6 +294,9 @@ const PortalCarrito = () => {
       p_cupon_id: cuponApplied?.id || null,
       p_comprobante_url: comprobanteUrl,
       p_referencia: requiereComprobante ? referenciaPago : null,
+      p_banco_id: requiereComprobante ? (bancoPagoId || null) : null,
+      p_moneda: requiereComprobante ? monedaPago : 'USD',
+      p_tasa: requiereComprobante && monedaPago === 'BS' ? (tasaPago || null) : null,
     });
 
     if (error) {
@@ -459,8 +488,59 @@ const PortalCarrito = () => {
         {/* Comprobante de pago — requerido antes de confirmar cuando el método lo exige */}
         {requiereComprobante && (
           <div className="px-4 mt-4">
-            <div className="bg-card rounded-xl border border-border p-4 space-y-3">
-              <p className="font-medium">Comprobante de pago</p>
+            <div className="bg-card rounded-xl border border-border p-4 space-y-4">
+              <p className="font-medium">¿A qué cuenta pagaste?</p>
+
+              {/* Moneda */}
+              <div className="flex gap-2">
+                {(["USD", "BS"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => { setMonedaPago(m); setBancoPagoId(""); }}
+                    className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${monedaPago === m ? "border-primary bg-primary/5 text-primary" : "border-border"}`}
+                  >
+                    {m === "USD" ? "Dólares (USD)" : "Bolívares (Bs.)"}
+                  </button>
+                ))}
+              </div>
+
+              {/* Bancos filtrados por moneda */}
+              <div className="space-y-2">
+                <Label>Banco / cuenta destino *</Label>
+                {bancosFiltrados.map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => setBancoPagoId(b.id)}
+                    className={`w-full text-left p-3 rounded-xl border transition-colors ${bancoPagoId === b.id ? "border-primary bg-primary/5" : "border-border"}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">{b.nombre}</p>
+                      <span className="text-xs font-semibold">{b.moneda === "USD" ? "USD $" : "Bs."}</span>
+                    </div>
+                    {b.numero_cuenta && <p className="text-xs font-mono text-muted-foreground">{b.numero_cuenta}</p>}
+                    {b.titular && <p className="text-xs text-muted-foreground">{b.titular}</p>}
+                  </button>
+                ))}
+                {bancosFiltrados.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No hay cuentas en {monedaPago === "USD" ? "dólares" : "bolívares"} disponibles.</p>
+                )}
+              </div>
+
+              {/* Monto a transferir */}
+              <div className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Monto a transferir</span>
+                <span className="font-semibold">
+                  {monedaPago === "BS" && tasaPago > 0
+                    ? `Bs. ${montoPagar.toLocaleString("es-VE", { maximumFractionDigits: 2 })}`
+                    : formatPrice(total)}
+                </span>
+              </div>
+              {monedaPago === "BS" && tasaPago > 0 && (
+                <p className="-mt-2 text-[11px] text-muted-foreground">Equivale a {formatPrice(total)} · tasa Bs. {tasaPago.toLocaleString("es-VE")}/USD</p>
+              )}
+
               <div className="space-y-2">
                 <Label>Número de referencia *</Label>
                 <Input

@@ -10,6 +10,14 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-08-14 · Checkout: banco destino + filtro por moneda
+
+- En el checkout (`PortalCarrito`), cuando el método lleva comprobante (transferencia/pago móvil), el cliente ahora elige **moneda (USD / Bs)** que **filtra las cuentas** (solo USD o solo Bs) y **selecciona el banco destino** al que pagó (muestra nombre, nº de cuenta y titular). Se muestra el monto a transferir (en Bs = total×tasa BCV).
+- Backend (`20260814b_checkout_banco_destino.sql`): `crear_orden_desde_carrito` acepta `p_banco_id/p_moneda/p_tasa` y los guarda en el pago pendiente (monto USD; monto_moneda/tasa si es Bs). El pago entra a la cola con el **banco ya asignado** → el admin lo ve prellenado al verificar.
+- Verificado E2E: checkout USD → pago pendiente con banco "Banco Banesco PANAMA" → admin aprueba → orden pagada. Solo cuentas USD visibles al elegir USD. 0 errores.
+
+---
+
 ## 2026-08-14 · Unificación del flujo de pagos pendientes (3 portales → cola admin)
 
 Cierra los puntos 1 y 4 pendientes de la auditoría de compra: hoy todos los pagos pendientes (checkout, portal cliente, vendedor) fluyen a UNA cola de verificación admin, y al aprobar se aplican a la deuda real.
