@@ -46,14 +46,19 @@ const MAX_DOC_SIZE = 5 * 1024 * 1024; // debe coincidir con el file_size_limit d
 const ALLOWED_DOC_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 
 const tiposNegocio = [
-  "Bodega",
-  "Mini Market",
+  "Kiosco",
+  "Abasto",
   "Supermercado",
+  "Bodega",
+  "Licorería",
   "Restaurante",
   "Hotel",
   "Panadería",
   "Cafetería",
-  "Distribuidora",
+  "Distribuidor(a)",
+  "Bodegón",
+  "Mini farmacia",
+  "Cantina",
   "Otro",
 ];
 
@@ -271,7 +276,7 @@ const Registro = () => {
 
           <div className="bg-card rounded-2xl border border-border p-6 md:p-8">
             <h1 className="text-2xl font-bold text-foreground mb-2">
-              Registro de Cliente Mayorista
+              Registro de Cliente
             </h1>
             <p className="text-muted-foreground mb-6">
               Completa el formulario para solicitar tu cuenta de cliente

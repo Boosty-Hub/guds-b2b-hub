@@ -7,10 +7,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const PREFIJOS = [
-  "0412", "0414", "0416", "0422", "0424", "0426",
-  "0212", "0241", "0243", "0251", "0261", "0281",
-];
+// Solo prefijos de teléfonos móviles (se quitaron los locales)
+const PREFIJOS = ["0412", "0414", "0416", "0422", "0424", "0426"];
 
 interface PhoneInputProps {
   value: string;

@@ -10,6 +10,25 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-08-14 · Ajustes al registro de cliente + verificación del bug de envío
+
+Cambios pedidos por el cliente (3 screenshots) sobre el proceso de registro público (`/registro`).
+
+### Cambios aplicados
+- **Título**: "Registro de Cliente **Mayorista**" → "Registro de Cliente" (`src/pages/Registro.tsx`).
+- **Tipos de negocio**: nueva lista de 14 (Kiosco, Abasto, Supermercado, Bodega, Licorería, Restaurante, Hotel, Panadería, Cafetería, Distribuidor(a), Bodegón, Mini farmacia, Cantina, Otro).
+- **Prefijos de teléfono**: solo móviles `0412/0414/0416/0422/0424/0426`; se quitaron los locales `0212/0241/0243/0251/0261/0281` (`src/components/forms/PhoneInput.tsx`).
+
+### Bug "revisa tu conexión e intenta de nuevo" (email de Wonderly, 12 ago) → NO reproducible hoy
+- Diagnóstico: el insert anónimo en `registros_clientes` **funciona** (201) tal como lo hace supabase-js (`.insert()` sin `.select()`, `Prefer: return=minimal`). El rol se resuelve como `anon` y existe la policy `registros_anon_insert` (check `true`) + grant + policy de storage `registro_anon_upload_documento`. La subida del RIF también funciona (200).
+- La causa del fallo del 12 ago fue el **estado pre-migración** (anon key legacy / RLS a medio endurecer). Con las llaves `sb_publishable_` + las RLS ya publicadas, el flujo quedó operativo. Ver [[guds-supabase-keys-nuevas]] y [[guds-rls-expuesto]].
+- **Verificado end-to-end (Playwright, anónimo):** los 3 pasos + "Enviar Solicitud" → INSERT 201 → pantalla "¡Solicitud Enviada!", 0 errores de consola. Datos de prueba limpiados.
+
+### Pendiente / mencionado en el email
+- Wonderly también pidió "revisar el proceso de **compra** para ajustar los flujos" — no auditado aún en esta sesión (candidato para la próxima).
+
+---
+
 ## 2026-08-14 · Auditoría del portal del vendedor
 
 Revisión módulo por módulo del portal `/vendedor` tras las importaciones de Odoo y los cambios de estructura.
