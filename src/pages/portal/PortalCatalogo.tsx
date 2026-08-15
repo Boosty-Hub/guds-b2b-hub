@@ -71,6 +71,8 @@ const PortalCatalogo = () => {
   // Empaque selection dialog
   const [isEmpaqueDialogOpen, setIsEmpaqueDialogOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<ProductoConEmpaques | null>(null);
+  // Precio real por empaque (mismo que cobra el checkout) para el diálogo: { tipo_empaque_id: precio }
+  const [empaquePrecios, setEmpaquePrecios] = useState<Record<string, number>>({});
   const { formatPrice } = useCurrency();
   const { getActiveCategories } = useStoreConfig();
   const { user } = useAuth();
@@ -78,7 +80,9 @@ const PortalCatalogo = () => {
   const navigate = useNavigate();
   
   const storeCategories = getActiveCategories();
-  const categories = ["Todos", ...storeCategories.map(c => c.nombre)];
+  // Dedupe TODO el arreglo (incluye el "Todos" fijo): tras el import puede existir una
+  // categoría llamada "Todos" u otros nombres repetidos → evita keys duplicadas.
+  const categories = Array.from(new Set(["Todos", ...storeCategories.map(c => c.nombre)]));
 
   useEffect(() => {
     // Update category when URL param changes
@@ -155,15 +159,26 @@ const PortalCatalogo = () => {
     if (data) setFavorites(data.map(f => f.producto_id));
   };
 
-  const handleAddToCart = (product: ProductoConEmpaques) => {
+  const handleAddToCart = async (product: ProductoConEmpaques) => {
     if (!user?.id) return;
-    
+
     const empaques = product.producto_empaques || [];
-    
+
     if (empaques.length > 1) {
-      // Show empaque selection dialog
+      // Show empaque selection dialog con el precio REAL por empaque (el mismo que cobra el checkout)
       setSelectedProduct(product);
+      setEmpaquePrecios({});
       setIsEmpaqueDialogOpen(true);
+      const entries = await Promise.all(empaques.map(async (pe) => {
+        const { data } = await supabase.rpc('precio_efectivo', {
+          p_producto_id: product.id,
+          p_tipo_empaque_id: pe.tipo_empaque_id,
+          p_cliente_id: user.cliente_id || null,
+        });
+        const fallback = product.en_oferta && product.precio_oferta ? Number(product.precio_oferta) : Number(product.precio_base);
+        return [pe.tipo_empaque_id, data != null ? Number(data) : fallback] as const;
+      }));
+      setEmpaquePrecios(Object.fromEntries(entries));
     } else if (empaques.length === 1) {
       // Only one empaque, add directly
       addToCartWithEmpaque(product, empaques[0].tipo_empaque);
@@ -260,10 +275,8 @@ const PortalCatalogo = () => {
     notifyCartChanged();
   };
 
-  const getCartQuantity = (productId: string) => {
-    const item = cart.find((i) => i.producto_id === productId);
-    return item?.cantidad || 0;
-  };
+  const getCartQuantity = (productId: string) =>
+    cart.filter((i) => i.producto_id === productId).reduce((s, i) => s + i.cantidad, 0);
 
   const toggleFavorite = async (productId: string) => {
     if (!user?.id) return;
@@ -570,7 +583,8 @@ const PortalCatalogo = () => {
               
               <div className="space-y-2">
                 {selectedProduct.producto_empaques?.map((pe) => {
-                  const precioTotal = selectedProduct.precio_base * pe.tipo_empaque.unidades;
+                  // Precio real del empaque (el que cobra el checkout); fallback mientras carga
+                  const precioTotal = empaquePrecios[pe.tipo_empaque_id] ?? (selectedProduct.precio_base * pe.tipo_empaque.unidades);
                   return (
                     <button
                       key={pe.id}

@@ -10,6 +10,30 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-08-14 · Auditoría del flujo de compra (portal del cliente)
+
+Recorrido Catálogo → Carrito → Checkout → Pago, verificado end-to-end.
+
+### Estado: FUNCIONA
+- Checkout end-to-end verificado (cliente QA ligado a un cliente de prueba desechable, revertido después): agregar al carrito → `crear_orden_desde_carrito` **RPC 200** → orden creada (`ORD-…`) → `/portal/pedidos`. El RPC recalcula todo en servidor (precios por `precio_efectivo` con lista del cliente, IVA/envío de `configuracion`, valida cupón, chequea crédito) e inserta orden `pendiente` + items + vacía el carrito atómicamente. Sin columnas obsoletas.
+
+### Bugs corregidos
+- **Precio del diálogo de empaque** (`PortalCatalogo.tsx`): mostraba `precio_base × unidades`, distinto de lo que cobra el checkout (`precio_efectivo`). Ahora pide el precio real por empaque al abrir el diálogo → **precio mostrado = precio cobrado**.
+- **Key duplicada "Todos"** (warning de React): existe una categoría llamada "Todos" que chocaba con el pill fijo "Todos". Se dedupe todo el arreglo de categorías.
+- **`getCartQuantity`** sumaba solo la primera fila del producto; ahora suma todas las presentaciones (empaques) de ese producto.
+- **PortalPagos**: se quitó la lista muerta `metodosPago` (tenía `deposito`, que no es válido). Ahora lee `bancos.metodos[]` (multi-método), muestra los métodos por banco (ej. Banco Mercantil → "Tarjeta, Transferencia") y agrega un **selector de Método** (incl. tarjeta). Sigue con `registrar_pago` (pago del cliente queda **pendiente** de verificación).
+
+### Hallazgos para decidir (no tocados — requieren decisión de negocio)
+1. **Comprobante del checkout "huérfano"**: `crear_orden_desde_carrito` guarda el comprobante en `ordenes.comprobante_url` pero NO crea una fila en `pagos`, y la verificación (`liquidar_orden`) suma `pagos`. Así, el pago hecho en el checkout no marca la orden como pagada hasta que el cliente lo re-reporta en PortalPagos o el admin lo registra. Conviene unificar (crear un `pago` pendiente en el checkout).
+2. **Sin datos del banco destino en el checkout**: para transferencia/pago móvil se exige referencia + comprobante, pero no se le muestra al cliente a qué cuenta transferir. Falta mostrar la cuenta.
+3. **`tarjeta` no está en el checkout del cliente** (sí en admin/vendedor): es intencional por ahora (no hay pasarela de tarjeta en el autoservicio); confirmar si se quiere.
+4. **Cola admin para verificar pagos pendientes**: el pago del vendedor/cliente queda `pendiente`; falta la pantalla admin para verificarlos y aplicar la adjudicación.
+
+### Verificación
+- `tsc` limpio · `npm run build` OK · Playwright (cliente QA): compra 200, catálogo 0 errores (key duplicada eliminada), selector de Método presente. Datos de prueba limpiados.
+
+---
+
 ## 2026-08-14 · Ajustes al registro de cliente + verificación del bug de envío
 
 Cambios pedidos por el cliente (3 screenshots) sobre el proceso de registro público (`/registro`).

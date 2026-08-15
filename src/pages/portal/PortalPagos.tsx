@@ -68,12 +68,9 @@ const statusConfig: Record<string, { label: string; color: string; icon: any }> 
   rechazado: { label: "Rechazado", color: "bg-red-500", icon: AlertCircle },
 };
 
-const metodosPago = [
-  { id: "transferencia", name: "Transferencia Bancaria", icon: "🏦" },
-  { id: "deposito", name: "Depósito", icon: "💵" },
-  { id: "pago_movil", name: "Pago Móvil", icon: "📱" },
-  { id: "efectivo", name: "Efectivo", icon: "💰" },
-];
+const metodoLabel: Record<string, string> = {
+  transferencia: "Transferencia", efectivo: "Efectivo", pago_movil: "Pago Móvil", credito: "Crédito", tarjeta: "Tarjeta",
+};
 
 const PortalPagos = () => {
   const { formatPrice, exchangeRate } = useCurrency();
@@ -92,10 +89,11 @@ const PortalPagos = () => {
     orden_id: "",
     monto: "",
     banco_id: "",
+    metodo: "",
     tasa: "",
     referencia: "",
   });
-  const [bancos, setBancos] = useState<{ id: string; nombre: string; metodo_pago: string; moneda: string; numero_cuenta: string | null }[]>([]);
+  const [bancos, setBancos] = useState<{ id: string; nombre: string; metodo_pago: string; metodos: string[] | null; moneda: string; numero_cuenta: string | null }[]>([]);
   const [comprobanteFile, setComprobanteFile] = useState<File | null>(null);
   const [uploadingComprobante, setUploadingComprobante] = useState(false);
   const comprobanteInputRef = useRef<HTMLInputElement>(null);
@@ -134,7 +132,7 @@ const PortalPagos = () => {
     // Bancos activos (a dónde puede pagar el cliente)
     const { data: bancosData } = await supabase
       .from('bancos')
-      .select('id, nombre, metodo_pago, moneda, numero_cuenta')
+      .select('id, nombre, metodo_pago, metodos, moneda, numero_cuenta')
       .eq('activo', true)
       .order('nombre');
     if (bancosData) setBancos(bancosData);
@@ -144,6 +142,7 @@ const PortalPagos = () => {
 
   const bancoSel = bancos.find((b) => b.id === formData.banco_id);
   const esBS = bancoSel?.moneda === "BS";
+  const metodosBanco = bancoSel?.metodos?.length ? bancoSel.metodos : bancoSel ? [bancoSel.metodo_pago] : [];
 
   const handleComprobanteSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -201,7 +200,7 @@ const PortalPagos = () => {
       p_cliente_id: user?.cliente_id,
       p_orden_id: formData.orden_id,
       p_banco_id: formData.banco_id,
-      p_metodo: bancoSel?.metodo_pago || "transferencia",
+      p_metodo: formData.metodo || metodosBanco[0] || bancoSel?.metodo_pago || "transferencia",
       p_monto_moneda: parseFloat(formData.monto),
       p_moneda: bancoSel?.moneda || "USD",
       p_tasa_cambio: esBS ? Number(formData.tasa) : null,
@@ -214,7 +213,7 @@ const PortalPagos = () => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Pago reportado", description: "Tu pago está pendiente de verificación" });
-      setFormData({ orden_id: "", monto: "", banco_id: "", tasa: "", referencia: "" });
+      setFormData({ orden_id: "", monto: "", banco_id: "", metodo: "", tasa: "", referencia: "" });
       setComprobanteFile(null);
       setIsPaymentOpen(false);
       fetchData();
@@ -349,7 +348,7 @@ const PortalPagos = () => {
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div>
                     <p className="text-muted-foreground">Método</p>
-                    <p className="font-medium capitalize">{pago.metodo?.replace('_', ' ')}</p>
+                    <p className="font-medium">{metodoLabel[pago.metodo] || pago.metodo}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Referencia</p>
@@ -436,7 +435,10 @@ const PortalPagos = () => {
                 {bancos.map((b) => (
                   <button
                     key={b.id}
-                    onClick={() => setFormData({ ...formData, banco_id: b.id, tasa: b.moneda === "BS" && exchangeRate > 0 ? String(exchangeRate) : "" })}
+                    onClick={() => {
+                      const ms = b.metodos?.length ? b.metodos : [b.metodo_pago];
+                      setFormData({ ...formData, banco_id: b.id, metodo: ms[0] || "transferencia", tasa: b.moneda === "BS" && exchangeRate > 0 ? String(exchangeRate) : "" });
+                    }}
                     className={`p-3 rounded-xl border text-left transition-colors ${
                       formData.banco_id === b.id ? "border-primary bg-primary/5" : "border-border"
                     }`}
@@ -445,12 +447,27 @@ const PortalPagos = () => {
                       <p className="text-sm font-medium">{b.nombre}</p>
                       <span className="text-xs font-semibold">{b.moneda === "USD" ? "USD $" : "Bs."}</span>
                     </div>
-                    <p className="text-xs text-muted-foreground">{b.numero_cuenta || b.metodo_pago.replace("_", " ")}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {b.numero_cuenta || (b.metodos?.length ? b.metodos.map((m) => metodoLabel[m] || m).join(", ") : (metodoLabel[b.metodo_pago] || b.metodo_pago))}
+                    </p>
                   </button>
                 ))}
                 {bancos.length === 0 && <p className="text-sm text-muted-foreground">No hay cuentas de pago disponibles.</p>}
               </div>
             </div>
+
+            {/* Método (del banco elegido) */}
+            {formData.banco_id && metodosBanco.length > 0 && (
+              <div className="space-y-2">
+                <Label>Método</Label>
+                <Select value={formData.metodo} onValueChange={(v) => setFormData({ ...formData, metodo: v })}>
+                  <SelectTrigger><SelectValue placeholder="Método" /></SelectTrigger>
+                  <SelectContent>
+                    {metodosBanco.map((m) => <SelectItem key={m} value={m}>{metodoLabel[m] || m}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* Amount */}
             <div className="space-y-2">
