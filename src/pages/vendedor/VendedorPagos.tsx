@@ -25,6 +25,11 @@ import { DataTablePagination } from "@/components/ui/data-table-pagination";
 interface Pago { id: string; numero: string; monto: number; metodo: string; estado: string; referencia: string | null; created_at: string; cliente?: { nombre_negocio: string } | null; }
 interface Cli { id: string; nombre_negocio: string; }
 interface OrdenPend { id: string; numero: string; total: number; cliente_id: string; }
+interface Banco { id: string; nombre: string; metodo_pago: string; metodos: string[] | null; moneda: string; }
+
+const metodoLabel: Record<string, string> = {
+  transferencia: "Transferencia", efectivo: "Efectivo", pago_movil: "Pago Móvil", credito: "Crédito", tarjeta: "Tarjeta",
+};
 
 const estadoConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" }> = {
   pendiente: { label: "Pendiente", variant: "secondary" }, verificado: { label: "Verificado", variant: "default" }, rechazado: { label: "Rechazado", variant: "destructive" },
@@ -39,8 +44,8 @@ const VendedorPagos = () => {
   const [ordenes, setOrdenes] = useState<OrdenPend[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ cliente_id: "", orden_id: "", monto: "", banco_id: "", tasa: "", referencia: "" });
-  const [bancos, setBancos] = useState<{ id: string; nombre: string; metodo_pago: string; moneda: string }[]>([]);
+  const [form, setForm] = useState({ cliente_id: "", orden_id: "", monto: "", banco_id: "", metodo: "", tasa: "", referencia: "" });
+  const [bancos, setBancos] = useState<Banco[]>([]);
   const [saving, setSaving] = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -51,12 +56,12 @@ const VendedorPagos = () => {
       // Solo los clientes asignados a este vendedor
       supabase.from("clientes").select("id, nombre_negocio").eq("activo", true).eq("vendedor_asignado_id", user.id).order("nombre_negocio"),
       supabase.from("ordenes").select("id, numero, total, cliente_id").eq("pagado", false).neq("estado", "cancelado"),
-      supabase.from("bancos").select("id, nombre, metodo_pago, moneda").eq("activo", true).order("nombre"),
+      supabase.from("bancos").select("id, nombre, metodo_pago, metodos, moneda").eq("activo", true).order("nombre"),
     ]);
     if (pRes.data) setPagos(pRes.data as unknown as Pago[]);
     if (cRes.data) setClientes(cRes.data as Cli[]);
     if (oRes.data) setOrdenes(oRes.data as OrdenPend[]);
-    if (bRes.data) setBancos(bRes.data as { id: string; nombre: string; metodo_pago: string; moneda: string }[]);
+    if (bRes.data) setBancos(bRes.data as Banco[]);
     setLoading(false);
   }, [user?.id]);
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -67,6 +72,7 @@ const VendedorPagos = () => {
   const ordenesDelCliente = ordenes.filter((o) => o.cliente_id === form.cliente_id);
   const bancoSel = bancos.find((b) => b.id === form.banco_id);
   const esBS = bancoSel?.moneda === "BS";
+  const metodosBanco = bancoSel?.metodos?.length ? bancoSel.metodos : bancoSel ? [bancoSel.metodo_pago] : [];
 
   const registrar = async () => {
     if (!form.cliente_id || !form.monto || Number(form.monto) <= 0) { toast({ title: "Faltan datos", description: "Elige cliente y monto", variant: "destructive" }); return; }
@@ -74,13 +80,13 @@ const VendedorPagos = () => {
     setSaving(true);
     const { error } = await supabase.rpc("registrar_pago", {
       p_cliente_id: form.cliente_id, p_orden_id: form.orden_id || null, p_banco_id: form.banco_id || null,
-      p_metodo: bancoSel?.metodo_pago || "efectivo", p_monto_moneda: Number(form.monto),
+      p_metodo: form.metodo || metodosBanco[0] || "transferencia", p_monto_moneda: Number(form.monto),
       p_moneda: bancoSel?.moneda || "USD", p_tasa_cambio: esBS ? Number(form.tasa) : null, p_referencia: form.referencia || null,
     });
     setSaving(false);
     if (error) { toast({ title: "No se pudo registrar el cobro", description: error.message, variant: "destructive" }); return; }
     toast({ title: "Cobro registrado", description: "Queda pendiente de verificación por administración." });
-    setOpen(false); setForm({ cliente_id: "", orden_id: "", monto: "", banco_id: "", tasa: "", referencia: "" });
+    setOpen(false); setForm({ cliente_id: "", orden_id: "", monto: "", banco_id: "", metodo: "", tasa: "", referencia: "" });
     fetchData();
   };
 
@@ -118,7 +124,7 @@ const VendedorPagos = () => {
                     <TableCell>{p.cliente?.nombre_negocio || "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{fmt(p.created_at)}</TableCell>
                     <TableCell className="text-right font-semibold">{formatPrice(Number(p.monto))}</TableCell>
-                    <TableCell className="capitalize">{p.metodo?.replace("_", " ")}</TableCell>
+                    <TableCell>{metodoLabel[p.metodo] || p.metodo}</TableCell>
                     <TableCell><Badge variant={estadoConfig[p.estado]?.variant || "secondary"}>{estadoConfig[p.estado]?.label || p.estado}</Badge></TableCell>
                   </TableRow>
                 ))}
@@ -147,15 +153,24 @@ const VendedorPagos = () => {
                 </Select>
               </div>
             )}
-            <div><Label>Banco / cuenta que recibe</Label>
-              <Select value={form.banco_id} onValueChange={(v) => {
-                const b = bancos.find((x) => x.id === v);
-                const nextTasa = b?.moneda === "BS" && exchangeRate > 0 ? String(exchangeRate) : "";
-                setForm((f) => ({ ...f, banco_id: v, tasa: nextTasa }));
-              }}>
-                <SelectTrigger><SelectValue placeholder="Efectivo (sin banco)" /></SelectTrigger>
-                <SelectContent>{bancos.map((b) => <SelectItem key={b.id} value={b.id}>{b.nombre} · {b.moneda === "USD" ? "USD $" : "Bs."} · {b.metodo_pago.replace("_", " ")}</SelectItem>)}</SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Banco / cuenta que recibe</Label>
+                <Select value={form.banco_id} onValueChange={(v) => {
+                  const b = bancos.find((x) => x.id === v);
+                  const ms = b?.metodos?.length ? b.metodos : b ? [b.metodo_pago] : [];
+                  const nextTasa = b?.moneda === "BS" && exchangeRate > 0 ? String(exchangeRate) : "";
+                  setForm((f) => ({ ...f, banco_id: v, metodo: ms[0] || "transferencia", tasa: nextTasa }));
+                }}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar banco" /></SelectTrigger>
+                  <SelectContent>{bancos.map((b) => <SelectItem key={b.id} value={b.id}>{b.nombre} · {b.moneda === "USD" ? "USD $" : "Bs."}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Método</Label>
+                <Select value={form.metodo} onValueChange={(v) => setForm((f) => ({ ...f, metodo: v }))} disabled={!form.banco_id}>
+                  <SelectTrigger><SelectValue placeholder={form.banco_id ? "Método" : "Elegí un banco"} /></SelectTrigger>
+                  <SelectContent>{metodosBanco.map((m) => <SelectItem key={m} value={m}>{metodoLabel[m] || m}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
             </div>
             <div><Label>{esBS ? "Monto recibido (Bs.)" : "Monto recibido (USD $)"}</Label><Input type="number" min="0" step="0.01" value={form.monto} onChange={(e) => setForm((f) => ({ ...f, monto: e.target.value }))} placeholder="0.00" /></div>
             {esBS && (

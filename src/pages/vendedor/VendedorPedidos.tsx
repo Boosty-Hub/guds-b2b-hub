@@ -277,8 +277,9 @@ const VendedorPedidos = () => {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="transferencia">Transferencia</SelectItem>
-                  <SelectItem value="efectivo">Efectivo</SelectItem>
                   <SelectItem value="pago_movil">Pago Móvil</SelectItem>
+                  <SelectItem value="tarjeta">Tarjeta</SelectItem>
+                  <SelectItem value="efectivo">Efectivo</SelectItem>
                   <SelectItem value="credito">Crédito</SelectItem>
                 </SelectContent>
               </Select>

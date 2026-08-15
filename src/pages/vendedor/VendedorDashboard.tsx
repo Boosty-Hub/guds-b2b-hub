@@ -18,19 +18,33 @@ const VendedorDashboard = () => {
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
+    if (!user?.id) return;
     setLoading(true);
     const inicioMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-    const [cRes, oRes] = await Promise.all([
-      supabase.from("clientes").select("credito_utilizado").eq("activo", true),
-      supabase.from("ordenes").select("total, estado, created_at"),
+    // Solo los clientes asignados a este vendedor
+    const { data: cli } = await supabase.from("clientes").select("id").eq("activo", true).eq("vendedor_asignado_id", user.id);
+    const ids = (cli ?? []).map((c: { id: string }) => c.id);
+    setClientes(ids.length);
+    if (ids.length === 0) { setPedidosPend(0); setVentasMes(0); setSaldoCartera(0); setLoading(false); return; }
+
+    const [oRes, cxcRes] = await Promise.all([
+      supabase.from("ordenes").select("total, monto_pagado, estado, created_at").in("cliente_id", ids).neq("estado", "cancelado"),
+      supabase.from("cuentas_cobrar").select("monto, monto_pagado, estado_pago").in("cliente_id", ids),
     ]);
-    if (cRes.data) { setClientes(cRes.data.length); setSaldoCartera(cRes.data.reduce((s: number, c: { credito_utilizado: number }) => s + Number(c.credito_utilizado || 0), 0)); }
-    if (oRes.data) {
-      setPedidosPend(oRes.data.filter((o: { estado: string }) => ["pendiente", "confirmado", "procesando", "enviado"].includes(o.estado)).length);
-      setVentasMes(oRes.data.filter((o: { estado: string; created_at: string }) => o.estado === "completado" && o.created_at >= inicioMes).reduce((s: number, o: { total: number }) => s + Number(o.total), 0));
+    let saldo = 0, pend = 0, ventas = 0;
+    for (const o of (oRes.data ?? []) as { total: number; monto_pagado: number; estado: string; created_at: string }[]) {
+      saldo += Number(o.total) - Number(o.monto_pagado || 0);
+      if (["pendiente", "confirmado", "procesando", "enviado"].includes(o.estado)) pend++;
+      if (o.estado === "completado" && o.created_at >= inicioMes) ventas += Number(o.total);
     }
+    for (const c of (cxcRes.data ?? []) as { monto: number; monto_pagado: number; estado_pago: string }[]) {
+      if (c.estado_pago !== "anulada") saldo += Number(c.monto) - Number(c.monto_pagado || 0);
+    }
+    setPedidosPend(pend);
+    setVentasMes(ventas);
+    setSaldoCartera(Math.max(0, saldo));
     setLoading(false);
-  }, []);
+  }, [user?.id]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const stat = (icon: React.ReactNode, val: string | number, label: string, cls: string) => (

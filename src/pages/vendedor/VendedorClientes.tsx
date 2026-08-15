@@ -16,7 +16,7 @@ import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface Cli {
   id: string; codigo: string; nombre_negocio: string; ciudad: string;
-  telefono: string | null; limite_credito: number; credito_utilizado: number;
+  telefono: string | null; limite_credito: number; saldo: number;
 }
 
 const VendedorClientes = () => {
@@ -32,17 +32,37 @@ const VendedorClientes = () => {
     // Solo los clientes asignados a este vendedor
     const { data } = await supabase
       .from("clientes")
-      .select("id, codigo, nombre_negocio, ciudad, telefono, limite_credito, credito_utilizado")
+      .select("id, codigo, nombre_negocio, ciudad, telefono, limite_credito")
       .eq("activo", true)
       .eq("vendedor_asignado_id", user.id)
       .order("nombre_negocio");
-    if (data) setClientes(data as Cli[]);
+    const lista = (data ?? []) as Omit<Cli, "saldo">[];
+    const ids = lista.map((c) => c.id);
+
+    // Deuda real = saldo de órdenes (total − pagado) + saldo de cuentas por cobrar
+    const saldos = new Map<string, number>();
+    if (ids.length) {
+      const [oRes, cxcRes] = await Promise.all([
+        supabase.from("ordenes").select("cliente_id, total, monto_pagado").in("cliente_id", ids).neq("estado", "cancelado"),
+        supabase.from("cuentas_cobrar").select("cliente_id, monto, monto_pagado, estado_pago").in("cliente_id", ids),
+      ]);
+      for (const o of (oRes.data ?? []) as { cliente_id: string; total: number; monto_pagado: number }[]) {
+        const s = Number(o.total) - Number(o.monto_pagado || 0);
+        if (s > 0.009) saldos.set(o.cliente_id, (saldos.get(o.cliente_id) || 0) + s);
+      }
+      for (const c of (cxcRes.data ?? []) as { cliente_id: string; monto: number; monto_pagado: number; estado_pago: string }[]) {
+        if (c.estado_pago === "anulada") continue;
+        const s = Number(c.monto) - Number(c.monto_pagado || 0);
+        if (s > 0.009) saldos.set(c.cliente_id, (saldos.get(c.cliente_id) || 0) + s);
+      }
+    }
+    setClientes(lista.map((c) => ({ ...c, saldo: saldos.get(c.id) || 0 })));
     setLoading(false);
   }, [user?.id]);
   useEffect(() => { fetchClientes(); }, [fetchClientes]);
 
-  const totalSaldo = clientes.reduce((s, c) => s + Number(c.credito_utilizado || 0), 0);
-  const conSaldo = clientes.filter((c) => Number(c.credito_utilizado) > 0).length;
+  const totalSaldo = clientes.reduce((s, c) => s + Number(c.saldo || 0), 0);
+  const conSaldo = clientes.filter((c) => Number(c.saldo) > 0).length;
 
   const filtrados = clientes.filter((c) =>
     c.nombre_negocio.toLowerCase().includes(search.toLowerCase()) || c.codigo.toLowerCase().includes(search.toLowerCase()));
@@ -81,15 +101,16 @@ const VendedorClientes = () => {
               </TableRow></TableHeader>
               <TableBody>
                 {pagination.pageItems.map((c) => {
-                  const disp = Number(c.limite_credito) - Number(c.credito_utilizado);
-                  const excedido = Number(c.credito_utilizado) > Number(c.limite_credito);
+                  const saldo = Number(c.saldo || 0);
+                  const excedido = Number(c.limite_credito) > 0 && saldo > Number(c.limite_credito);
+                  const conDeuda = saldo > 0.009;
                   return (
                     <TableRow key={c.id} className="hover:bg-muted/50">
                       <TableCell><p className="font-medium">{c.nombre_negocio}</p><p className="text-xs text-muted-foreground">{c.codigo}</p></TableCell>
                       <TableCell className="text-muted-foreground">{c.ciudad}</TableCell>
                       <TableCell className="text-right">{formatPrice(Number(c.limite_credito))}</TableCell>
-                      <TableCell className={`text-right font-semibold ${Number(c.credito_utilizado) > 0 ? "text-destructive" : ""}`}>{formatPrice(Number(c.credito_utilizado))}</TableCell>
-                      <TableCell><Badge variant={excedido ? "destructive" : disp > 0 ? "default" : "secondary"}>{excedido ? "Excedido" : "Al día"}</Badge></TableCell>
+                      <TableCell className={`text-right font-semibold ${conDeuda ? "text-destructive" : ""}`}>{formatPrice(saldo)}</TableCell>
+                      <TableCell><Badge variant={excedido ? "destructive" : conDeuda ? "secondary" : "default"}>{excedido ? "Excedido" : conDeuda ? "Con deuda" : "Al día"}</Badge></TableCell>
                       <TableCell className="text-right">
                         {c.telefono ? <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => window.open(`tel:${c.telefono}`, "_self")}><Phone className="h-4 w-4" /></Button> : "—"}
                       </TableCell>

@@ -10,6 +10,29 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-08-14 · Auditoría del portal del vendedor
+
+Revisión módulo por módulo del portal `/vendedor` tras las importaciones de Odoo y los cambios de estructura.
+
+### Hallazgo principal (requiere decisión de negocio)
+- **Ningún cliente tiene `vendedor_asignado_id`** (0 de 432). El import de Odoo solo guardó el vendedor como **texto** en `clientes.vendedor_odoo` (15 nombres: ANDERSON ALBORNOZ 87, ELIZABETH ARGOTES 70, MARIANA GRANADOS 45, …). Como el portal y las RLS filtran por `vendedor_asignado_id`, **cada vendedor ve su portal vacío**.
+- Los 4 usuarios vendedor del app (Andres Toro, Antonio Lima, + 2 QA) **no coinciden** con los nombres de Odoo → no hay mapeo automático. **Pendiente:** decidir qué usuario-app corresponde a cada vendedor de Odoo (o crear cuentas) para poblar `vendedor_asignado_id`.
+
+### Correcciones aplicadas (código)
+- **VendedorDashboard**: ahora filtra clientes por `vendedor_asignado_id`; "Saldo cartera" usa deuda **real** (saldos de órdenes + `cuentas_cobrar`) en vez de `credito_utilizado`.
+- **VendedorClientes**: "Saldo pendiente" = deuda real por cliente (órdenes + cuentas), estado Con deuda/Excedido/Al día.
+- **VendedorPagos**: bancos **multi-método** + selector de **Método** (incluye tarjeta), etiqueta de método legible. Sigue usando `registrar_pago` (deja el cobro **pendiente** hasta que admin verifica — flujo correcto del vendedor). Lista de pagos correctamente acotada por RLS a sus clientes.
+- **VendedorPedidos**: opción de pago **Tarjeta** agregada.
+- **VendedorInventario**: filtra `productos.activo = true` (no muestra desactivados). (Sigue con stock global `productos.stock_actual`, no per-almacén — aceptable para vista de vendedor.)
+
+### Verificación
+- `tsc` limpio · `npm run build` OK · Playwright como `qa.vendedor@guds.test` con 10 clientes de prueba (asignación **revertida** después): 6 módulos cargan con **0 errores de consola**. Deuda del vendedor coincide con la del admin (FARMATODO $212.958,85, etc.).
+
+### Notas
+- `registrar_pago` deja el pago del vendedor en `estado='pendiente'`; falta confirmar/definir la UI **admin** para verificar esos pagos pendientes y que apliquen la adjudicación (hoy el admin usa `registrar_cobro` directo).
+
+---
+
 ## 2026-08-14
 
 ### Resumen

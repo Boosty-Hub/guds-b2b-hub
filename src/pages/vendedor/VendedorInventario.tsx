@@ -32,7 +32,7 @@ const VendedorInventario = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    const { data } = await supabase.from('productos').select('*').order('nombre');
+    const { data } = await supabase.from('productos').select('*').eq('activo', true).order('nombre');
     if (data) setProductos(data);
     setLoading(false);
   };
