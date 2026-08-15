@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { cn } from "@/lib/utils";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { NavLink, useNavigate } from "react-router-dom";
@@ -36,8 +37,17 @@ const mobileNavItems = [
   { icon: Settings, label: "Config", path: "/admin/configuracion" },
 ];
 
+const COLLAPSE_KEY = "guds-sb-collapsed";
+
 export function MainLayout({ children, title }: MainLayoutProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "1");
+  const toggleCollapsed = () =>
+    setCollapsed((v) => {
+      const next = !v;
+      localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      return next;
+    });
   const navigate = useNavigate();
   const { user } = useAuth();
 
@@ -54,7 +64,7 @@ export function MainLayout({ children, title }: MainLayoutProps) {
     <div className="min-h-screen bg-background">
       {/* Desktop Sidebar */}
       <div className="hidden lg:block">
-        <Sidebar />
+        <Sidebar collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
       </div>
 
       {/* Mobile Header */}
@@ -76,12 +86,12 @@ export function MainLayout({ children, title }: MainLayoutProps) {
       </header>
 
       {/* Desktop Header */}
-      <div className="hidden lg:block lg:ml-64">
+      <div className={cn("hidden lg:block transition-[margin] duration-200", collapsed ? "lg:ml-16" : "lg:ml-64")}>
         <Header title={title} />
       </div>
 
       {/* Main Content */}
-      <main className="lg:ml-64 pb-20 lg:pb-0">
+      <main className={cn("pb-20 lg:pb-0 transition-[margin] duration-200", collapsed ? "lg:ml-16" : "lg:ml-64")}>
         <div className="p-4 lg:p-6">{children}</div>
       </main>
 

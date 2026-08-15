@@ -22,6 +22,8 @@ import { CheckCircle, XCircle, Clock, Loader2, Wallet, Eye } from "lucide-react"
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface PagoAdmin {
   id: string;
@@ -116,6 +118,7 @@ const Pagos = () => {
   };
 
   const visibles = filtro === "pendiente" ? pagos.filter((p) => p.estado === "pendiente") : pagos;
+  const pagination = usePagination(visibles, 25);
   const pendientes = pagos.filter((p) => p.estado === "pendiente");
   const montoPendiente = pendientes.reduce((s, p) => s + Number(p.monto || 0), 0);
   const verificados = pagos.filter((p) => p.estado === "verificado");
@@ -197,7 +200,7 @@ const Pagos = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visibles.map((pago) => (
+                {pagination.pageItems.map((pago) => (
                   <TableRow key={pago.id} className="hover:bg-muted/50">
                     <TableCell className="font-medium text-primary">{pago.numero}</TableCell>
                     <TableCell>{pago.cliente?.nombre_negocio || "N/A"}</TableCell>
@@ -259,6 +262,7 @@ const Pagos = () => {
               </TableBody>
             </Table>
           )}
+          {!loading && <DataTablePagination pagination={pagination} />}
         </div>
       </div>
 

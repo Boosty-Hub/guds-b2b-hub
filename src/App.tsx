@@ -26,9 +26,12 @@ import Ordenes from "./pages/Ordenes";
 import Clientes from "./pages/Clientes";
 import Productos from "./pages/Productos";
 import Inventario from "./pages/Inventario";
+import Almacenes from "./pages/Almacenes";
+import AlmacenDetalle from "./pages/AlmacenDetalle";
 import Precios from "./pages/Precios";
 import Cuentas from "./pages/Cuentas";
 import Pagos from "./pages/Pagos";
+import CuentasPorCobrar from "./pages/CuentasPorCobrar";
 import Bancos from "./pages/Bancos";
 import Perfil from "./pages/Perfil";
 import NotFound from "./pages/NotFound";
@@ -89,6 +92,7 @@ import RegistrosClientes from "./pages/RegistrosClientes";
 
 // Admin Cliente Usuarios
 import ClienteUsuarios from "./pages/ClienteUsuarios";
+import ClienteDetalle from "./pages/ClienteDetalle";
 
 // Portal de Delivery
 import DeliveryDashboard from "./pages/delivery/DeliveryDashboard";
@@ -124,12 +128,16 @@ const App = () => (
                 <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><Index /></ProtectedRoute>} />
                 <Route path="/admin/ordenes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="ordenes"><Ordenes /></ProtectedRoute>} />
                 <Route path="/admin/clientes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="clientes"><Clientes /></ProtectedRoute>} />
+                <Route path="/admin/clientes/:clienteId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="clientes"><ClienteDetalle /></ProtectedRoute>} />
                 <Route path="/admin/clientes/:clienteId/usuarios" element={<ProtectedRoute allowedRoles={["admin"]} modulo="clientes"><ClienteUsuarios /></ProtectedRoute>} />
                 <Route path="/admin/productos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="productos"><Productos /></ProtectedRoute>} />
                 <Route path="/admin/inventario" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><Inventario /></ProtectedRoute>} />
+                <Route path="/admin/almacenes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><Almacenes /></ProtectedRoute>} />
+                <Route path="/admin/almacenes/:almacenId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><AlmacenDetalle /></ProtectedRoute>} />
                 <Route path="/admin/precios" element={<ProtectedRoute allowedRoles={["admin"]} modulo="precios"><Precios /></ProtectedRoute>} />
                 <Route path="/admin/cuentas" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Cuentas /></ProtectedRoute>} />
                 <Route path="/admin/pagos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Pagos /></ProtectedRoute>} />
+                <Route path="/admin/cuentas-por-cobrar" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><CuentasPorCobrar /></ProtectedRoute>} />
                 <Route path="/admin/bancos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="bancos"><Bancos /></ProtectedRoute>} />
                 <Route path="/admin/cupones" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cupones"><Cupones /></ProtectedRoute>} />
                 <Route path="/admin/banners" element={<ProtectedRoute allowedRoles={["admin"]} modulo="banners"><Banners /></ProtectedRoute>} />

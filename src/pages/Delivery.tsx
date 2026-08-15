@@ -17,6 +17,8 @@ import { Truck, Package, Clock, CheckCircle, Loader2, UserPlus } from "lucide-re
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface Repartidor { id: string; nombre: string; apellido: string | null; }
 interface Orden {
@@ -86,6 +88,9 @@ const Delivery = () => {
   const entregadas = entregas.filter((e) => e.estado === "entregada").length;
   const fmt = (s: string | null) => (s ? new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }) : "—");
 
+  const pagination = usePagination(ordenes, 25);
+  const pagination2 = usePagination(entregas, 25);
+
   const stat = (icon: React.ReactNode, n: number, label: string, cls: string) => (
     <div className="rounded-lg border border-border bg-card p-4"><div className="flex items-center gap-3">
       <div className={`rounded-lg p-2 ${cls}`}>{icon}</div>
@@ -119,7 +124,7 @@ const Delivery = () => {
                   <TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead><TableHead className="text-right">Acción</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {ordenes.map((o) => (
+                  {pagination.pageItems.map((o) => (
                     <TableRow key={o.id} className="hover:bg-muted/50">
                       <TableCell className="font-medium text-primary">{o.numero}</TableCell>
                       <TableCell>{o.cliente?.nombre_negocio || "—"}</TableCell>
@@ -136,6 +141,7 @@ const Delivery = () => {
                 </TableBody>
               </Table>
             )}
+            {!loading && <DataTablePagination pagination={pagination} />}
           </div>
         </TabsContent>
 
@@ -150,7 +156,7 @@ const Delivery = () => {
                   <TableHead>Asignada</TableHead><TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {entregas.map((e) => (
+                  {pagination2.pageItems.map((e) => (
                     <TableRow key={e.id} className="hover:bg-muted/50">
                       <TableCell className="font-medium text-primary">{e.orden?.numero || "—"}</TableCell>
                       <TableCell>{e.orden?.cliente?.nombre_negocio || "—"}</TableCell>
@@ -163,6 +169,7 @@ const Delivery = () => {
                 </TableBody>
               </Table>
             )}
+            {!loading && <DataTablePagination pagination={pagination2} />}
           </div>
         </TabsContent>
       </Tabs>

@@ -25,3 +25,9 @@ dist-ssr
 
 # Supabase CLI
 supabase/.temp
+
+# Scripts con credenciales (NO subir: contienen secretos de Odoo)
+scripts/odoo-verificar.mjs
+scripts/node_modules
+scripts/package-lock.json
+scripts/package.json

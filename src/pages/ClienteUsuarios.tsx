@@ -50,6 +50,8 @@ import {
 } from "lucide-react";
 import { supabase, Usuario, Cliente } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 const ClienteUsuarios = () => {
   const { clienteId } = useParams<{ clienteId: string }>();
@@ -257,6 +259,8 @@ const ClienteUsuarios = () => {
     (u.apellido && u.apellido.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  const pagination = usePagination(filteredUsuarios, 25);
+
   return (
     <MainLayout title={`Usuarios - ${cliente?.nombre_negocio || 'Cliente'}`}>
       {/* Back Button & Header */}
@@ -353,7 +357,7 @@ const ClienteUsuarios = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredUsuarios.map((usuario) => (
+              {pagination.pageItems.map((usuario) => (
                 <TableRow key={usuario.id} className="hover:bg-muted/50">
                   <TableCell>
                     <div className="flex items-center gap-3">
@@ -409,6 +413,7 @@ const ClienteUsuarios = () => {
             </TableBody>
           </Table>
         )}
+        {!loading && <DataTablePagination pagination={pagination} />}
       </div>
 
       {/* Create User Sheet */}

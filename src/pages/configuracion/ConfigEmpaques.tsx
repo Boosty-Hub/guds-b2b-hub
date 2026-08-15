@@ -34,6 +34,8 @@ import {
 import { Plus, Edit, Trash2, Package, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase, TipoEmpaque } from "@/lib/supabase";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 const ConfigEmpaques = () => {
   const [empaques, setEmpaques] = useState<TipoEmpaque[]>([]);
@@ -166,6 +168,8 @@ const ConfigEmpaques = () => {
     setIsEditOpen(true);
   };
 
+  const pagination = usePagination(empaques, 25);
+
   return (
     <ConfiguracionLayout 
       title="Tipos de Empaque" 
@@ -211,7 +215,7 @@ const ConfigEmpaques = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {empaques.map((empaque) => (
+                {pagination.pageItems.map((empaque) => (
                   <TableRow key={empaque.id}>
                     <TableCell className="font-medium">{empaque.nombre}</TableCell>
                     <TableCell className="text-muted-foreground">{empaque.descripcion || '-'}</TableCell>
@@ -242,6 +246,7 @@ const ConfigEmpaques = () => {
               </TableBody>
             </Table>
           )}
+          {!loading && empaques.length > 0 && <DataTablePagination pagination={pagination} />}
         </CardContent>
       </Card>
 

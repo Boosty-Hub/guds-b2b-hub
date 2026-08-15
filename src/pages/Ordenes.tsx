@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
+import { cn } from "@/lib/utils";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,10 +32,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Plus, Search, Eye, Truck, Loader2, Package, CheckCircle, Clock, X } from "lucide-react";
+import { Plus, Search, Eye, Truck, Loader2, Package, CheckCircle, Clock, X, Users, ChevronRight } from "lucide-react";
 import { supabase, Cliente, Producto } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface OrdenDB {
   id: string;
@@ -42,12 +45,17 @@ interface OrdenDB {
   cliente_id: string;
   estado: string;
   subtotal: number;
+  impuesto: number;
   descuento: number;
+  envio: number;
   total: number;
   metodo_pago: string;
+  moneda_original: string | null;
+  vendedor_odoo: string | null;
   comprobante_url: string | null;
   referencia_pago: string | null;
   notas: string;
+  fecha_pedido: string | null;
   fecha_entrega: string | null;
   created_at: string;
   cliente?: {
@@ -65,6 +73,7 @@ interface OrdenItem {
   cantidad: number;
   precio_unitario: number;
   subtotal: number;
+  nombre_producto?: string;
   producto?: {
     nombre: string;
     imagen_emoji: string;
@@ -88,6 +97,9 @@ const Ordenes = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [grouped, setGrouped] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (k: string) => setOpenGroups((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const [selectedOrder, setSelectedOrder] = useState<OrdenDB | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -124,7 +136,8 @@ const Ordenes = () => {
         cliente:clientes(nombre_negocio, direccion, ciudad, telefono),
         items:orden_items(*, producto:productos(nombre, imagen_emoji, imagen_url))
       `)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(5000); // el default de Supabase es 1000; con el histórico importado hay más
     
     if (data) setOrdenes(data);
     setLoading(false);
@@ -251,6 +264,39 @@ const Ordenes = () => {
     return matchesSearch && matchesStatus;
   });
 
+  const pagination = usePagination(filteredOrdenes, 25);
+
+  const grupos = useMemo(() => {
+    const m = new Map<string, { key: string; nombre: string; orders: OrdenDB[]; total: number }>();
+    for (const o of filteredOrdenes) {
+      const key = o.cliente_id || "sin";
+      const g = m.get(key) || { key, nombre: o.cliente?.nombre_negocio || "Sin cliente", orders: [], total: 0 };
+      g.orders.push(o); g.total += Number(o.total || 0);
+      m.set(key, g);
+    }
+    return [...m.values()].sort((a, b) => b.orders.length - a.orders.length);
+  }, [filteredOrdenes]);
+
+  const renderOrderRow = (orden: OrdenDB) => (
+    <TableRow
+      key={orden.id}
+      className="cursor-pointer hover:bg-muted/50"
+      onClick={() => { setSelectedOrder(orden); setIsDetailOpen(true); }}
+    >
+      <TableCell className="font-medium text-primary">{orden.numero}</TableCell>
+      <TableCell className="font-medium">{orden.cliente?.nombre_negocio || 'N/A'}</TableCell>
+      <TableCell className="text-center">{orden.items?.length || 0}</TableCell>
+      <TableCell className="text-right font-semibold">{formatPrice(orden.total)}</TableCell>
+      <TableCell>
+        <Badge variant={statusConfig[orden.estado]?.variant || "secondary"}>
+          {statusConfig[orden.estado]?.label || orden.estado}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-muted-foreground">{formatDate(orden.created_at)}</TableCell>
+      <TableCell className="text-muted-foreground capitalize">{orden.metodo_pago?.replace('_', ' ') || 'N/A'}</TableCell>
+    </TableRow>
+  );
+
   const orderTotal = newOrder.items.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
 
   return (
@@ -282,10 +328,16 @@ const Ordenes = () => {
             </SelectContent>
           </Select>
         </div>
-        <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Nueva Orden
-        </Button>
+        <div className="flex gap-2">
+          <Button variant={grouped ? "default" : "outline"} className="gap-2" onClick={() => setGrouped((g) => !g)}>
+            <Users className="h-4 w-4" />
+            {grouped ? "Agrupado por cliente" : "Agrupar por cliente"}
+          </Button>
+          <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Nueva Orden
+          </Button>
+        </div>
       </div>
 
       {/* Orders Table */}
@@ -309,153 +361,175 @@ const Ordenes = () => {
                 <TableHead>Estado</TableHead>
                 <TableHead>Fecha</TableHead>
                 <TableHead>Método Pago</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredOrdenes.map((orden) => (
-                <TableRow key={orden.id} className="hover:bg-muted/50">
-                  <TableCell className="font-medium text-primary">{orden.numero}</TableCell>
-                  <TableCell className="font-medium">{orden.cliente?.nombre_negocio || 'N/A'}</TableCell>
-                  <TableCell className="text-center">{orden.items?.length || 0}</TableCell>
-                  <TableCell className="text-right font-semibold">{formatPrice(orden.total)}</TableCell>
-                  <TableCell>
-                    <Badge variant={statusConfig[orden.estado]?.variant || "secondary"}>
-                      {statusConfig[orden.estado]?.label || orden.estado}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{formatDate(orden.created_at)}</TableCell>
-                  <TableCell className="text-muted-foreground capitalize">{orden.metodo_pago?.replace('_', ' ') || 'N/A'}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-8 w-8"
-                        onClick={() => {
-                          setSelectedOrder(orden);
-                          setIsDetailOpen(true);
-                        }}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {grouped
+                ? grupos.map((g) => (
+                    <Fragment key={g.key}>
+                      <TableRow className="cursor-pointer bg-muted/40 hover:bg-muted" onClick={() => toggleGroup(g.key)}>
+                        <TableCell colSpan={7}>
+                          <div className="flex items-center gap-2 font-medium">
+                            <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", openGroups.has(g.key) && "rotate-90")} />
+                            <span className="truncate">{g.nombre}</span>
+                            <Badge variant="secondary">{g.orders.length} órden{g.orders.length !== 1 ? "es" : ""}</Badge>
+                            <span className="ml-auto font-semibold text-primary">{formatPrice(g.total)}</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {openGroups.has(g.key) && g.orders.map(renderOrderRow)}
+                    </Fragment>
+                  ))
+                : pagination.pageItems.map(renderOrderRow)}
             </TableBody>
           </Table>
+        )}
+        {!loading && !grouped && <DataTablePagination pagination={pagination} />}
+        {!loading && grouped && filteredOrdenes.length > 0 && (
+          <div className="border-t border-border px-4 py-2.5 text-sm text-muted-foreground">
+            {grupos.length} cliente{grupos.length !== 1 ? "s" : ""} · {filteredOrdenes.length} órdenes
+          </div>
         )}
       </div>
 
       {/* Order Detail Sheet */}
       <Sheet open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetContent className="w-full overflow-y-auto sm:w-[50vw] sm:max-w-none">
           <SheetHeader>
             <SheetTitle>Detalle de Orden</SheetTitle>
           </SheetHeader>
           
           {selectedOrder && (
             <div className="mt-6 space-y-6">
-              {/* Order Info */}
-              <div className="bg-muted rounded-xl p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-lg font-bold text-primary">{selectedOrder.numero}</span>
+              {/* Cabecera */}
+              <div className="rounded-xl border bg-muted/40 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-2xl font-bold text-primary">{selectedOrder.numero}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {formatDate(selectedOrder.fecha_pedido || selectedOrder.created_at)}
+                    </p>
+                  </div>
                   <Badge variant={statusConfig[selectedOrder.estado]?.variant || "secondary"}>
                     {statusConfig[selectedOrder.estado]?.label || selectedOrder.estado}
                   </Badge>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
                   <div>
-                    <span className="text-muted-foreground">Fecha:</span>
-                    <p className="font-medium">{formatDate(selectedOrder.created_at)}</p>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Vendedor</p>
+                    <p className="font-medium">{selectedOrder.vendedor_odoo || '—'}</p>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Método:</span>
-                    <p className="font-medium capitalize">{selectedOrder.metodo_pago?.replace('_', ' ')}</p>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Método de pago</p>
+                    <p className="font-medium capitalize">{selectedOrder.metodo_pago?.replace('_', ' ') || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Moneda</p>
+                    <p className="font-medium">{selectedOrder.moneda_original || '—'}</p>
                   </div>
                   {selectedOrder.referencia_pago && (
                     <div>
-                      <span className="text-muted-foreground">Referencia:</span>
-                      <p className="font-medium font-mono">{selectedOrder.referencia_pago}</p>
-                    </div>
-                  )}
-                  {selectedOrder.comprobante_url && (
-                    <div>
-                      <span className="text-muted-foreground">Comprobante:</span>
-                      <div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="mt-1"
-                          onClick={() => verComprobanteOrden(selectedOrder.comprobante_url!)}
-                        >
-                          <Eye className="h-4 w-4 mr-2" />
-                          Ver comprobante
-                        </Button>
-                      </div>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Referencia</p>
+                      <p className="font-mono font-medium">{selectedOrder.referencia_pago}</p>
                     </div>
                   )}
                 </div>
+                {selectedOrder.comprobante_url && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => verComprobanteOrden(selectedOrder.comprobante_url!)}
+                  >
+                    <Eye className="mr-2 h-4 w-4" />
+                    Ver comprobante
+                  </Button>
+                )}
               </div>
 
-              {/* Client Info */}
-              <div>
-                <h3 className="font-semibold mb-2">Cliente</h3>
-                <div className="bg-card border rounded-xl p-4">
+              {/* Cliente + Resumen */}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-xl border p-4">
+                  <h3 className="mb-2 font-semibold">Cliente</h3>
                   <p className="font-medium">{selectedOrder.cliente?.nombre_negocio}</p>
-                  <p className="text-sm text-muted-foreground">{selectedOrder.cliente?.direccion}</p>
-                  <p className="text-sm text-muted-foreground">{selectedOrder.cliente?.ciudad}</p>
+                  {selectedOrder.cliente?.direccion && (
+                    <p className="text-sm text-muted-foreground">{selectedOrder.cliente.direccion}</p>
+                  )}
+                  {selectedOrder.cliente?.ciudad && (
+                    <p className="text-sm text-muted-foreground">{selectedOrder.cliente.ciudad}</p>
+                  )}
                   {selectedOrder.cliente?.telefono && (
                     <p className="text-sm text-muted-foreground">Tel: {selectedOrder.cliente.telefono}</p>
                   )}
                 </div>
-              </div>
-
-              {/* Products */}
-              <div>
-                <h3 className="font-semibold mb-2">Productos ({selectedOrder.items?.length || 0})</h3>
-                <div className="space-y-2">
-                  {selectedOrder.items?.map((item) => (
-                    <div key={item.id} className="flex items-center gap-3 bg-card border rounded-lg p-3">
-                      <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center text-xl">
-                        {item.producto?.imagen_emoji || '📦'}
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-medium text-sm">{item.producto?.nombre}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {item.cantidad} x {formatPrice(item.precio_unitario)}
-                        </p>
-                      </div>
-                      <p className="font-medium">{formatPrice(item.subtotal)}</p>
+                <div className="rounded-xl border p-4">
+                  <h3 className="mb-2 font-semibold">Resumen</h3>
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Subtotal</span>
+                      <span>{formatPrice(selectedOrder.subtotal)}</span>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Summary */}
-              <div className="bg-muted rounded-xl p-4 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Subtotal</span>
-                  <span>{formatPrice(selectedOrder.subtotal)}</span>
-                </div>
-                {selectedOrder.descuento > 0 && (
-                  <div className="flex justify-between text-sm text-green-600">
-                    <span>Descuento</span>
-                    <span>-{formatPrice(selectedOrder.descuento)}</span>
+                    {selectedOrder.impuesto > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Impuesto</span>
+                        <span>{formatPrice(selectedOrder.impuesto)}</span>
+                      </div>
+                    )}
+                    {selectedOrder.descuento > 0 && (
+                      <div className="flex justify-between text-green-600">
+                        <span>Descuento</span>
+                        <span>-{formatPrice(selectedOrder.descuento)}</span>
+                      </div>
+                    )}
+                    {selectedOrder.envio > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Envío</span>
+                        <span>{formatPrice(selectedOrder.envio)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t pt-2 text-base font-bold">
+                      <span>Total</span>
+                      <span className="text-primary">{formatPrice(selectedOrder.total)}</span>
+                    </div>
                   </div>
-                )}
-                <div className="flex justify-between font-bold text-lg pt-2 border-t">
-                  <span>Total</span>
-                  <span className="text-primary">{formatPrice(selectedOrder.total)}</span>
                 </div>
               </div>
 
-              {/* Status Actions */}
+              {/* Productos */}
               <div>
-                <h3 className="font-semibold mb-2">Cambiar Estado</h3>
-                <div className="grid grid-cols-2 gap-2">
+                <h3 className="mb-2 font-semibold">Productos ({selectedOrder.items?.length || 0})</h3>
+                <div className="rounded-xl border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Producto</TableHead>
+                        <TableHead className="text-center">Cant.</TableHead>
+                        <TableHead className="text-right">Precio</TableHead>
+                        <TableHead className="text-right">Subtotal</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedOrder.items?.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-medium">
+                            <span className="mr-2">{item.producto?.imagen_emoji || '📦'}</span>
+                            {item.producto?.nombre || item.nombre_producto || 'Producto'}
+                          </TableCell>
+                          <TableCell className="text-center">{item.cantidad}</TableCell>
+                          <TableCell className="text-right">{formatPrice(item.precio_unitario)}</TableCell>
+                          <TableCell className="text-right font-medium">{formatPrice(item.subtotal)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              {/* Cambiar estado */}
+              <div>
+                <h3 className="mb-2 font-semibold">Cambiar estado</h3>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {['pendiente', 'confirmado', 'procesando', 'enviado', 'completado', 'cancelado'].map((status) => (
                     <Button
                       key={status}
@@ -463,7 +537,6 @@ const Ordenes = () => {
                       size="sm"
                       disabled={updatingStatus || selectedOrder.estado === status}
                       onClick={() => updateOrderStatus(selectedOrder.id, status)}
-                      className="capitalize"
                     >
                       {updatingStatus ? <Loader2 className="h-4 w-4 animate-spin" /> : statusConfig[status]?.label}
                     </Button>
@@ -471,11 +544,11 @@ const Ordenes = () => {
                 </div>
               </div>
 
-              {/* Notes */}
+              {/* Notas */}
               {selectedOrder.notas && (
                 <div>
-                  <h3 className="font-semibold mb-2">Notas</h3>
-                  <p className="text-sm text-muted-foreground bg-card border rounded-lg p-3">
+                  <h3 className="mb-2 font-semibold">Notas</h3>
+                  <p className="rounded-lg border bg-card p-3 text-sm text-muted-foreground">
                     {selectedOrder.notas}
                   </p>
                 </div>

@@ -222,9 +222,18 @@ Deno.serve(async (req) => {
 
     if (!tasa) throw new Error("No se pudo obtener la tasa del BCV en este momento");
 
+    // Secret key: esquema NUEVO (SUPABASE_SECRET_KEYS, JSON keyed by name) con
+    // fallback a la legacy SUPABASE_SERVICE_ROLE_KEY mientras siga habilitada.
+    // Así funciona antes y después de deshabilitar las llaves JWT legacy.
+    const secretKey =
+      (() => {
+        try { return JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}")["default"]; }
+        catch { return undefined; }
+      })() ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      secretKey!,
     );
     const { error } = await supabase.rpc("upsert_tasa_bcv", { p_tasa: tasa, p_fuente: fuente });
     if (error) throw error;

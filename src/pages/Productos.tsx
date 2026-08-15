@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import * as XLSX from 'xlsx';
+import { cn } from "@/lib/utils";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,7 +47,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Search, Package, Edit, Trash2, Loader2, MoreHorizontal, CheckSquare, XSquare, Tag, FolderOpen, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Plus, Search, Package, Edit, Trash2, Loader2, MoreHorizontal, CheckSquare, XSquare, Tag, FolderOpen, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, ChevronRight } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownMenu,
@@ -59,6 +60,8 @@ import { supabase, Producto, Categoria, TipoEmpaque, ProductoEmpaque } from "@/l
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { ProductImagesInput } from "@/components/products/ProductImagesInput";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface ProductoConRelaciones extends Producto {
   categoria: Categoria | null;
@@ -89,6 +92,9 @@ const Productos = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [categoriaFilter, setCategoriaFilter] = useState("all");
+  const [grouped, setGrouped] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (k: string) => setOpenGroups((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -843,6 +849,8 @@ const Productos = () => {
     return matchSearch && matchCategoria;
   });
 
+  const pagination = usePagination(filteredProductos, 25);
+
   const stats = {
     total: productos.length,
     disponibles: productos.filter(p => p.stock_actual > p.stock_minimo).length,
@@ -854,6 +862,84 @@ const Productos = () => {
     if (p.stock_actual === 0) return { label: "Agotado", variant: "destructive" as const };
     if (p.stock_actual <= p.stock_minimo) return { label: "Bajo Stock", variant: "secondary" as const };
     return { label: "Disponible", variant: "default" as const };
+  };
+
+  const grupos = useMemo(() => {
+    const m = new Map<string, { key: string; nombre: string; items: ProductoConRelaciones[] }>();
+    for (const p of filteredProductos) {
+      const key = p.categoria_id || "sin";
+      const g = m.get(key) || { key, nombre: p.categoria?.nombre || "Sin categoría", items: [] };
+      g.items.push(p);
+      m.set(key, g);
+    }
+    return [...m.values()].sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [filteredProductos]);
+
+  const renderProductoRow = (producto: ProductoConRelaciones) => {
+    const status = getStatus(producto);
+    const isSelected = selectedIds.includes(producto.id);
+    return (
+      <TableRow
+        key={producto.id}
+        className={`hover:bg-muted/50 cursor-pointer ${isSelected ? 'bg-primary/5' : ''}`}
+        onClick={() => openEditSheet(producto)}
+      >
+        <TableCell onClick={(e) => e.stopPropagation()}>
+          <Checkbox checked={isSelected} onCheckedChange={() => toggleSelect(producto.id)} />
+        </TableCell>
+        <TableCell className="font-mono text-sm text-primary">{producto.sku}</TableCell>
+        <TableCell className="font-medium">
+          <div className="flex items-center gap-2">
+            {producto.imagen_url ? (
+              <img src={producto.imagen_url} alt={producto.nombre} className="h-8 w-8 rounded object-cover" />
+            ) : (
+              <Package className="h-5 w-5 text-muted-foreground" />
+            )}
+            {producto.nombre}
+          </div>
+        </TableCell>
+        <TableCell className="text-muted-foreground">{producto.categoria?.nombre || 'Sin Categoría'}</TableCell>
+        <TableCell>
+          <div className="flex flex-wrap gap-1">
+            {producto.producto_empaques && producto.producto_empaques.length > 0 ? (
+              producto.producto_empaques.map(pe => (
+                <Badge key={pe.id} variant="outline" className="text-xs">
+                  {pe.tipo_empaque?.nombre}
+                  {pe.tipo_empaque && pe.tipo_empaque.unidades > 1 && (
+                    <span className="ml-1 text-muted-foreground">({pe.tipo_empaque.unidades}u)</span>
+                  )}
+                </Badge>
+              ))
+            ) : (
+              <Badge variant="outline">{producto.unidad}</Badge>
+            )}
+          </div>
+        </TableCell>
+        <TableCell className="text-right font-semibold">{formatPrice(producto.precio_base)}</TableCell>
+        <TableCell className="text-center">{producto.stock_actual}</TableCell>
+        <TableCell>
+          <Badge variant={status.variant}>{status.label}</Badge>
+        </TableCell>
+        <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+          <Switch checked={producto.activo} onCheckedChange={(checked) => handleToggleActivo(producto.id, checked)} />
+        </TableCell>
+        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+          <div className="flex justify-end gap-1">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditSheet(producto)}>
+              <Edit className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive hover:text-destructive"
+              onClick={() => { setSelectedProducto(producto); setIsDeleteOpen(true); }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+    );
   };
 
   return (
@@ -931,6 +1017,10 @@ const Productos = () => {
           </Select>
         </div>
         <div className="flex gap-2">
+          <Button variant={grouped ? "default" : "outline"} className="gap-2" onClick={() => setGrouped((g) => !g)}>
+            <FolderOpen className="h-4 w-4" />
+            {grouped ? "Agrupado por categoría" : "Agrupar por categoría"}
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="gap-2">
@@ -1050,80 +1140,30 @@ const Productos = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredProductos.map((producto) => {
-                const status = getStatus(producto);
-                const isSelected = selectedIds.includes(producto.id);
-                return (
-                  <TableRow 
-                    key={producto.id} 
-                    className={`hover:bg-muted/50 cursor-pointer ${isSelected ? 'bg-primary/5' : ''}`}
-                    onClick={() => openEditSheet(producto)}
-                  >
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={() => toggleSelect(producto.id)}
-                      />
-                    </TableCell>
-                    <TableCell className="font-mono text-sm text-primary">{producto.sku}</TableCell>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        {producto.imagen_url ? (
-                          <img src={producto.imagen_url} alt={producto.nombre} className="h-8 w-8 rounded object-cover" />
-                        ) : (
-                          <Package className="h-5 w-5 text-muted-foreground" />
-                        )}
-                        {producto.nombre}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{producto.categoria?.nombre || 'Sin Categoría'}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {producto.producto_empaques && producto.producto_empaques.length > 0 ? (
-                          producto.producto_empaques.map(pe => (
-                            <Badge key={pe.id} variant="outline" className="text-xs">
-                              {pe.tipo_empaque?.nombre}
-                              {pe.tipo_empaque && pe.tipo_empaque.unidades > 1 && (
-                                <span className="ml-1 text-muted-foreground">({pe.tipo_empaque.unidades}u)</span>
-                              )}
-                            </Badge>
-                          ))
-                        ) : (
-                          <Badge variant="outline">{producto.unidad}</Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">{formatPrice(producto.precio_base)}</TableCell>
-                    <TableCell className="text-center">{producto.stock_actual}</TableCell>
-                    <TableCell>
-                      <Badge variant={status.variant}>{status.label}</Badge>
-                    </TableCell>
-                    <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
-                      <Switch
-                        checked={producto.activo}
-                        onCheckedChange={(checked) => handleToggleActivo(producto.id, checked)}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditSheet(producto)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => { setSelectedProducto(producto); setIsDeleteOpen(true); }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+              {grouped
+                ? grupos.map((g) => (
+                    <Fragment key={g.key}>
+                      <TableRow className="cursor-pointer bg-muted/40 hover:bg-muted" onClick={() => toggleGroup(g.key)}>
+                        <TableCell colSpan={10}>
+                          <div className="flex items-center gap-2 font-medium">
+                            <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", openGroups.has(g.key) && "rotate-90")} />
+                            <span className="truncate">{g.nombre}</span>
+                            <Badge variant="secondary">{g.items.length} producto{g.items.length !== 1 ? "s" : ""}</Badge>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {openGroups.has(g.key) && g.items.map(renderProductoRow)}
+                    </Fragment>
+                  ))
+                : pagination.pageItems.map(renderProductoRow)}
             </TableBody>
           </Table>
+        )}
+        {!loading && !grouped && <DataTablePagination pagination={pagination} />}
+        {!loading && grouped && filteredProductos.length > 0 && (
+          <div className="border-t border-border px-4 py-2.5 text-sm text-muted-foreground">
+            {grupos.length} categoría{grupos.length !== 1 ? "s" : ""} · {filteredProductos.length} productos
+          </div>
         )}
       </div>
 

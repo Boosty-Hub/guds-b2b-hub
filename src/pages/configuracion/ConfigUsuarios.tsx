@@ -59,6 +59,8 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase, Rol, Modulo, Permiso } from "@/lib/supabase";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface UsuarioConRol {
   id: string;
@@ -483,6 +485,9 @@ const ConfigUsuarios = () => {
     return matchSearch && matchRol;
   });
 
+  const pagination = usePagination(filteredUsuarios, 25);
+  const pagination2 = usePagination(modulos, 25);
+
   const stats = {
     total: usuarios.length,
     activos: usuarios.filter(u => u.activo).length,
@@ -618,7 +623,7 @@ const ConfigUsuarios = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredUsuarios.map((usuario) => (
+                    {pagination.pageItems.map((usuario) => (
                       <TableRow key={usuario.id}>
                         <TableCell>
                           <div className="flex items-center gap-3">
@@ -688,6 +693,7 @@ const ConfigUsuarios = () => {
                   </TableBody>
                 </Table>
               )}
+              {!loading && <DataTablePagination pagination={pagination} />}
             </CardContent>
           </Card>
         </TabsContent>
@@ -970,7 +976,7 @@ const ConfigUsuarios = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {modulos.map(modulo => (
+                    {pagination2.pageItems.map(modulo => (
                       <TableRow key={modulo.id}>
                         <TableCell className="font-medium">{modulo.nombre}</TableCell>
                         <TableCell className="text-center">
@@ -1012,6 +1018,7 @@ const ConfigUsuarios = () => {
                     ))}
                   </TableBody>
                 </Table>
+                <DataTablePagination pagination={pagination2} />
               </div>
             </div>
           </div>

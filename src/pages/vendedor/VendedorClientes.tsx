@@ -11,6 +11,8 @@ import { Search, Users, Loader2, Phone } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface Cli {
   id: string; codigo: string; nombre_negocio: string; ciudad: string;
@@ -45,6 +47,8 @@ const VendedorClientes = () => {
   const filtrados = clientes.filter((c) =>
     c.nombre_negocio.toLowerCase().includes(search.toLowerCase()) || c.codigo.toLowerCase().includes(search.toLowerCase()));
 
+  const pagination = usePagination(filtrados, 25);
+
   return (
     <VendedorLayout title="Mis Clientes">
       <div className="space-y-6">
@@ -76,7 +80,7 @@ const VendedorClientes = () => {
                 <TableHead>Estado</TableHead><TableHead className="text-right">Contacto</TableHead>
               </TableRow></TableHeader>
               <TableBody>
-                {filtrados.map((c) => {
+                {pagination.pageItems.map((c) => {
                   const disp = Number(c.limite_credito) - Number(c.credito_utilizado);
                   const excedido = Number(c.credito_utilizado) > Number(c.limite_credito);
                   return (
@@ -95,6 +99,7 @@ const VendedorClientes = () => {
               </TableBody>
             </Table>
           )}
+          {!loading && filtrados.length > 0 && <DataTablePagination pagination={pagination} />}
         </div>
       </div>
     </VendedorLayout>

@@ -77,10 +77,13 @@ export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const formatPrice = (priceUSD: number): string => {
+    // Robusto ante null/undefined/NaN (datos importados pueden venir sin valor).
+    const n = Number(priceUSD);
+    const safe = Number.isFinite(n) ? n : 0;
     if (currency === "USD") {
-      return `$${priceUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `$${safe.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     } else {
-      const priceBS = convertToBS(priceUSD);
+      const priceBS = convertToBS(safe);
       return `Bs. ${priceBS.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
   };

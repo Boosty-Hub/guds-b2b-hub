@@ -17,6 +17,8 @@ import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface Orden { id: string; numero: string; total: number; estado: string; created_at: string; cliente?: { nombre_negocio: string } | null; }
 interface Cli { id: string; nombre_negocio: string; }
@@ -157,6 +159,8 @@ const VendedorPedidos = () => {
 
   const fmt = (s: string) => new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
+  const pagination = usePagination(ordenes, 25);
+
   return (
     <VendedorLayout title="Pedidos">
       <div className="flex items-center justify-between mb-4">
@@ -174,7 +178,7 @@ const VendedorPedidos = () => {
               <TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {ordenes.map((o) => (
+              {pagination.pageItems.map((o) => (
                 <TableRow key={o.id} className="hover:bg-muted/50">
                   <TableCell className="font-medium text-emerald-600">{o.numero}</TableCell>
                   <TableCell>{o.cliente?.nombre_negocio || "—"}</TableCell>
@@ -186,6 +190,7 @@ const VendedorPedidos = () => {
             </TableBody>
           </Table>
         )}
+        {!loading && ordenes.length > 0 && <DataTablePagination pagination={pagination} />}
       </div>
 
       {/* Nuevo pedido */}

@@ -34,6 +34,8 @@ import { Plus, Search, Tags, Edit, Users, Percent, Loader2, Trash2, Check } from
 import { supabase, ListaPrecios, Producto, Cliente } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface ListaConClientes extends ListaPrecios {
   clientes_count?: number;
@@ -384,6 +386,9 @@ const Precios = () => {
     l.nombre.toLowerCase().includes(listSearchTerm.toLowerCase())
   );
 
+  const pagination = usePagination(filteredProductos, 25);
+  const pagination2 = usePagination(filteredProductosPrecios, 25);
+
   const stats = {
     total: listas.length,
     activas: listas.filter(l => l.activo).length,
@@ -566,7 +571,7 @@ const Precios = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredProductos.map((producto) => (
+                  {pagination.pageItems.map((producto) => (
                     <TableRow key={producto.id} className="hover:bg-muted/50">
                       <TableCell className="font-mono text-sm text-primary">{producto.sku}</TableCell>
                       <TableCell className="font-medium">
@@ -589,6 +594,7 @@ const Precios = () => {
                 </TableBody>
               </Table>
             )}
+            {!loading && <DataTablePagination pagination={pagination} />}
           </div>
         </TabsContent>
       </Tabs>
@@ -855,7 +861,7 @@ const Precios = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredProductosPrecios.map((producto) => {
+                  {pagination2.pageItems.map((producto) => {
                     const precioConDescuento = calcularPrecioConDescuento(producto.precio_base);
                     const tieneManual = producto.precio_lista !== null || preciosModificados[producto.id] !== undefined;
                     const precioActual = getPrecioActual(producto);
@@ -912,6 +918,7 @@ const Precios = () => {
                   })}
                 </TableBody>
               </Table>
+              <DataTablePagination pagination={pagination2} />
             </ScrollArea>
 
             <div className="flex gap-2 pt-4">

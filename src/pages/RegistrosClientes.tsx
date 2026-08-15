@@ -57,6 +57,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, RegistroCliente } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 const statusConfig = {
   pendiente: { label: "Pendiente", color: "bg-yellow-500", icon: Clock },
@@ -88,6 +90,8 @@ const RegistrosClientes = () => {
     const matchesStatus = statusFilter === "all" || reg.estado === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  const pagination = usePagination(filteredRegistros, 25);
 
   const handleApprove = async () => {
     if (!selectedRegistro) return;
@@ -249,10 +253,14 @@ const RegistrosClientes = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredRegistros.map((registro) => {
+              {pagination.pageItems.map((registro) => {
                 const StatusIcon = statusConfig[registro.estado].icon;
                 return (
-                  <TableRow key={registro.id}>
+                  <TableRow
+                    key={registro.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => openViewDialog(registro)}
+                  >
                     <TableCell>
                       <div>
                         <p className="font-medium">{registro.nombreNegocio}</p>
@@ -277,51 +285,45 @@ const RegistrosClientes = () => {
                         {statusConfig[registro.estado].label}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => openViewDialog(registro)}>
-                            <Eye className="h-4 w-4 mr-2" />
-                            Ver Detalles
-                          </DropdownMenuItem>
-                          {registro.estado === "pendiente" && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem 
-                                className="text-green-600"
-                                onClick={() => {
-                                  setSelectedRegistro(registro);
-                                  setIsApproveOpen(true);
-                                }}
-                              >
-                                <CheckCircle className="h-4 w-4 mr-2" />
-                                Aprobar
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                className="text-red-600"
-                                onClick={() => {
-                                  setSelectedRegistro(registro);
-                                  setIsRejectOpen(true);
-                                }}
-                              >
-                                <XCircle className="h-4 w-4 mr-2" />
-                                Rechazar
-                              </DropdownMenuItem>
-                            </>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                      {registro.estado === "pendiente" && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="text-green-600"
+                              onClick={() => {
+                                setSelectedRegistro(registro);
+                                setIsApproveOpen(true);
+                              }}
+                            >
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              Aprobar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-red-600"
+                              onClick={() => {
+                                setSelectedRegistro(registro);
+                                setIsRejectOpen(true);
+                              }}
+                            >
+                              <XCircle className="h-4 w-4 mr-2" />
+                              Rechazar
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </TableCell>
                   </TableRow>
                 );
               })}
             </TableBody>
           </Table>
+          <DataTablePagination pagination={pagination} />
         </CardContent>
       </Card>
 

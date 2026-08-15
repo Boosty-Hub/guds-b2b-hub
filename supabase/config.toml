@@ -1,1 +1,6 @@
 project_id = "oyyxkbwtyxdpzsgarmim"
+
+# La función se invoca con la publishable key nueva (no-JWT). El gateway solo
+# verifica JWT con las llaves legacy, así que hay que desactivar verify_jwt.
+[functions.actualizar-tasa-bcv]
+verify_jwt = false

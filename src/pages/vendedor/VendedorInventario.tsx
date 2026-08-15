@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/table";
 import { Search, Package, Warehouse, Loader2 } from "lucide-react";
 import { supabase, Producto } from "@/lib/supabase";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 // Vista de solo lectura para el vendedor: mismo stock que ve el admin en
 // Inventario.tsx, pero sin la pestaña de Movimientos (movimientos_inventario
@@ -39,6 +41,8 @@ const VendedorInventario = () => {
     p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.sku.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const pagination = usePagination(filteredProductos, 25);
 
   const stats = {
     total: productos.length,
@@ -112,7 +116,7 @@ const VendedorInventario = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredProductos.map((item) => {
+              {pagination.pageItems.map((item) => {
                 const status = item.stock_actual === 0 ? "agotado" : item.stock_actual <= item.stock_minimo ? "bajo" : "ok";
                 return (
                   <TableRow key={item.id} className="hover:bg-muted/50">
@@ -137,6 +141,7 @@ const VendedorInventario = () => {
             </TableBody>
           </Table>
         )}
+        {!loading && <DataTablePagination pagination={pagination} />}
       </div>
     </VendedorLayout>
   );

@@ -2,17 +2,29 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
-  ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-auto">
-      <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
-    </div>
-  ),
-);
+const Table = React.forwardRef<
+  HTMLTableElement,
+  React.HTMLAttributes<HTMLTableElement> & { containerClassName?: string }
+>(({ className, containerClassName, ...props }, ref) => (
+  // Contenedor con scroll horizontal/vertical y barra delgada "flotante" (.table-scroll).
+  // El max-height acota la tabla: habilita el header sticky y el scroll horizontal
+  // accesible al pie cuando la tabla es muy grande. Se puede sobreescribir con containerClassName.
+  <div
+    className={cn(
+      "relative w-full overflow-auto table-scroll max-h-[calc(100vh-20rem)] rounded-[inherit]",
+      containerClassName,
+    )}
+  >
+    <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
+  </div>
+));
 Table.displayName = "Table";
 
 const TableHeader = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(
-  ({ className, ...props }, ref) => <thead ref={ref} className={cn("[&_tr]:border-b", className)} {...props} />,
+  ({ className, ...props }, ref) => (
+    // Header sticky global: queda fijo arriba al hacer scroll vertical de la tabla.
+    <thead ref={ref} className={cn("[&_tr]:border-b sticky top-0 z-10 bg-card", className)} {...props} />
+  ),
 );
 TableHeader.displayName = "TableHeader";
 

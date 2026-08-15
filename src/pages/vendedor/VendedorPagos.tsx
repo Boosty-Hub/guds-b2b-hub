@@ -19,6 +19,8 @@ import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface Pago { id: string; numero: string; monto: number; metodo: string; estado: string; referencia: string | null; created_at: string; cliente?: { nombre_negocio: string } | null; }
 interface Cli { id: string; nombre_negocio: string; }
@@ -84,6 +86,8 @@ const VendedorPagos = () => {
 
   const fmt = (s: string) => new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short" });
 
+  const pagination = usePagination(pagos, 25);
+
   return (
     <VendedorLayout title="Pagos">
       <div className="space-y-6">
@@ -108,7 +112,7 @@ const VendedorPagos = () => {
                 <TableHead className="text-right">Monto</TableHead><TableHead>Método</TableHead><TableHead>Estado</TableHead>
               </TableRow></TableHeader>
               <TableBody>
-                {pagos.map((p) => (
+                {pagination.pageItems.map((p) => (
                   <TableRow key={p.id} className="hover:bg-muted/50">
                     <TableCell className="font-medium text-emerald-600">{p.numero}</TableCell>
                     <TableCell>{p.cliente?.nombre_negocio || "—"}</TableCell>
@@ -121,6 +125,7 @@ const VendedorPagos = () => {
               </TableBody>
             </Table>
           )}
+          {!loading && pagos.length > 0 && <DataTablePagination pagination={pagination} />}
         </div>
       </div>
 

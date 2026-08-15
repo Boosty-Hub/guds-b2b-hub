@@ -65,7 +65,8 @@ grant execute on function public.upsert_tasa_bcv(numeric, text) to service_role;
 -- ---------------------------------------------------------------------------
 -- Cron diario: 08:00 America/Caracas (UTC-4, sin horario de verano) = 12:00 UTC
 -- Dispara la Edge Function, que scrapea bcv.org.ve y llama a upsert_tasa_bcv.
--- Usa la anon key (pública) solo para pasar el verify_jwt del gateway.
+-- La función se despliega con verify_jwt=false; se manda la publishable key
+-- (no-JWT) en el header `apikey` (las llaves nuevas NO van en Authorization).
 -- ---------------------------------------------------------------------------
 do $$
 begin
@@ -81,7 +82,7 @@ select cron.schedule(
       url     := 'https://oyyxkbwtyxdpzsgarmim.supabase.co/functions/v1/actualizar-tasa-bcv',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im95eXhrYnd0eXhkcHpzZ2FybWltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUxMzgwNTEsImV4cCI6MjA4MDcxNDA1MX0.0hdYtGizONaFhJy9ZC9yB7qdMK1kRrXaP7pw-nR_Kq0'
+        'apikey', 'sb_publishable_J8477Ia3F9Ro3S7NQQlwrw_BDOYElbV'
       ),
       body    := '{}'::jsonb
     );

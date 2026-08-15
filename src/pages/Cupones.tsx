@@ -22,6 +22,8 @@ import { Plus, Search, Ticket, Percent, DollarSign, Loader2, Pencil, Trash2 } fr
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface Cupon {
   id: string;
@@ -132,6 +134,8 @@ const Cupones = () => {
   const filtrados = cupones.filter((c) =>
     c.codigo.toLowerCase().includes(search.toLowerCase()) || (c.descripcion || "").toLowerCase().includes(search.toLowerCase()));
 
+  const pagination = usePagination(filtrados, 25);
+
   const estadoBadge = (c: Cupon) => {
     if (vencido(c)) return <Badge variant="secondary">Vencido</Badge>;
     if (!c.activo) return <Badge variant="outline">Inactivo</Badge>;
@@ -191,7 +195,7 @@ const Cupones = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtrados.map((c) => (
+              {pagination.pageItems.map((c) => (
                 <TableRow key={c.id} className="hover:bg-muted/50">
                   <TableCell className="font-mono font-medium text-primary">{c.codigo}</TableCell>
                   <TableCell className="text-muted-foreground max-w-[200px] truncate">{c.descripcion || "—"}</TableCell>
@@ -212,6 +216,7 @@ const Cupones = () => {
             </TableBody>
           </Table>
         )}
+        {!loading && <DataTablePagination pagination={pagination} />}
       </div>
 
       {/* Form */}

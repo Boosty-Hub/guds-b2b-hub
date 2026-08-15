@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = 'https://oyyxkbwtyxdpzsgarmim.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im95eXhrYnd0eXhkcHpzZ2FybWltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUxMzgwNTEsImV4cCI6MjA4MDcxNDA1MX0.0hdYtGizONaFhJy9ZC9yB7qdMK1kRrXaP7pw-nR_Kq0';
+// Llave PUBLISHABLE nueva (sb_publishable_...). Reemplaza la anon JWT legacy,
+// que quedará deshabilitada. supabase-js la envía en el header `apikey`.
+const supabaseAnonKey = 'sb_publishable_J8477Ia3F9Ro3S7NQQlwrw_BDOYElbV';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -61,6 +63,21 @@ export interface Cliente {
   vendedor_asignado_id: string | null;
   activo: boolean;
   created_at: string;
+  // Campos importados desde Odoo
+  odoo_id?: number | null;
+  cedula?: string | null;
+  estado?: string | null;
+  celular?: string | null;
+  es_empresa?: boolean | null;
+  tipo_residencia?: string | null;
+  vendedor_odoo?: string | null;
+  condicion_pago?: string | null;
+  licencia_actividad?: string | null;
+  sitio_web?: string | null;
+  notas?: string | null;
+  fecha_registro_odoo?: string | null;
+  latitud?: number | null;
+  longitud?: number | null;
 }
 
 export interface RegistroCliente {

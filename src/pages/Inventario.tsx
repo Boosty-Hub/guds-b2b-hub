@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
+import { cn } from "@/lib/utils";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,10 +29,12 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Search, ArrowUpRight, ArrowDownLeft, Package, Warehouse, Loader2, RefreshCw } from "lucide-react";
+import { Plus, Search, ArrowUpRight, ArrowDownLeft, Package, Warehouse, Loader2, RefreshCw, ChevronRight, Boxes } from "lucide-react";
 import { supabase, Producto } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface MovimientoInventario {
   id: string;
@@ -46,13 +49,24 @@ interface MovimientoInventario {
   producto?: Producto;
 }
 
+interface InvAlmacenRow {
+  id: string;
+  cantidad: number;
+  almacen: { id: string; nombre: string; tipo: string } | null;
+  producto: { id: string; nombre: string; sku: string } | null;
+}
+
 const Inventario = () => {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [movimientos, setMovimientos] = useState<MovimientoInventario[]>([]);
+  const [invAlmacen, setInvAlmacen] = useState<InvAlmacenRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [movementSearchTerm, setMovementSearchTerm] = useState("");
   const [tipoFiltro, setTipoFiltro] = useState("all");
+  const [almSearch, setAlmSearch] = useState("");
+  const [openAlm, setOpenAlm] = useState<Set<string>>(new Set());
+  const toggleAlm = (k: string) => setOpenAlm((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   
   // Estados para diálogos
   const [isMovementOpen, setIsMovementOpen] = useState(false);
@@ -71,13 +85,15 @@ const Inventario = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    const [productosRes, movimientosRes] = await Promise.all([
+    const [productosRes, movimientosRes, invAlmRes] = await Promise.all([
       supabase.from('productos').select('*').order('nombre'),
-      supabase.from('movimientos_inventario').select('*, producto:productos(nombre, sku)').order('created_at', { ascending: false }).limit(50)
+      supabase.from('movimientos_inventario').select('*, producto:productos(nombre, sku)').order('created_at', { ascending: false }).limit(50),
+      supabase.from('inventario_almacen').select('id, cantidad, almacen:almacenes(id, nombre, tipo), producto:productos(id, nombre, sku)').limit(5000),
     ]);
-    
+
     if (productosRes.data) setProductos(productosRes.data);
     if (movimientosRes.data) setMovimientos(movimientosRes.data);
+    if (invAlmRes.data) setInvAlmacen(invAlmRes.data as unknown as InvAlmacenRow[]);
     setLoading(false);
   };
 
@@ -86,13 +102,31 @@ const Inventario = () => {
     p.sku.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const pagination = usePagination(filteredProductos, 25);
+
   const filteredMovimientos = movimientos.filter(m => {
-    const matchesSearch = movementSearchTerm === "" || 
+    const matchesSearch = movementSearchTerm === "" ||
       (m.producto as any)?.nombre?.toLowerCase().includes(movementSearchTerm.toLowerCase()) ||
       (m.producto as any)?.sku?.toLowerCase().includes(movementSearchTerm.toLowerCase());
     const matchesTipo = tipoFiltro === "all" || m.tipo === tipoFiltro;
     return matchesSearch && matchesTipo;
   });
+
+  const pagination2 = usePagination(filteredMovimientos, 25);
+
+  const gruposAlm = useMemo(() => {
+    const m = new Map<string, { key: string; nombre: string; tipo: string; items: InvAlmacenRow[]; total: number }>();
+    const q = almSearch.toLowerCase();
+    for (const r of invAlmacen) {
+      if (!r.almacen) continue;
+      if (q && !(r.almacen.nombre.toLowerCase().includes(q) || r.producto?.nombre?.toLowerCase().includes(q) || r.producto?.sku?.toLowerCase().includes(q))) continue;
+      const key = r.almacen.id;
+      const g = m.get(key) || { key, nombre: r.almacen.nombre, tipo: r.almacen.tipo, items: [], total: 0 };
+      g.items.push(r); g.total += Number(r.cantidad || 0);
+      m.set(key, g);
+    }
+    return [...m.values()].sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [invAlmacen, almSearch]);
 
   const openMovementDialog = (type: 'entrada' | 'salida' | 'ajuste') => {
     setMovementType(type);
@@ -234,6 +268,7 @@ const Inventario = () => {
       <Tabs defaultValue="stock" className="space-y-6">
         <TabsList>
           <TabsTrigger value="stock">Stock Actual</TabsTrigger>
+          <TabsTrigger value="almacenes">Por Almacén</TabsTrigger>
           <TabsTrigger value="movements">Movimientos</TabsTrigger>
         </TabsList>
 
@@ -276,7 +311,7 @@ const Inventario = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredProductos.map((item) => {
+                  {pagination.pageItems.map((item) => {
                     const status = item.stock_actual === 0 ? "agotado" : item.stock_actual <= item.stock_minimo ? "bajo" : "ok";
                     return (
                       <TableRow key={item.id} className="hover:bg-muted/50">
@@ -300,6 +335,69 @@ const Inventario = () => {
                   })}
                 </TableBody>
               </Table>
+            )}
+            {!loading && <DataTablePagination pagination={pagination} />}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="almacenes" className="space-y-4">
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Buscar almacén o producto..."
+              className="pl-9"
+              value={almSearch}
+              onChange={(e) => setAlmSearch(e.target.value)}
+            />
+          </div>
+          <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
+            {loading ? (
+              <div className="flex items-center justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+            ) : gruposAlm.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <Boxes className="mb-4 h-12 w-12 opacity-50" />
+                <p>No hay existencias por almacén</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Almacén / Producto</TableHead>
+                    <TableHead>SKU</TableHead>
+                    <TableHead className="text-right">Cantidad</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {gruposAlm.map((g) => (
+                    <Fragment key={g.key}>
+                      <TableRow className="cursor-pointer bg-muted/40 hover:bg-muted" onClick={() => toggleAlm(g.key)}>
+                        <TableCell colSpan={3}>
+                          <div className="flex items-center gap-2 font-medium">
+                            <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", openAlm.has(g.key) && "rotate-90")} />
+                            <Boxes className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            <span className="truncate">{g.nombre}</span>
+                            <Badge variant={g.tipo === "consignacion" ? "outline" : "secondary"}>{g.tipo}</Badge>
+                            <Badge variant="secondary">{g.items.length} SKU</Badge>
+                            <span className="ml-auto font-semibold text-primary">{g.total.toLocaleString("es-VE")} u</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {openAlm.has(g.key) && g.items.map((r) => (
+                        <TableRow key={r.id} className="hover:bg-muted/50">
+                          <TableCell className="pl-10">{r.producto?.nombre || "—"}</TableCell>
+                          <TableCell className="font-mono text-sm text-muted-foreground">{r.producto?.sku || "—"}</TableCell>
+                          <TableCell className="text-right font-semibold">{Number(r.cantidad).toLocaleString("es-VE")}</TableCell>
+                        </TableRow>
+                      ))}
+                    </Fragment>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            {!loading && gruposAlm.length > 0 && (
+              <div className="border-t border-border px-4 py-2.5 text-sm text-muted-foreground">
+                {gruposAlm.length} almacén{gruposAlm.length !== 1 ? "es" : ""} con existencias
+              </div>
             )}
           </div>
         </TabsContent>
@@ -362,7 +460,7 @@ const Inventario = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredMovimientos.map((mov: any) => (
+                  {pagination2.pageItems.map((mov: any) => (
                     <TableRow key={mov.id} className="hover:bg-muted/50">
                       <TableCell className="text-muted-foreground">
                         {new Date(mov.created_at).toLocaleDateString('es-VE', { 
@@ -392,6 +490,7 @@ const Inventario = () => {
                 </TableBody>
               </Table>
             )}
+            <DataTablePagination pagination={pagination2} />
           </div>
         </TabsContent>
       </Tabs>

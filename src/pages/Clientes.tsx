@@ -39,10 +39,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Plus, Search, Building2, MapPin, Users, Eye, Edit, Loader2, Trash2, Save, UserPlus } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { supabase, Cliente, ListaPrecios } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface ClienteConLista extends Cliente {
   lista_precios?: ListaPrecios | null;
@@ -67,6 +69,7 @@ const Clientes = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const { formatPrice } = useCurrency();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Sheet states
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -231,6 +234,8 @@ const Clientes = () => {
     c.rif.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const pagination = usePagination(filteredClientes, 25);
+
   const stats = {
     total: clientes.length,
     activos: clientes.filter(c => c.activo).length,
@@ -329,8 +334,12 @@ const Clientes = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredClientes.map((cliente) => (
-                <TableRow key={cliente.id} className="hover:bg-muted/50">
+              {pagination.pageItems.map((cliente) => (
+                <TableRow
+                  key={cliente.id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => navigate(`/admin/clientes/${cliente.id}`)}
+                >
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <Avatar className="h-9 w-9">
@@ -362,8 +371,17 @@ const Clientes = () => {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        title="Ver detalle"
+                        onClick={() => navigate(`/admin/clientes/${cliente.id}`)}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
                       <Link to={`/admin/clientes/${cliente.id}/usuarios`}>
                         <Button variant="ghost" size="icon" className="h-8 w-8" title="Usuarios del Portal">
                           <UserPlus className="h-4 w-4" />
@@ -387,6 +405,7 @@ const Clientes = () => {
             </TableBody>
           </Table>
         )}
+        {!loading && <DataTablePagination pagination={pagination} />}
       </div>
 
       {/* Create Client Sheet */}

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -18,9 +19,12 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Landmark, Loader2, Pencil, Trash2 } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Plus, Landmark, Loader2, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, Receipt } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/use-pagination";
+import { DataTablePagination } from "@/components/ui/data-table-pagination";
 
 interface Banco {
   id: string;
@@ -31,13 +35,29 @@ interface Banco {
   titular: string | null;
   documento: string | null;
   activo: boolean;
+  metodos: string[] | null;
+  saldo?: number;
 }
 
+interface Movimiento { id: string; tipo: string; monto: number; referencia: string | null; descripcion: string | null; fecha: string; }
+
 const metodoLabel: Record<string, string> = {
-  transferencia: "Transferencia", efectivo: "Efectivo", pago_movil: "Pago Móvil", credito: "Crédito",
+  transferencia: "Transferencia", efectivo: "Efectivo", pago_movil: "Pago Móvil", credito: "Crédito", tarjeta: "Tarjeta",
 };
 
-const emptyForm = { nombre: "", metodo_pago: "transferencia", moneda: "USD", numero_cuenta: "", titular: "", documento: "", activo: true };
+const METODOS = [
+  { tipo: "transferencia", label: "Transferencia" },
+  { tipo: "pago_movil", label: "Pago Móvil" },
+  { tipo: "tarjeta", label: "Tarjeta" },
+  { tipo: "efectivo", label: "Efectivo" },
+];
+
+const fmtMoneda = (n: number, moneda: string) =>
+  moneda === "USD"
+    ? `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `Bs. ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const emptyForm = { nombre: "", metodos: ["transferencia"], moneda: "USD", numero_cuenta: "", titular: "", documento: "", activo: true };
 
 const Bancos = () => {
   const { toast } = useToast();
@@ -51,19 +71,38 @@ const Bancos = () => {
 
   useEffect(() => { fetchBancos(); }, []);
 
+  const [movSheet, setMovSheet] = useState<Banco | null>(null);
+  const [movs, setMovs] = useState<Movimiento[]>([]);
+  const [movsLoading, setMovsLoading] = useState(false);
+
   const fetchBancos = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from("bancos").select("*").order("nombre");
-    if (error) toast({ title: "Error al cargar bancos", description: error.message, variant: "destructive" });
-    else setBancos((data || []) as Banco[]);
+    const [{ data, error }, { data: mv }] = await Promise.all([
+      supabase.from("bancos").select("*").order("nombre"),
+      supabase.from("movimientos_bancarios").select("banco_id, tipo, monto"),
+    ]);
+    if (error) { toast({ title: "Error al cargar bancos", description: error.message, variant: "destructive" }); setLoading(false); return; }
+    const saldo = new Map<string, number>();
+    for (const m of (mv as { banco_id: string; tipo: string; monto: number }[]) ?? []) {
+      saldo.set(m.banco_id, (saldo.get(m.banco_id) || 0) + (m.tipo === "salida" ? -Number(m.monto) : Number(m.monto)));
+    }
+    setBancos(((data || []) as Banco[]).map((b) => ({ ...b, saldo: saldo.get(b.id) || 0 })));
     setLoading(false);
+  };
+
+  const openMovs = async (b: Banco) => {
+    setMovSheet(b); setMovsLoading(true); setMovs([]);
+    const { data } = await supabase.from("movimientos_bancarios")
+      .select("id, tipo, monto, referencia, descripcion, fecha").eq("banco_id", b.id).order("fecha", { ascending: false });
+    setMovs((data as Movimiento[]) ?? []);
+    setMovsLoading(false);
   };
 
   const openNew = () => { setEditing(null); setForm({ ...emptyForm }); setFormOpen(true); };
   const openEdit = (b: Banco) => {
     setEditing(b);
     setForm({
-      nombre: b.nombre, metodo_pago: b.metodo_pago, moneda: b.moneda,
+      nombre: b.nombre, metodos: b.metodos && b.metodos.length ? b.metodos : [b.metodo_pago], moneda: b.moneda,
       numero_cuenta: b.numero_cuenta || "", titular: b.titular || "", documento: b.documento || "", activo: b.activo,
     });
     setFormOpen(true);
@@ -71,9 +110,10 @@ const Bancos = () => {
 
   const save = async () => {
     if (!form.nombre.trim()) { toast({ title: "Falta el nombre", variant: "destructive" }); return; }
+    if (form.metodos.length === 0) { toast({ title: "Elegí al menos un método de pago", variant: "destructive" }); return; }
     setSaving(true);
     const payload = {
-      nombre: form.nombre.trim(), metodo_pago: form.metodo_pago, moneda: form.moneda,
+      nombre: form.nombre.trim(), metodo_pago: form.metodos[0], metodos: form.metodos, moneda: form.moneda,
       numero_cuenta: form.numero_cuenta || null, titular: form.titular || null, documento: form.documento || null, activo: form.activo,
     };
     const { error } = editing
@@ -93,6 +133,8 @@ const Bancos = () => {
     else { toast({ title: "Banco eliminado", description: toDelete.nombre }); fetchBancos(); }
     setToDelete(null);
   };
+
+  const pagination = usePagination(bancos, 25);
 
   return (
     <MainLayout title="Bancos">
@@ -117,17 +159,25 @@ const Bancos = () => {
           <Table>
             <TableHeader><TableRow>
               <TableHead>Banco / Cuenta</TableHead><TableHead>Método</TableHead><TableHead>Moneda</TableHead>
+              <TableHead className="text-right">Saldo</TableHead>
               <TableHead>Titular</TableHead><TableHead>Estado</TableHead><TableHead className="text-right">Acciones</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {bancos.map((b) => (
-                <TableRow key={b.id} className="hover:bg-muted/50">
+              {pagination.pageItems.map((b) => (
+                <TableRow key={b.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openMovs(b)}>
                   <TableCell><p className="font-medium">{b.nombre}</p><p className="text-xs text-muted-foreground font-mono">{b.numero_cuenta || "—"}</p></TableCell>
-                  <TableCell>{metodoLabel[b.metodo_pago] || b.metodo_pago}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {(b.metodos && b.metodos.length ? b.metodos : [b.metodo_pago]).map((m) => (
+                        <Badge key={m} variant="outline" className="text-xs font-normal">{metodoLabel[m] || m}</Badge>
+                      ))}
+                    </div>
+                  </TableCell>
                   <TableCell><Badge variant={b.moneda === "USD" ? "default" : "secondary"}>{b.moneda === "USD" ? "USD $" : "Bs."}</Badge></TableCell>
+                  <TableCell className="text-right font-semibold">{fmtMoneda(b.saldo || 0, b.moneda)}</TableCell>
                   <TableCell className="text-muted-foreground">{b.titular || "—"}</TableCell>
                   <TableCell><Badge variant={b.activo ? "default" : "outline"}>{b.activo ? "Activo" : "Inactivo"}</Badge></TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end gap-1">
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(b)}><Pencil className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => setToDelete(b)}><Trash2 className="h-4 w-4" /></Button>
@@ -138,6 +188,7 @@ const Bancos = () => {
             </TableBody>
           </Table>
         )}
+        {!loading && <DataTablePagination pagination={pagination} />}
       </div>
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
@@ -146,17 +197,23 @@ const Bancos = () => {
           <div className="grid grid-cols-2 gap-3 py-2">
             <div className="col-span-2"><Label>Nombre del banco / cuenta</Label>
               <Input value={form.nombre} onChange={(e) => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Ej. Banco Mercantil / Zelle" /></div>
-            <div><Label>Método de pago</Label>
-              <Select value={form.metodo_pago} onValueChange={(v) => setForm(f => ({ ...f, metodo_pago: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="transferencia">Transferencia</SelectItem>
-                  <SelectItem value="pago_movil">Pago Móvil</SelectItem>
-                  <SelectItem value="efectivo">Efectivo</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="col-span-2"><Label>Métodos de pago que recibe</Label>
+              <div className="mt-1 grid grid-cols-2 gap-2 rounded-lg border p-3 sm:grid-cols-4">
+                {METODOS.map((m) => (
+                  <label key={m.tipo} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      checked={form.metodos.includes(m.tipo)}
+                      onCheckedChange={(ck) => setForm(f => ({
+                        ...f,
+                        metodos: ck ? [...f.metodos, m.tipo] : f.metodos.filter(x => x !== m.tipo),
+                      }))}
+                    />
+                    {m.label}
+                  </label>
+                ))}
+              </div>
             </div>
-            <div><Label>Moneda</Label>
+            <div className="col-span-2"><Label>Moneda</Label>
               <Select value={form.moneda} onValueChange={(v) => setForm(f => ({ ...f, moneda: v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -195,6 +252,52 @@ const Bancos = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Movimientos del banco */}
+      <Sheet open={!!movSheet} onOpenChange={(o) => { if (!o) setMovSheet(null); }}>
+        <SheetContent className="w-full overflow-y-auto sm:w-[50vw] sm:max-w-none">
+          <SheetHeader><SheetTitle>Movimientos — {movSheet?.nombre}</SheetTitle></SheetHeader>
+          {movSheet && (
+            <div className="mt-4 space-y-4">
+              <div className="flex items-center justify-between rounded-xl border bg-muted/40 p-4">
+                <span className="text-sm text-muted-foreground">Saldo actual</span>
+                <span className="text-xl font-bold">{fmtMoneda(movSheet.saldo || 0, movSheet.moneda)}</span>
+              </div>
+              {movsLoading ? (
+                <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+              ) : movs.length === 0 ? (
+                <div className="flex flex-col items-center py-10 text-muted-foreground"><Receipt className="mb-2 h-8 w-8 opacity-50" />Sin movimientos todavía.</div>
+              ) : (
+                <div className="rounded-xl border">
+                  <Table>
+                    <TableHeader><TableRow>
+                      <TableHead>Fecha</TableHead><TableHead>Descripción</TableHead>
+                      <TableHead>Referencia</TableHead><TableHead className="text-right">Monto</TableHead>
+                    </TableRow></TableHeader>
+                    <TableBody>
+                      {movs.map((m) => (
+                        <TableRow key={m.id}>
+                          <TableCell className="text-muted-foreground">{new Date(m.fecha).toLocaleDateString("es-VE")}</TableCell>
+                          <TableCell className="font-medium">
+                            {m.tipo === "salida"
+                              ? <ArrowUpRight className="mr-1 inline h-4 w-4 text-destructive" />
+                              : <ArrowDownLeft className="mr-1 inline h-4 w-4 text-success" />}
+                            {m.descripcion || (m.tipo === "salida" ? "Salida" : "Entrada")}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm text-muted-foreground">{m.referencia || "—"}</TableCell>
+                          <TableCell className={`text-right font-semibold ${m.tipo === "salida" ? "text-destructive" : "text-success"}`}>
+                            {m.tipo === "salida" ? "-" : "+"}{fmtMoneda(Number(m.monto), movSheet.moneda)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </MainLayout>
   );
 };
