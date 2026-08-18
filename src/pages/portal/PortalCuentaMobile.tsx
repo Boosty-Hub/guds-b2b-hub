@@ -19,7 +19,9 @@ import {
   Shield,
   Star,
   Loader2,
-  Trash2
+  Trash2,
+  Boxes,
+  Receipt
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase, Cliente } from "@/lib/supabase";
@@ -38,6 +40,8 @@ const menuItems = [
     items: [
       { icon: Heart, label: "Favoritos", path: "/portal/favoritos", badge: null },
       { icon: Gift, label: "Cupones disponibles", path: "/portal/cuenta/cupones", badge: null },
+      { icon: Boxes, label: "Consignación", path: "/portal/consignacion", badge: null },
+      { icon: Receipt, label: "Retenciones", path: "/portal/retenciones", badge: null },
     ]
   },
   {

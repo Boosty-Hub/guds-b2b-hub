@@ -22,6 +22,12 @@ import {
   ChevronDown,
   PanelLeftClose,
   PanelLeftOpen,
+  FileText,
+  FileMinus,
+  PackageCheck,
+  Receipt,
+  UserCog,
+  ListChecks,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
@@ -46,6 +52,7 @@ const navSections: NavSection[] = [
     items: [
       { icon: ShoppingCart, label: "Órdenes", path: "/admin/ordenes", modulo: "ordenes" },
       { icon: Users, label: "Clientes", path: "/admin/clientes", modulo: "clientes" },
+      { icon: UserCog, label: "Vendedores", path: "/admin/vendedores", modulo: "usuarios" },
       { icon: UserPlus, label: "Registros", path: "/admin/registros", modulo: "registros" },
     ],
   },
@@ -64,6 +71,7 @@ const navSections: NavSection[] = [
     items: [
       { icon: Warehouse, label: "Inventario", path: "/admin/inventario", modulo: "inventario" },
       { icon: Boxes, label: "Almacenes", path: "/admin/almacenes", modulo: "inventario" },
+      { icon: PackageCheck, label: "Consignación", path: "/admin/consignacion", modulo: "inventario" },
     ],
   },
   {
@@ -71,7 +79,11 @@ const navSections: NavSection[] = [
     items: [
       { icon: CreditCard, label: "Cuentas", path: "/admin/cuentas", modulo: "cuentas" },
       { icon: HandCoins, label: "Cuentas por Cobrar", path: "/admin/cuentas-por-cobrar", modulo: "cuentas" },
+      { icon: FileText, label: "Facturas", path: "/admin/facturas", modulo: "cuentas" },
+      { icon: FileMinus, label: "Notas de Crédito", path: "/admin/notas-credito", modulo: "cuentas" },
+      { icon: Receipt, label: "Retenciones", path: "/admin/retenciones", modulo: "cuentas" },
       { icon: Landmark, label: "Bancos", path: "/admin/bancos", modulo: "bancos" },
+      { icon: ListChecks, label: "Conciliación", path: "/admin/conciliacion", modulo: "bancos" },
     ],
   },
   {

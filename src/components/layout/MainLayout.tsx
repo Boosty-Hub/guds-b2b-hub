@@ -3,15 +3,16 @@ import { cn } from "@/lib/utils";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { NavLink, useNavigate } from "react-router-dom";
-import { 
-  Menu, 
+import {
+  Menu,
   LayoutDashboard,
   ShoppingCart,
   Users,
   Package,
   Settings,
   LogOut,
-  X
+  X,
+  Bell
 } from "lucide-react";
 import {
   Sheet,
@@ -23,6 +24,10 @@ import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
+import { ControlTower } from "./ControlTower";
+import { useControlTower } from "@/contexts/ControlTowerContext";
+import { useNotifications } from "@/contexts/NotificationsContext";
+import { usePendingActions } from "@/hooks/use-pending-actions";
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -50,6 +55,11 @@ export function MainLayout({ children, title }: MainLayoutProps) {
     });
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { open: torreAbierta, collapsed: torreColapsada, toggle: toggleTorre } = useControlTower();
+  const margenTorre = torreAbierta ? (torreColapsada ? "lg:mr-16" : "lg:mr-96") : "lg:mr-0";
+  const { unreadCount } = useNotifications();
+  const { total: totalPendientes } = usePendingActions();
+  const totalBadgeMobile = unreadCount + totalPendientes;
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -76,6 +86,14 @@ export function MainLayout({ children, title }: MainLayoutProps) {
           <h1 className="font-semibold truncate">{title}</h1>
           <div className="flex items-center gap-2">
             <BoostySupportSlot media="(max-width: 1023.98px)" />
+            <button onClick={toggleTorre} className="relative p-2" title="Torre de control">
+              <Bell className="h-5 w-5" />
+              {totalBadgeMobile > 0 && (
+                <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
+                  {totalBadgeMobile > 9 ? "9+" : totalBadgeMobile}
+                </span>
+              )}
+            </button>
             <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center">
               <span className="text-sm font-semibold">
                 {user ? getInitials(user.nombre, user.apellido) : 'U'}
@@ -86,14 +104,17 @@ export function MainLayout({ children, title }: MainLayoutProps) {
       </header>
 
       {/* Desktop Header */}
-      <div className={cn("hidden lg:block transition-[margin] duration-200", collapsed ? "lg:ml-16" : "lg:ml-64")}>
+      <div className={cn("hidden lg:block transition-[margin] duration-200", collapsed ? "lg:ml-16" : "lg:ml-64", margenTorre)}>
         <Header title={title} />
       </div>
 
       {/* Main Content */}
-      <main className={cn("pb-20 lg:pb-0 transition-[margin] duration-200", collapsed ? "lg:ml-16" : "lg:ml-64")}>
+      <main className={cn("pb-20 lg:pb-0 transition-[margin] duration-200", collapsed ? "lg:ml-16" : "lg:ml-64", margenTorre)}>
         <div className="p-4 lg:p-6">{children}</div>
       </main>
+
+      {/* Torre de control (empuja en desktop, overlay completo en mobile/tablet) */}
+      <ControlTower />
 
       {/* Mobile Bottom Navigation */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border z-50 overflow-hidden">

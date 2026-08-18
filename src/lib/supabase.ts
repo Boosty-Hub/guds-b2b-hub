@@ -78,6 +78,8 @@ export interface Cliente {
   fecha_registro_odoo?: string | null;
   latitud?: number | null;
   longitud?: number | null;
+  retiene_iva?: boolean;
+  retiene_islr?: boolean;
 }
 
 export interface RegistroCliente {

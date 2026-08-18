@@ -4,3 +4,6 @@ project_id = "oyyxkbwtyxdpzsgarmim"
 # verifica JWT con las llaves legacy, así que hay que desactivar verify_jwt.
 [functions.actualizar-tasa-bcv]
 verify_jwt = false
+
+[functions.conciliar-ia-sugerir]
+verify_jwt = false

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,14 +16,15 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Search, Loader2, HandCoins, Wallet, Users, FilePlus, Eye, ShieldCheck } from "lucide-react";
+import { Search, Loader2, HandCoins, Wallet, Users, FilePlus, Eye, ShieldCheck, PiggyBank } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { SelectorFacturas, type FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
 
-interface OrdenLite { id: string; numero: string; cliente_id: string; total: number; monto_pagado: number; estado_pago: string; fecha: string; }
+interface FacturaRow { id: string; numero: string; cliente_id: string; tipo: string; fecha_emision: string | null; saldo_usd: number; }
 interface Banco { id: string; nombre: string; moneda: string; metodo_pago: string; metodos: string[] | null; }
 
 const metodoLabel: Record<string, string> = {
@@ -31,65 +33,76 @@ const metodoLabel: Record<string, string> = {
 interface Deudor { cliente_id: string; nombre: string; docs: number; saldo: number; }
 interface Cobro { id: string; numero: string; monto: number; monto_moneda: number; moneda: string; created_at: string; cliente?: { nombre_negocio: string } | null; banco?: { nombre: string } | null; }
 interface CuentaManual { id: string; numero: string; cliente_id: string; concepto: string; monto: number; monto_pagado: number; estado_pago: string; fecha: string; }
-interface PagoPendiente { id: string; numero: string; monto: number; monto_moneda: number | null; moneda: string; metodo: string; referencia: string | null; comprobante_url: string | null; banco_id: string | null; created_at: string; cliente?: { nombre_negocio: string } | null; orden?: { numero: string } | null; }
+interface PagoPendiente { id: string; numero: string; cliente_id: string; monto: number; monto_moneda: number | null; moneda: string; metodo: string; referencia: string | null; comprobante_url: string | null; banco_id: string | null; created_at: string; cliente?: { nombre_negocio: string } | null; orden?: { numero: string } | null; }
+interface Anticipo { pago_id: string; numero: string; cliente_id: string; monto_usd: number; aplicado: number; disponible: number; created_at: string; }
 
 const CuentasPorCobrar = () => {
   const { formatPrice, exchangeRate } = useCurrency();
   const { toast } = useToast();
-  const [ordenes, setOrdenes] = useState<OrdenLite[]>([]);
+  const navigate = useNavigate();
+  const [facturas, setFacturas] = useState<FacturaRow[]>([]);
   const [clientes, setClientes] = useState<Record<string, string>>({});
   const [bancos, setBancos] = useState<Banco[]>([]);
   const [cobros, setCobros] = useState<Cobro[]>([]);
   const [cuentas, setCuentas] = useState<CuentaManual[]>([]);
   const [pendientes, setPendientes] = useState<PagoPendiente[]>([]);
+  const [anticipos, setAnticipos] = useState<Anticipo[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
 
   // Verificación de pagos pendientes
   const [verif, setVerif] = useState<PagoPendiente | null>(null);
   const [verifForm, setVerifForm] = useState({ banco_id: "", notas: "" });
+  const [verifAsignaciones, setVerifAsignaciones] = useState<Record<string, number>>({});
   const [verifSaving, setVerifSaving] = useState(false);
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ cliente_id: "", banco_id: "", metodo: "", monto: 0, tasa: 0, referencia: "", notas: "" });
+  const [asignaciones, setAsignaciones] = useState<Record<string, number>>({});
 
   const [openCxc, setOpenCxc] = useState(false);
   const [savingCxc, setSavingCxc] = useState(false);
   const [cxcForm, setCxcForm] = useState({ cliente_id: "", concepto: "", monto: 0, fecha: "" });
 
+  // Aplicar anticipo
+  const [aplicarAnt, setAplicarAnt] = useState<Anticipo | null>(null);
+  const [antAsignaciones, setAntAsignaciones] = useState<Record<string, number>>({});
+  const [antSaving, setAntSaving] = useState(false);
+
   const fetchAll = async () => {
     setLoading(true);
-    const [{ data: ords }, { data: clis }, { data: bcs }, { data: cbs }, { data: cxc }, { data: pend }] = await Promise.all([
-      supabase.from("ordenes").select("id, numero, cliente_id, total, monto_pagado, estado_pago, fecha_pedido, created_at").neq("estado", "cancelado"),
+    const [{ data: facs }, { data: clis }, { data: bcs }, { data: cbs }, { data: cxc }, { data: pend }, { data: ants }] = await Promise.all([
+      supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, saldo_usd").eq("estado", "posted"),
       supabase.from("clientes").select("id, nombre_negocio").order("nombre_negocio"),
       supabase.from("bancos").select("id, nombre, moneda, metodo_pago, metodos").eq("activo", true).order("nombre"),
       supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("created_at", { ascending: false }).limit(5000),
       supabase.from("cuentas_cobrar").select("id, numero, cliente_id, concepto, monto, monto_pagado, estado_pago, fecha").order("fecha", { ascending: false }),
-      supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, metodo, referencia, comprobante_url, banco_id, created_at, cliente:clientes(nombre_negocio), orden:ordenes(numero)").eq("estado", "pendiente").order("created_at", { ascending: false }),
+      supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, comprobante_url, banco_id, created_at, cliente:clientes(nombre_negocio), orden:ordenes(numero)").eq("estado", "pendiente").order("created_at", { ascending: false }),
+      supabase.from("v_anticipos").select("*").order("created_at", { ascending: false }),
     ]);
-    setOrdenes(((ords as (OrdenLite & { fecha_pedido: string | null; created_at: string })[]) ?? []).map((o) => ({ ...o, fecha: o.fecha_pedido || o.created_at })));
+    setFacturas((facs as FacturaRow[]) ?? []);
     setClientes(Object.fromEntries(((clis as { id: string; nombre_negocio: string }[]) ?? []).map((c) => [c.id, c.nombre_negocio])));
     setBancos((bcs as Banco[]) ?? []);
     setCobros((cbs as Cobro[]) ?? []);
     setCuentas((cxc as CuentaManual[]) ?? []);
     setPendientes((pend as PagoPendiente[]) ?? []);
+    setAnticipos(((ants as Anticipo[]) ?? []).filter((a) => Number(a.disponible) > 0.009));
     setLoading(false);
   };
   useEffect(() => { fetchAll(); }, []);
 
+  const facturasNormales = useMemo(() => facturas.filter((f) => f.tipo === "factura" && f.saldo_usd > 0.009), [facturas]);
+
   const deudores = useMemo(() => {
     const m = new Map<string, Deudor>();
-    const add = (cli: string, saldo: number) => {
-      if (saldo <= 0.009) return;
-      const d = m.get(cli) || { cliente_id: cli, nombre: clientes[cli] || "—", docs: 0, saldo: 0 };
-      d.docs += 1; d.saldo += saldo;
-      m.set(cli, d);
-    };
-    for (const o of ordenes) add(o.cliente_id, Number(o.total) - Number(o.monto_pagado || 0));
-    for (const c of cuentas) if (c.estado_pago !== "anulada") add(c.cliente_id, Number(c.monto) - Number(c.monto_pagado || 0));
+    for (const f of facturasNormales) {
+      const d = m.get(f.cliente_id) || { cliente_id: f.cliente_id, nombre: clientes[f.cliente_id] || "—", docs: 0, saldo: 0 };
+      d.docs += 1; d.saldo += Number(f.saldo_usd);
+      m.set(f.cliente_id, d);
+    }
     return [...m.values()].sort((a, b) => b.saldo - a.saldo);
-  }, [ordenes, cuentas, clientes]);
+  }, [facturasNormales, clientes]);
 
   const clientesLista = useMemo(() => Object.entries(clientes).map(([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre)), [clientes]);
 
@@ -115,41 +128,24 @@ const CuentasPorCobrar = () => {
   const pgDeud = usePagination(filtrados, 25);
   const pgCobros = usePagination(cobros, 25);
   const pgCuentas = usePagination(cuentas, 25);
+  const pgAnt = usePagination(anticipos, 25);
 
   const bancoSel = bancos.find((b) => b.id === form.banco_id);
   const esBs = bancoSel?.moneda === "BS";
   const metodosBanco = bancoSel?.metodos?.length ? bancoSel.metodos : bancoSel ? [bancoSel.metodo_pago] : [];
   const saldoCliente = deudores.find((d) => d.cliente_id === form.cliente_id)?.saldo ?? 0;
-
-  // Documentos pendientes del cliente en el MISMO orden que registrar_cobro (FIFO por fecha, órdenes + cuentas)
-  const docsClienteFifo = useMemo(() => {
-    if (!form.cliente_id) return [] as { numero: string; tipo: string; saldo: number; fecha: string }[];
-    const docs: { numero: string; tipo: string; saldo: number; fecha: string }[] = [];
-    for (const o of ordenes) {
-      const saldo = Number(o.total) - Number(o.monto_pagado || 0);
-      if (o.cliente_id === form.cliente_id && saldo > 0.009) docs.push({ numero: o.numero, tipo: "Orden", saldo, fecha: o.fecha });
-    }
-    for (const c of cuentas) {
-      const saldo = Number(c.monto) - Number(c.monto_pagado || 0);
-      if (c.cliente_id === form.cliente_id && c.estado_pago !== "anulada" && saldo > 0.009) docs.push({ numero: c.numero, tipo: "Cuenta", saldo, fecha: c.fecha });
-    }
-    return docs.sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
-  }, [form.cliente_id, ordenes, cuentas]);
-
   const montoUSD = esBs ? (form.tasa > 0 ? form.monto / form.tasa : 0) : form.monto;
-  const previewAdjudicacion = useMemo(() => {
-    let rest = montoUSD;
-    const rows = docsClienteFifo.map((d) => {
-      const aplicado = Math.max(0, Math.min(rest, d.saldo));
-      rest = Math.round((rest - aplicado) * 100) / 100;
-      const estado = aplicado <= 0.009 ? "pendiente" : aplicado >= d.saldo - 0.009 ? "cubierto" : "parcial";
-      return { ...d, aplicado, estado };
-    });
-    return { rows, aFavor: Math.round(rest * 100) / 100, tocados: rows.filter((r) => r.aplicado > 0.009).length };
-  }, [docsClienteFifo, montoUSD]);
+
+  const facturasDelCliente = (clienteId: string): FacturaSaldo[] => facturasNormales
+    .filter((f) => f.cliente_id === clienteId)
+    .map((f) => ({ id: f.id, numero: f.numero, fecha_emision: f.fecha_emision, saldo_usd: Number(f.saldo_usd) }))
+    .sort((a, b) => new Date(a.fecha_emision || 0).getTime() - new Date(b.fecha_emision || 0).getTime());
+
+  const facturasCliente = useMemo(() => facturasDelCliente(form.cliente_id), [facturasNormales, form.cliente_id]);
 
   const abrirCobro = (cliente_id?: string) => {
     setForm({ cliente_id: cliente_id || "", banco_id: "", metodo: "", monto: 0, tasa: Math.round(exchangeRate * 100) / 100, referencia: "", notas: "" });
+    setAsignaciones({});
     setOpen(true);
   };
 
@@ -168,8 +164,14 @@ const CuentasPorCobrar = () => {
       toast({ title: "Falta la tasa", description: "Un pago en bolívares necesita la tasa Bs/USD.", variant: "destructive" });
       return;
     }
+    const asignado = Object.values(asignaciones).reduce((s, v) => s + v, 0);
+    if (asignado > montoUSD + 0.01) {
+      toast({ title: "La asignación excede el monto", description: "Revisá los montos por factura.", variant: "destructive" });
+      return;
+    }
     setSaving(true);
-    const { data, error } = await supabase.rpc("registrar_cobro", {
+    const p_asignaciones = Object.entries(asignaciones).map(([factura_id, monto]) => ({ factura_id, monto }));
+    const { data, error } = await supabase.rpc("registrar_cobro_facturas", {
       p_cliente_id: form.cliente_id,
       p_banco_id: form.banco_id,
       p_monto_moneda: form.monto,
@@ -177,17 +179,19 @@ const CuentasPorCobrar = () => {
       p_tasa: esBs ? form.tasa : null,
       p_metodo: form.metodo || metodosBanco[0] || "transferencia",
       p_referencia: form.referencia || null,
+      p_comprobante_url: null,
       p_notas: form.notas || null,
+      p_asignaciones,
     });
     setSaving(false);
     if (error) {
       toast({ title: "No se pudo registrar el cobro", description: error.message, variant: "destructive" });
       return;
     }
-    const r = data as { ordenes_afectadas: number; credito_a_favor: number; monto_usd: number };
+    const r = data as { monto_usd: number; facturas_afectadas: number; saldo_a_favor: number };
     toast({
       title: "Cobro registrado",
-      description: `$${r.monto_usd} adjudicado a ${r.ordenes_afectadas} orden(es)` + (r.credito_a_favor > 0 ? ` · saldo a favor: ${formatPrice(r.credito_a_favor)}` : ""),
+      description: `$${r.monto_usd} aplicado a ${r.facturas_afectadas} factura(s)` + (r.saldo_a_favor > 0.009 ? ` · saldo a favor: ${formatPrice(r.saldo_a_favor)}` : ""),
     });
     setOpen(false);
     fetchAll();
@@ -198,7 +202,11 @@ const CuentasPorCobrar = () => {
   const abrirVerif = (p: PagoPendiente) => {
     setVerif(p);
     setVerifForm({ banco_id: p.banco_id || "", notas: "" });
+    setVerifAsignaciones({});
   };
+
+  const facturasVerif = useMemo(() => verif ? facturasDelCliente(verif.cliente_id) : [], [verif, facturasNormales]);
+  const montoVerifUSD = verif ? Number(verif.monto) : 0;
 
   const verComprobante = async (path: string) => {
     const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 120);
@@ -208,26 +216,54 @@ const CuentasPorCobrar = () => {
 
   const decidirVerif = async (aprobar: boolean) => {
     if (!verif) return;
+    if (aprobar) {
+      const asignado = Object.values(verifAsignaciones).reduce((s, v) => s + v, 0);
+      if (asignado > montoVerifUSD + 0.01) {
+        toast({ title: "La asignación excede el monto", description: "Revisá los montos por factura.", variant: "destructive" });
+        return;
+      }
+    }
     setVerifSaving(true);
+    const p_asignaciones = Object.entries(verifAsignaciones).map(([factura_id, monto]) => ({ factura_id, monto }));
     const { error } = await supabase.rpc("verificar_pago", {
       p_pago_id: verif.id,
       p_aprobar: aprobar,
       p_notas: verifForm.notas || null,
       p_banco_id: aprobar ? (verifForm.banco_id || null) : null,
+      p_tasa: null,
+      p_asignaciones,
     });
     setVerifSaving(false);
     if (error) { toast({ title: "No se pudo procesar", description: error.message, variant: "destructive" }); return; }
     toast({
       title: aprobar ? "Pago verificado" : "Pago rechazado",
-      description: aprobar ? "Se adjudicó a la deuda del cliente (más antiguo primero)." : "El pago quedó rechazado.",
+      description: aprobar ? "Se aplicó a las facturas seleccionadas." : "El pago quedó rechazado.",
     });
     setVerif(null);
     fetchAll();
   };
 
+  const abrirAplicarAnticipo = (a: Anticipo) => { setAplicarAnt(a); setAntAsignaciones({}); };
+  const facturasAnt = useMemo(() => aplicarAnt ? facturasDelCliente(aplicarAnt.cliente_id) : [], [aplicarAnt, facturasNormales]);
+
+  const confirmarAplicarAnticipo = async () => {
+    if (!aplicarAnt) return;
+    const asignado = Object.values(antAsignaciones).reduce((s, v) => s + v, 0);
+    if (asignado <= 0.009) { toast({ title: "Elegí al menos una factura", variant: "destructive" }); return; }
+    if (asignado > aplicarAnt.disponible + 0.01) { toast({ title: "Excede el anticipo disponible", variant: "destructive" }); return; }
+    setAntSaving(true);
+    const p_asignaciones = Object.entries(antAsignaciones).map(([factura_id, monto]) => ({ factura_id, monto }));
+    const { error } = await supabase.rpc("aplicar_anticipo", { p_pago_id: aplicarAnt.pago_id, p_asignaciones });
+    setAntSaving(false);
+    if (error) { toast({ title: "No se pudo aplicar", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Anticipo aplicado" });
+    setAplicarAnt(null);
+    fetchAll();
+  };
+
   return (
     <MainLayout title="Cuentas por Cobrar">
-      <div className="mb-6 grid gap-4 md:grid-cols-3">
+      <div className="mb-6 grid gap-4 md:grid-cols-4">
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="flex items-center gap-3">
             <div className="rounded-lg bg-destructive/10 p-2"><Wallet className="h-5 w-5 text-destructive" /></div>
@@ -244,6 +280,12 @@ const CuentasPorCobrar = () => {
           <div className="flex items-center gap-3">
             <div className="rounded-lg bg-success/10 p-2"><HandCoins className="h-5 w-5 text-success" /></div>
             <div><p className="text-2xl font-bold">{cobros.length}</p><p className="text-sm text-muted-foreground">Cobros registrados</p></div>
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-primary/10 p-2"><PiggyBank className="h-5 w-5 text-primary" /></div>
+            <div><p className="text-2xl font-bold">{formatPrice(anticipos.reduce((s, a) => s + Number(a.disponible), 0))}</p><p className="text-sm text-muted-foreground">Anticipos sin aplicar</p></div>
           </div>
         </div>
       </div>
@@ -269,6 +311,7 @@ const CuentasPorCobrar = () => {
             <TabsTrigger value="cobrar">Por cobrar ({deudores.length})</TabsTrigger>
             <TabsTrigger value="manuales">Cuentas manuales ({cuentas.length})</TabsTrigger>
             <TabsTrigger value="cobros">Recibos ({cobros.length})</TabsTrigger>
+            <TabsTrigger value="anticipos">Anticipos ({anticipos.length})</TabsTrigger>
             <TabsTrigger value="verificar" className="gap-1.5">
               <ShieldCheck className="h-3.5 w-3.5" /> Por verificar
               {pendientes.length > 0 && <Badge variant="destructive" className="ml-1 px-1.5">{pendientes.length}</Badge>}
@@ -319,19 +362,19 @@ const CuentasPorCobrar = () => {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Cliente</TableHead>
-                    <TableHead className="text-center">Documentos</TableHead>
+                    <TableHead className="text-center">Facturas</TableHead>
                     <TableHead className="text-right">Saldo</TableHead>
                     <TableHead className="text-right">Acción</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pgDeud.pageItems.map((d) => (
-                    <TableRow key={d.cliente_id}>
+                    <TableRow key={d.cliente_id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/cuentas/${d.cliente_id}`)}>
                       <TableCell className="font-medium">{d.nombre}</TableCell>
                       <TableCell className="text-center">{d.docs}</TableCell>
                       <TableCell className="text-right font-semibold text-destructive">{formatPrice(d.saldo)}</TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" variant="outline" onClick={() => abrirCobro(d.cliente_id)}>Registrar cobro</Button>
+                        <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); abrirCobro(d.cliente_id); }}>Registrar cobro</Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -406,17 +449,52 @@ const CuentasPorCobrar = () => {
               <DataTablePagination pagination={pgCobros} />
             </div>
           </TabsContent>
+
+          <TabsContent value="anticipos" className="mt-4">
+            <div className="rounded-xl border border-border bg-card shadow-sm">
+              {anticipos.length === 0 ? (
+                <p className="p-8 text-center text-muted-foreground">No hay anticipos sin aplicar. Un pago con sobrante queda acá.</p>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nº</TableHead><TableHead>Cliente</TableHead><TableHead>Fecha</TableHead>
+                        <TableHead className="text-right">Pago</TableHead><TableHead className="text-right">Disponible</TableHead>
+                        <TableHead className="text-right">Acción</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pgAnt.pageItems.map((a) => (
+                        <TableRow key={a.pago_id}>
+                          <TableCell className="font-mono text-sm text-primary">{a.numero}</TableCell>
+                          <TableCell className="font-medium">{clientes[a.cliente_id] || "—"}</TableCell>
+                          <TableCell className="text-muted-foreground">{new Date(a.created_at).toLocaleDateString("es-VE")}</TableCell>
+                          <TableCell className="text-right">{formatPrice(a.monto_usd)}</TableCell>
+                          <TableCell className="text-right font-semibold text-success">{formatPrice(a.disponible)}</TableCell>
+                          <TableCell className="text-right">
+                            <Button size="sm" variant="outline" onClick={() => abrirAplicarAnticipo(a)}>Aplicar a facturas</Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <DataTablePagination pagination={pgAnt} />
+                </>
+              )}
+            </div>
+          </TabsContent>
         </Tabs>
       )}
 
       {/* Registrar cobro */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Registrar Cobro</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Cliente *</Label>
-              <Select value={form.cliente_id} onValueChange={(v) => setForm({ ...form, cliente_id: v })}>
+              <Select value={form.cliente_id} onValueChange={(v) => { setForm({ ...form, cliente_id: v }); setAsignaciones({}); }}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar cliente con deuda" /></SelectTrigger>
                 <SelectContent>
                   {deudores.map((d) => (
@@ -424,7 +502,7 @@ const CuentasPorCobrar = () => {
                   ))}
                 </SelectContent>
               </Select>
-              {form.cliente_id && <p className="text-xs text-muted-foreground">Saldo pendiente: <span className="font-semibold text-destructive">{formatPrice(saldoCliente)}</span> — se adjudica de la orden más antigua a la más nueva.</p>}
+              {form.cliente_id && <p className="text-xs text-muted-foreground">Saldo pendiente: <span className="font-semibold text-destructive">{formatPrice(saldoCliente)}</span></p>}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -463,37 +541,17 @@ const CuentasPorCobrar = () => {
               )}
             </div>
             {esBs && form.monto > 0 && form.tasa > 0 && (
-              <p className="text-xs text-muted-foreground">Equivale a <span className="font-semibold">{formatPrice(form.monto / form.tasa)}</span></p>
+              <p className="text-xs text-muted-foreground">Equivale a <span className="font-semibold">{formatPrice(montoUSD)}</span></p>
             )}
 
-            {/* Preview de adjudicación (un pago que abarca varias órdenes, más antiguo primero) */}
-            {form.cliente_id && montoUSD > 0.009 && (
-              <div className="rounded-lg border border-border bg-muted/40 p-3">
-                <p className="mb-2 text-xs font-medium text-muted-foreground">
-                  Adjudicación automática · del documento más antiguo al más nuevo:
-                </p>
-                {previewAdjudicacion.tocados === 0 ? (
-                  <p className="text-xs text-muted-foreground">Este cliente no tiene documentos pendientes.</p>
-                ) : (
-                  <div className="max-h-40 space-y-1.5 overflow-y-auto">
-                    {previewAdjudicacion.rows.filter((r) => r.aplicado > 0.009).map((r, i) => (
-                      <div key={i} className="flex items-center gap-2 text-sm">
-                        <span className="font-mono text-xs text-primary">{r.numero}</span>
-                        <span className="text-[11px] text-muted-foreground">{r.tipo}</span>
-                        <span className="ml-auto tabular-nums">{formatPrice(r.aplicado)}<span className="text-muted-foreground"> / {formatPrice(r.saldo)}</span></span>
-                        <Badge variant={r.estado === "cubierto" ? "default" : "outline"} className="shrink-0">
-                          {r.estado === "cubierto" ? "Cubierta" : "Parcial"}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {previewAdjudicacion.aFavor > 0.009 && (
-                  <p className="mt-2 border-t border-border pt-2 text-xs">
-                    Sobrante (saldo a favor del cliente): <span className="font-semibold">{formatPrice(previewAdjudicacion.aFavor)}</span>
-                  </p>
-                )}
-              </div>
+            {form.cliente_id && (
+              <SelectorFacturas
+                facturas={facturasCliente}
+                montoDisponible={montoUSD}
+                asignaciones={asignaciones}
+                onChange={setAsignaciones}
+                formatPrice={formatPrice}
+              />
             )}
 
             <div className="space-y-2">
@@ -552,13 +610,13 @@ const CuentasPorCobrar = () => {
 
       {/* Verificar pago pendiente */}
       <Dialog open={!!verif} onOpenChange={(o) => !o && setVerif(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Verificar pago {verif?.numero}</DialogTitle></DialogHeader>
           {verif && (
             <div className="space-y-4 py-2">
               <div className="space-y-1 rounded-lg border bg-muted/40 p-3 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">Cliente</span><span className="font-medium">{verif.cliente?.nombre_negocio || "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Orden</span><span>{verif.orden?.numero || "— (se adjudica FIFO)"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Orden</span><span>{verif.orden?.numero || "—"}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Monto</span><span className="font-semibold">{formatPrice(verif.monto)}{verif.moneda !== "USD" && verif.monto_moneda ? ` · ${Number(verif.monto_moneda).toLocaleString("es-VE")} ${verif.moneda}` : ""}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Método</span><span>{metodoLabel[verif.metodo] || verif.metodo}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Referencia</span><span className="font-mono">{verif.referencia || "—"}</span></div>
@@ -574,14 +632,49 @@ const CuentasPorCobrar = () => {
                   <SelectTrigger><SelectValue placeholder="Sin banco / asignar luego" /></SelectTrigger>
                   <SelectContent>{bancos.map((b) => <SelectItem key={b.id} value={b.id}>{b.nombre} ({b.moneda})</SelectItem>)}</SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">Si elegís banco, se registra el movimiento de entrada. Al aprobar, el monto se adjudica a la deuda del cliente (más antiguo primero).</p>
+                <p className="text-xs text-muted-foreground">Si elegís banco, se registra el movimiento de entrada.</p>
               </div>
+
+              <SelectorFacturas
+                facturas={facturasVerif}
+                montoDisponible={montoVerifUSD}
+                asignaciones={verifAsignaciones}
+                onChange={setVerifAsignaciones}
+                formatPrice={formatPrice}
+              />
+
               <div className="space-y-2"><Label>Notas</Label><Textarea rows={2} value={verifForm.notas} onChange={(e) => setVerifForm((f) => ({ ...f, notas: e.target.value }))} placeholder="Opcional (motivo de rechazo, observaciones…)" /></div>
             </div>
           )}
           <DialogFooter className="gap-2">
             <Button variant="destructive" onClick={() => decidirVerif(false)} disabled={verifSaving}>Rechazar</Button>
             <Button onClick={() => decidirVerif(true)} disabled={verifSaving} className="gap-2">{verifSaving && <Loader2 className="h-4 w-4 animate-spin" />} Aprobar y adjudicar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Aplicar anticipo */}
+      <Dialog open={!!aplicarAnt} onOpenChange={(o) => !o && setAplicarAnt(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>Aplicar anticipo {aplicarAnt?.numero}</DialogTitle></DialogHeader>
+          {aplicarAnt && (
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                Cliente <span className="font-medium text-foreground">{clientes[aplicarAnt.cliente_id]}</span> ·
+                disponible <span className="font-semibold text-foreground">{formatPrice(aplicarAnt.disponible)}</span>
+              </p>
+              <SelectorFacturas
+                facturas={facturasAnt}
+                montoDisponible={aplicarAnt.disponible}
+                asignaciones={antAsignaciones}
+                onChange={setAntAsignaciones}
+                formatPrice={formatPrice}
+              />
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAplicarAnt(null)}>Cancelar</Button>
+            <Button onClick={confirmarAplicarAnticipo} disabled={antSaving} className="gap-2">{antSaving && <Loader2 className="h-4 w-4 animate-spin" />} Aplicar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,7 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { SelectorFacturas, type FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
 
 interface ClienteCuenta {
   id: string;
@@ -56,25 +58,15 @@ interface PagoRow {
   fecha_verificacion: string | null;
   banco?: { nombre: string } | null;
 }
-interface OrdenRow {
+interface FacturaRow {
   id: string;
   numero: string;
   cliente_id: string;
-  total: number;
-  monto_pagado: number;
-  estado: string;
-  estado_pago: string | null;
-  created_at: string;
-}
-interface CuentaManual {
-  id: string;
-  numero: string;
-  cliente_id: string;
-  concepto: string;
-  monto: number;
-  monto_pagado: number;
-  estado_pago: string;
-  fecha: string;
+  tipo: string;
+  fecha_emision: string | null;
+  total_usd: number;
+  saldo_usd: number;
+  estado_cobro: string;
 }
 interface Banco { id: string; nombre: string; metodo_pago: string; metodos: string[] | null; moneda: string; }
 
@@ -83,12 +75,12 @@ const metodoLabel: Record<string, string> = {
 };
 
 const Cuentas = () => {
-  const { formatPrice, exchangeRate } = useCurrency();
+  const { formatPrice } = useCurrency();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [clientes, setClientes] = useState<ClienteCuenta[]>([]);
   const [pagos, setPagos] = useState<PagoRow[]>([]);
-  const [ordenes, setOrdenes] = useState<OrdenRow[]>([]);
-  const [cuentas, setCuentas] = useState<CuentaManual[]>([]);
+  const [facturas, setFacturas] = useState<FacturaRow[]>([]);
   const [bancos, setBancos] = useState<Banco[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchAcc, setSearchAcc] = useState("");
@@ -97,45 +89,43 @@ const Cuentas = () => {
   // Registrar cobro
   const [payOpen, setPayOpen] = useState(false);
   const [payForm, setPayForm] = useState({ cliente_id: "", banco_id: "", metodo: "", monto: "", tasa: "", referencia: "" });
+  const [asignaciones, setAsignaciones] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { fetchAll(); }, []);
 
   const fetchAll = async () => {
     setLoading(true);
-    const [cRes, pRes, oRes, cxcRes, bRes] = await Promise.all([
+    const [cRes, pRes, fRes, bRes] = await Promise.all([
       supabase.from("clientes").select("id, codigo, nombre_negocio, limite_credito, credito_utilizado, dias_credito"),
       supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, estado, created_at, fecha_verificacion, banco:bancos(nombre)").order("created_at", { ascending: false }).limit(5000),
-      supabase.from("ordenes").select("id, numero, cliente_id, total, monto_pagado, estado, estado_pago, created_at").neq("estado", "cancelado"),
-      supabase.from("cuentas_cobrar").select("id, numero, cliente_id, concepto, monto, monto_pagado, estado_pago, fecha").order("fecha", { ascending: false }),
+      supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, total_usd, saldo_usd, estado_cobro").eq("estado", "posted"),
       supabase.from("bancos").select("id, nombre, metodo_pago, metodos, moneda").eq("activo", true).order("nombre"),
     ]);
     if (cRes.data) setClientes(cRes.data as ClienteCuenta[]);
     if (pRes.data) setPagos(pRes.data as unknown as PagoRow[]);
-    if (oRes.data) setOrdenes(oRes.data as unknown as OrdenRow[]);
-    if (cxcRes.data) setCuentas(cxcRes.data as CuentaManual[]);
+    if (fRes.data) setFacturas(fRes.data as FacturaRow[]);
     if (bRes.data) setBancos(bRes.data as Banco[]);
     setLoading(false);
   };
 
   const clientesMap = useMemo(() => Object.fromEntries(clientes.map((c) => [c.id, c.nombre_negocio])), [clientes]);
 
-  // Deuda real por cliente = saldo de órdenes (total − pagado) + saldo de cuentas manuales
+  // Deuda real por cliente = suma de saldo_usd de sus facturas (las notas de crédito restan solas, por el signo)
   const deudaCliente = useMemo(() => {
     const m = new Map<string, { saldo: number; docs: number }>();
-    const add = (cli: string, saldo: number) => {
-      if (saldo <= 0.009) return;
-      const d = m.get(cli) || { saldo: 0, docs: 0 };
-      d.saldo += saldo; d.docs += 1; m.set(cli, d);
-    };
-    for (const o of ordenes) add(o.cliente_id, Number(o.total) - Number(o.monto_pagado || 0));
-    for (const c of cuentas) if (c.estado_pago !== "anulada") add(c.cliente_id, Number(c.monto) - Number(c.monto_pagado || 0));
+    for (const f of facturas) {
+      if (Math.abs(f.saldo_usd) <= 0.009) continue;
+      const d = m.get(f.cliente_id) || { saldo: 0, docs: 0 };
+      d.saldo += Number(f.saldo_usd); d.docs += 1; m.set(f.cliente_id, d);
+    }
     return m;
-  }, [ordenes, cuentas]);
+  }, [facturas]);
 
   const ultimoPagoByClient = useMemo(() => {
     const m = new Map<string, string>();
     for (const p of pagos) {
+      if (p.estado !== "verificado") continue;
       const f = p.fecha_verificacion || p.created_at;
       const prev = m.get(p.cliente_id);
       if (!prev || new Date(f) > new Date(prev)) m.set(p.cliente_id, f);
@@ -153,6 +143,7 @@ const Cuentas = () => {
   const totalPorCobrar = useMemo(() => [...deudaCliente.values()].reduce((s, d) => s + d.saldo, 0), [deudaCliente]);
   const inicioMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
   const cobradoMes = pagos
+    .filter((p) => p.estado === "verificado")
     .filter((p) => { const f = p.fecha_verificacion || p.created_at; return f && new Date(f).getTime() >= inicioMes; })
     .reduce((s, p) => s + Number(p.monto || 0), 0);
   const clientesConDeuda = deudaCliente.size;
@@ -164,21 +155,21 @@ const Cuentas = () => {
     .map((c) => ({ c, ...(deudaCliente.get(c.id) || { saldo: 0, docs: 0 }) }))
     .sort((a, b) => b.saldo - a.saldo), [clientes, deudaCliente]);
 
-  // Movimientos (libro de cuenta): cobros (+), órdenes y cuentas manuales (cargo −)
+  // Movimientos (libro de cuenta): cobros verificados (+), facturas de tipo factura (cargo −), notas de crédito (crédito +)
   const movimientos = useMemo(() => [
-    ...pagos.map((p) => ({
+    ...pagos.filter((p) => p.estado === "verificado").map((p) => ({
       id: p.id, fecha: p.fecha_verificacion || p.created_at, cliente: clientesMap[p.cliente_id] || "—",
       tipo: "pago" as const, monto: Number(p.monto), metodo: metodoLabel[p.metodo] || p.metodo, referencia: p.numero,
     })),
-    ...ordenes.map((o) => ({
-      id: o.id, fecha: o.created_at, cliente: clientesMap[o.cliente_id] || "—",
-      tipo: "cargo" as const, monto: Number(o.total), metodo: "Orden", referencia: o.numero,
+    ...facturas.filter((f) => f.tipo === "factura").map((f) => ({
+      id: f.id, fecha: f.fecha_emision || "", cliente: clientesMap[f.cliente_id] || "—",
+      tipo: "cargo" as const, monto: Number(f.total_usd), metodo: "Factura", referencia: f.numero,
     })),
-    ...cuentas.filter((c) => c.estado_pago !== "anulada").map((c) => ({
-      id: c.id, fecha: c.fecha, cliente: clientesMap[c.cliente_id] || "—",
-      tipo: "cargo" as const, monto: Number(c.monto), metodo: "Cuenta manual", referencia: c.numero,
+    ...facturas.filter((f) => f.tipo === "nota_credito").map((f) => ({
+      id: f.id, fecha: f.fecha_emision || "", cliente: clientesMap[f.cliente_id] || "—",
+      tipo: "pago" as const, monto: Math.abs(Number(f.total_usd)), metodo: "Nota de crédito", referencia: f.numero,
     })),
-  ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()), [pagos, ordenes, cuentas, clientesMap]);
+  ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()), [pagos, facturas, clientesMap]);
 
   const cuentasFiltradas = cuentasCliente.filter(({ c }) =>
     c.nombre_negocio.toLowerCase().includes(searchAcc.toLowerCase()) || (c.codigo || "").toLowerCase().includes(searchAcc.toLowerCase()));
@@ -196,16 +187,22 @@ const Cuentas = () => {
   const esBS = bancoSel?.moneda === "BS";
   const metodosBanco = bancoSel?.metodos?.length ? bancoSel.metodos : bancoSel ? [bancoSel.metodo_pago] : [];
   const saldoCliente = deudores.find((d) => d.id === payForm.cliente_id)?.saldo ?? 0;
+  const montoUSD = esBS ? (Number(payForm.tasa) > 0 ? Number(payForm.monto) / Number(payForm.tasa) : 0) : Number(payForm.monto) || 0;
+  const facturasCliente: FacturaSaldo[] = useMemo(() => facturas
+    .filter((f) => f.cliente_id === payForm.cliente_id && f.tipo === "factura" && f.saldo_usd > 0.009)
+    .map((f) => ({ id: f.id, numero: f.numero, fecha_emision: f.fecha_emision, saldo_usd: Number(f.saldo_usd) }))
+    .sort((a, b) => new Date(a.fecha_emision || 0).getTime() - new Date(b.fecha_emision || 0).getTime()),
+    [facturas, payForm.cliente_id]);
 
   const abrirCobro = () => {
     setPayForm({ cliente_id: "", banco_id: "", metodo: "", monto: "", tasa: "", referencia: "" });
+    setAsignaciones({});
     setPayOpen(true);
   };
   const elegirBanco = (banco_id: string) => {
     const b = bancos.find((x) => x.id === banco_id);
     const ms = b?.metodos?.length ? b.metodos : b ? [b.metodo_pago] : [];
-    const nextTasa = b?.moneda === "BS" && exchangeRate > 0 ? String(Math.round(exchangeRate * 100) / 100) : "";
-    setPayForm((f) => ({ ...f, banco_id, metodo: ms[0] || "transferencia", tasa: nextTasa }));
+    setPayForm((f) => ({ ...f, banco_id, metodo: ms[0] || "transferencia" }));
   };
 
   const registrarCobro = async () => {
@@ -217,8 +214,14 @@ const Cuentas = () => {
       toast({ title: "Falta la tasa de cambio", description: "Para un cobro en bolívares indicá la tasa (Bs. por USD).", variant: "destructive" });
       return;
     }
+    const asignado = Object.values(asignaciones).reduce((s, v) => s + v, 0);
+    if (asignado > montoUSD + 0.01) {
+      toast({ title: "La asignación excede el monto", description: "Revisá los montos por factura.", variant: "destructive" });
+      return;
+    }
     setSaving(true);
-    const { data, error } = await supabase.rpc("registrar_cobro", {
+    const p_asignaciones = Object.entries(asignaciones).map(([factura_id, monto]) => ({ factura_id, monto }));
+    const { data, error } = await supabase.rpc("registrar_cobro_facturas", {
       p_cliente_id: payForm.cliente_id,
       p_banco_id: payForm.banco_id,
       p_monto_moneda: Number(payForm.monto),
@@ -226,17 +229,19 @@ const Cuentas = () => {
       p_tasa: esBS ? Number(payForm.tasa) : null,
       p_metodo: payForm.metodo || metodosBanco[0] || "transferencia",
       p_referencia: payForm.referencia || null,
+      p_comprobante_url: null,
       p_notas: null,
+      p_asignaciones,
     });
     setSaving(false);
     if (error) {
       toast({ title: "No se pudo registrar el cobro", description: error.message, variant: "destructive" });
       return;
     }
-    const r = data as { ordenes_afectadas: number; credito_a_favor: number; monto_usd: number };
+    const r = data as { monto_usd: number; facturas_afectadas: number; saldo_a_favor: number };
     toast({
       title: "Cobro registrado",
-      description: `$${r.monto_usd} adjudicado a ${r.ordenes_afectadas} documento(s)` + (r.credito_a_favor > 0 ? ` · saldo a favor: ${formatPrice(r.credito_a_favor)}` : ""),
+      description: `$${r.monto_usd} aplicado a ${r.facturas_afectadas} factura(s)` + (r.saldo_a_favor > 0.009 ? ` · saldo a favor: ${formatPrice(r.saldo_a_favor)}` : ""),
     });
     setPayOpen(false);
     fetchAll();
@@ -277,7 +282,7 @@ const Cuentas = () => {
           <div className="flex items-center gap-3">
             <div className="rounded-lg bg-primary/10 p-2"><DollarSign className="h-5 w-5 text-primary" /></div>
             <div>
-              <p className="text-2xl font-bold">{pagos.length}</p>
+              <p className="text-2xl font-bold">{pagos.filter((p) => p.estado === "verificado").length}</p>
               <p className="text-sm text-muted-foreground">Recibos registrados</p>
             </div>
           </div>
@@ -322,7 +327,7 @@ const Cuentas = () => {
                   {pagination.pageItems.map(({ c, saldo, docs }) => {
                     const est = estadoCuenta(c, saldo);
                     return (
-                      <TableRow key={c.id} className="hover:bg-muted/50">
+                      <TableRow key={c.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/cuentas/${c.id}`)}>
                         <TableCell>
                           <p className="font-medium">{c.nombre_negocio}</p>
                           <p className="text-xs text-muted-foreground">{c.codigo || "—"}</p>
@@ -391,18 +396,18 @@ const Cuentas = () => {
 
       {/* Registrar Cobro */}
       <Dialog open={payOpen} onOpenChange={setPayOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Registrar Cobro</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Cliente *</Label>
-              <Select value={payForm.cliente_id} onValueChange={(v) => setPayForm((f) => ({ ...f, cliente_id: v }))}>
+              <Select value={payForm.cliente_id} onValueChange={(v) => { setPayForm((f) => ({ ...f, cliente_id: v })); setAsignaciones({}); }}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar cliente con deuda" /></SelectTrigger>
                 <SelectContent>
                   {deudores.map((d) => <SelectItem key={d.id} value={d.id}>{d.nombre} — {formatPrice(d.saldo)}</SelectItem>)}
                 </SelectContent>
               </Select>
-              {payForm.cliente_id && <p className="text-xs text-muted-foreground">Saldo pendiente: <span className="font-semibold text-destructive">{formatPrice(saldoCliente)}</span> — se adjudica del documento más antiguo al más nuevo.</p>}
+              {payForm.cliente_id && <p className="text-xs text-muted-foreground">Saldo pendiente: <span className="font-semibold text-destructive">{formatPrice(saldoCliente)}</span></p>}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -437,8 +442,19 @@ const Cuentas = () => {
               )}
             </div>
             {esBS && payForm.monto && payForm.tasa && Number(payForm.tasa) > 0 && (
-              <p className="text-xs text-muted-foreground">Equivale a <span className="font-semibold">{formatPrice(Number(payForm.monto) / Number(payForm.tasa))}</span></p>
+              <p className="text-xs text-muted-foreground">Equivale a <span className="font-semibold">{formatPrice(montoUSD)}</span></p>
             )}
+
+            {payForm.cliente_id && (
+              <SelectorFacturas
+                facturas={facturasCliente}
+                montoDisponible={montoUSD}
+                asignaciones={asignaciones}
+                onChange={setAsignaciones}
+                formatPrice={formatPrice}
+              />
+            )}
+
             <div className="space-y-2">
               <Label>Referencia</Label>
               <Input value={payForm.referencia} onChange={(e) => setPayForm((f) => ({ ...f, referencia: e.target.value }))} placeholder="Nro. de referencia (opcional)" />

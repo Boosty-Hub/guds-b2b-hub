@@ -1,4 +1,7 @@
 import { Bell, Search, User, LogOut, Settings } from "lucide-react";
+import { useNotifications } from "@/contexts/NotificationsContext";
+import { useControlTower } from "@/contexts/ControlTowerContext";
+import { usePendingActions } from "@/hooks/use-pending-actions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +17,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { TasaBcv } from "@/components/TasaBcv";
-import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
 
 interface HeaderProps {
@@ -24,6 +26,10 @@ interface HeaderProps {
 export function Header({ title }: HeaderProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { unreadCount } = useNotifications();
+  const { toggle: toggleTorre, open: torreAbierta } = useControlTower();
+  const { total: totalPendientes } = usePendingActions();
+  const totalBadge = unreadCount + totalPendientes;
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -51,8 +57,21 @@ export function Header({ title }: HeaderProps) {
         {/* Tasa BCV */}
         <TasaBcv />
 
-        {/* Notifications */}
-        <NotificationsDropdown />
+        {/* Torre de control */}
+        <Button
+          variant={torreAbierta ? "secondary" : "ghost"}
+          size="icon"
+          className="relative"
+          onClick={toggleTorre}
+          title="Torre de control"
+        >
+          <Bell className="h-5 w-5" />
+          {totalBadge > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-xs font-semibold text-destructive-foreground">
+              {totalBadge > 9 ? "9+" : totalBadge}
+            </span>
+          )}
+        </Button>
 
         {/* Boosty support */}
         <BoostySupportSlot media="(min-width: 1024px)" />

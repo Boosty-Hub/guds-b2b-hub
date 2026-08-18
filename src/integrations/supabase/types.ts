@@ -39,6 +39,50 @@ export type Database = {
   }
   public: {
     Tables: {
+      almacenes: {
+        Row: {
+          activo: boolean | null
+          cliente_id: string | null
+          codigo: string | null
+          created_at: string | null
+          id: string
+          nombre: string
+          odoo_id: number | null
+          tipo: string
+          updated_at: string | null
+        }
+        Insert: {
+          activo?: boolean | null
+          cliente_id?: string | null
+          codigo?: string | null
+          created_at?: string | null
+          id?: string
+          nombre: string
+          odoo_id?: number | null
+          tipo?: string
+          updated_at?: string | null
+        }
+        Update: {
+          activo?: boolean | null
+          cliente_id?: string | null
+          codigo?: string | null
+          created_at?: string | null
+          id?: string
+          nombre?: string
+          odoo_id?: number | null
+          tipo?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "almacenes_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bancos: {
         Row: {
           activo: boolean
@@ -46,9 +90,11 @@ export type Database = {
           documento: string | null
           id: string
           metodo_pago: Database["public"]["Enums"]["pago_metodo"]
+          metodos: string[] | null
           moneda: string
           nombre: string
           numero_cuenta: string | null
+          odoo_id: number | null
           titular: string | null
           updated_at: string | null
         }
@@ -58,9 +104,11 @@ export type Database = {
           documento?: string | null
           id?: string
           metodo_pago: Database["public"]["Enums"]["pago_metodo"]
+          metodos?: string[] | null
           moneda?: string
           nombre: string
           numero_cuenta?: string | null
+          odoo_id?: number | null
           titular?: string | null
           updated_at?: string | null
         }
@@ -70,9 +118,11 @@ export type Database = {
           documento?: string | null
           id?: string
           metodo_pago?: Database["public"]["Enums"]["pago_metodo"]
+          metodos?: string[] | null
           moneda?: string
           nombre?: string
           numero_cuenta?: string | null
+          odoo_id?: number | null
           titular?: string | null
           updated_at?: string | null
         }
@@ -189,6 +239,7 @@ export type Database = {
           icono: string | null
           id: string
           nombre: string
+          odoo_id: number | null
           orden: number | null
           updated_at: string | null
         }
@@ -199,6 +250,7 @@ export type Database = {
           icono?: string | null
           id?: string
           nombre: string
+          odoo_id?: number | null
           orden?: number | null
           updated_at?: string | null
         }
@@ -209,6 +261,7 @@ export type Database = {
           icono?: string | null
           id?: string
           nombre?: string
+          odoo_id?: number | null
           orden?: number | null
           updated_at?: string | null
         }
@@ -217,75 +270,117 @@ export type Database = {
       clientes: {
         Row: {
           activo: boolean | null
-          ciudad: string
+          cedula: string | null
+          celular: string | null
+          ciudad: string | null
           codigo: string
+          condicion_pago: string | null
           contribuyente_especial: boolean
           created_at: string | null
           credito_utilizado: number | null
           dias_credito: number | null
-          direccion: string
+          direccion: string | null
           direccion_entrega: string | null
-          email: string
+          email: string | null
+          es_empresa: boolean | null
+          estado: string | null
+          fecha_registro_odoo: string | null
           id: string
           latitud: number | null
+          licencia_actividad: string | null
           limite_credito: number | null
           lista_precios_id: string | null
           longitud: number | null
           nombre_negocio: string
+          notas: string | null
+          odoo_id: number | null
           registro_origen_id: string | null
+          retiene_islr: boolean
+          retiene_iva: boolean
           rif: string
+          sitio_web: string | null
           telefono: string | null
           tipo_negocio: string
+          tipo_residencia: string | null
           updated_at: string | null
           vendedor_asignado_id: string | null
+          vendedor_odoo: string | null
         }
         Insert: {
           activo?: boolean | null
-          ciudad: string
+          cedula?: string | null
+          celular?: string | null
+          ciudad?: string | null
           codigo: string
+          condicion_pago?: string | null
           contribuyente_especial?: boolean
           created_at?: string | null
           credito_utilizado?: number | null
           dias_credito?: number | null
-          direccion: string
+          direccion?: string | null
           direccion_entrega?: string | null
-          email: string
+          email?: string | null
+          es_empresa?: boolean | null
+          estado?: string | null
+          fecha_registro_odoo?: string | null
           id?: string
           latitud?: number | null
+          licencia_actividad?: string | null
           limite_credito?: number | null
           lista_precios_id?: string | null
           longitud?: number | null
           nombre_negocio: string
+          notas?: string | null
+          odoo_id?: number | null
           registro_origen_id?: string | null
+          retiene_islr?: boolean
+          retiene_iva?: boolean
           rif: string
+          sitio_web?: string | null
           telefono?: string | null
           tipo_negocio: string
+          tipo_residencia?: string | null
           updated_at?: string | null
           vendedor_asignado_id?: string | null
+          vendedor_odoo?: string | null
         }
         Update: {
           activo?: boolean | null
-          ciudad?: string
+          cedula?: string | null
+          celular?: string | null
+          ciudad?: string | null
           codigo?: string
+          condicion_pago?: string | null
           contribuyente_especial?: boolean
           created_at?: string | null
           credito_utilizado?: number | null
           dias_credito?: number | null
-          direccion?: string
+          direccion?: string | null
           direccion_entrega?: string | null
-          email?: string
+          email?: string | null
+          es_empresa?: boolean | null
+          estado?: string | null
+          fecha_registro_odoo?: string | null
           id?: string
           latitud?: number | null
+          licencia_actividad?: string | null
           limite_credito?: number | null
           lista_precios_id?: string | null
           longitud?: number | null
           nombre_negocio?: string
+          notas?: string | null
+          odoo_id?: number | null
           registro_origen_id?: string | null
+          retiene_islr?: boolean
+          retiene_iva?: boolean
           rif?: string
+          sitio_web?: string | null
           telefono?: string | null
           tipo_negocio?: string
+          tipo_residencia?: string | null
           updated_at?: string | null
           vendedor_asignado_id?: string | null
+          vendedor_odoo?: string | null
         }
         Relationships: [
           {
@@ -310,6 +405,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      conceptos_retencion_islr: {
+        Row: {
+          activo: boolean
+          codigo: string | null
+          concepto: string
+          created_at: string
+          id: string
+          porcentaje: number
+        }
+        Insert: {
+          activo?: boolean
+          codigo?: string | null
+          concepto: string
+          created_at?: string
+          id?: string
+          porcentaje: number
+        }
+        Update: {
+          activo?: boolean
+          codigo?: string | null
+          concepto?: string
+          created_at?: string
+          id?: string
+          porcentaje?: number
+        }
+        Relationships: []
       }
       configuracion: {
         Row: {
@@ -340,6 +462,59 @@ export type Database = {
           valor?: string | null
         }
         Relationships: []
+      }
+      cuentas_cobrar: {
+        Row: {
+          cliente_id: string
+          concepto: string
+          created_at: string | null
+          estado_pago: string
+          fecha: string
+          id: string
+          monto: number
+          monto_pagado: number
+          notas: string | null
+          numero: string | null
+          origen: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          cliente_id: string
+          concepto: string
+          created_at?: string | null
+          estado_pago?: string
+          fecha?: string
+          id?: string
+          monto: number
+          monto_pagado?: number
+          notas?: string | null
+          numero?: string | null
+          origen?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          cliente_id?: string
+          concepto?: string
+          created_at?: string | null
+          estado_pago?: string
+          fecha?: string
+          id?: string
+          monto?: number
+          monto_pagado?: number
+          notas?: string | null
+          numero?: string | null
+          origen?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cuentas_cobrar_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       cupones: {
         Row: {
@@ -405,6 +580,153 @@ export type Database = {
             columns: ["cliente_especifico_id"]
             isOneToOne: false
             referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      declaracion_consignacion_items: {
+        Row: {
+          cantidad: number
+          created_at: string
+          declaracion_id: string
+          id: string
+          nombre_producto: string | null
+          precio_unitario: number
+          producto_id: string | null
+          sku_producto: string | null
+          subtotal: number
+        }
+        Insert: {
+          cantidad: number
+          created_at?: string
+          declaracion_id: string
+          id?: string
+          nombre_producto?: string | null
+          precio_unitario?: number
+          producto_id?: string | null
+          sku_producto?: string | null
+          subtotal?: number
+        }
+        Update: {
+          cantidad?: number
+          created_at?: string
+          declaracion_id?: string
+          id?: string
+          nombre_producto?: string | null
+          precio_unitario?: number
+          producto_id?: string | null
+          sku_producto?: string | null
+          subtotal?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "declaracion_consignacion_items_declaracion_id_fkey"
+            columns: ["declaracion_id"]
+            isOneToOne: false
+            referencedRelation: "declaraciones_consignacion"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "declaracion_consignacion_items_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "productos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      declaraciones_consignacion: {
+        Row: {
+          almacen_id: string
+          cliente_id: string
+          created_at: string
+          declarado_por: string | null
+          estado: string
+          factura_id: string | null
+          fecha: string
+          id: string
+          impuesto: number
+          notas: string | null
+          numero: string
+          revisado_en: string | null
+          revisado_por: string | null
+          rol_declarante: string
+          subtotal: number
+          total: number
+          updated_at: string
+        }
+        Insert: {
+          almacen_id: string
+          cliente_id: string
+          created_at?: string
+          declarado_por?: string | null
+          estado?: string
+          factura_id?: string | null
+          fecha?: string
+          id?: string
+          impuesto?: number
+          notas?: string | null
+          numero: string
+          revisado_en?: string | null
+          revisado_por?: string | null
+          rol_declarante: string
+          subtotal?: number
+          total?: number
+          updated_at?: string
+        }
+        Update: {
+          almacen_id?: string
+          cliente_id?: string
+          created_at?: string
+          declarado_por?: string | null
+          estado?: string
+          factura_id?: string | null
+          fecha?: string
+          id?: string
+          impuesto?: number
+          notas?: string | null
+          numero?: string
+          revisado_en?: string | null
+          revisado_por?: string | null
+          rol_declarante?: string
+          subtotal?: number
+          total?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "declaraciones_consignacion_almacen_id_fkey"
+            columns: ["almacen_id"]
+            isOneToOne: false
+            referencedRelation: "almacenes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "declaraciones_consignacion_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "declaraciones_consignacion_declarado_por_fkey"
+            columns: ["declarado_por"]
+            isOneToOne: false
+            referencedRelation: "usuarios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "declaraciones_consignacion_factura_id_fkey"
+            columns: ["factura_id"]
+            isOneToOne: false
+            referencedRelation: "facturas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "declaraciones_consignacion_revisado_por_fkey"
+            columns: ["revisado_por"]
+            isOneToOne: false
+            referencedRelation: "usuarios"
             referencedColumns: ["id"]
           },
         ]
@@ -487,6 +809,183 @@ export type Database = {
           },
         ]
       }
+      factura_items: {
+        Row: {
+          cantidad: number
+          created_at: string | null
+          descuento: number
+          factura_id: string
+          id: string
+          nombre_producto: string | null
+          odoo_id: number | null
+          precio_unitario: number
+          producto_id: string | null
+          sku_producto: string | null
+          subtotal: number
+          total: number
+        }
+        Insert: {
+          cantidad?: number
+          created_at?: string | null
+          descuento?: number
+          factura_id: string
+          id?: string
+          nombre_producto?: string | null
+          odoo_id?: number | null
+          precio_unitario?: number
+          producto_id?: string | null
+          sku_producto?: string | null
+          subtotal?: number
+          total?: number
+        }
+        Update: {
+          cantidad?: number
+          created_at?: string | null
+          descuento?: number
+          factura_id?: string
+          id?: string
+          nombre_producto?: string | null
+          odoo_id?: number | null
+          precio_unitario?: number
+          producto_id?: string | null
+          sku_producto?: string | null
+          subtotal?: number
+          total?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "factura_items_factura_id_fkey"
+            columns: ["factura_id"]
+            isOneToOne: false
+            referencedRelation: "facturas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "factura_items_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "productos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      facturas: {
+        Row: {
+          cliente_id: string | null
+          creada_en_guds: boolean
+          created_at: string | null
+          estado: string
+          estado_cobro: string | null
+          estado_pago: string
+          fecha_emision: string | null
+          fecha_vencimiento: string | null
+          id: string
+          impuesto: number
+          moneda: string
+          monto_aplicado_usd: number
+          monto_pagado: number
+          monto_retenido_usd: number
+          notas: string | null
+          nro_control: string | null
+          numero: string
+          odoo_id: number | null
+          odoo_sync_at: string | null
+          orden_id: string | null
+          referencia: string | null
+          saldo_odoo_usd: number
+          saldo_pendiente: number
+          saldo_usd: number | null
+          subtotal: number
+          tasa_cambio: number | null
+          tipo: string
+          total: number
+          total_usd: number
+          updated_at: string | null
+          vendedor_odoo: string | null
+        }
+        Insert: {
+          cliente_id?: string | null
+          creada_en_guds?: boolean
+          created_at?: string | null
+          estado?: string
+          estado_cobro?: string | null
+          estado_pago?: string
+          fecha_emision?: string | null
+          fecha_vencimiento?: string | null
+          id?: string
+          impuesto?: number
+          moneda?: string
+          monto_aplicado_usd?: number
+          monto_pagado?: number
+          monto_retenido_usd?: number
+          notas?: string | null
+          nro_control?: string | null
+          numero: string
+          odoo_id?: number | null
+          odoo_sync_at?: string | null
+          orden_id?: string | null
+          referencia?: string | null
+          saldo_odoo_usd?: number
+          saldo_pendiente?: number
+          saldo_usd?: number | null
+          subtotal?: number
+          tasa_cambio?: number | null
+          tipo?: string
+          total?: number
+          total_usd?: number
+          updated_at?: string | null
+          vendedor_odoo?: string | null
+        }
+        Update: {
+          cliente_id?: string | null
+          creada_en_guds?: boolean
+          created_at?: string | null
+          estado?: string
+          estado_cobro?: string | null
+          estado_pago?: string
+          fecha_emision?: string | null
+          fecha_vencimiento?: string | null
+          id?: string
+          impuesto?: number
+          moneda?: string
+          monto_aplicado_usd?: number
+          monto_pagado?: number
+          monto_retenido_usd?: number
+          notas?: string | null
+          nro_control?: string | null
+          numero?: string
+          odoo_id?: number | null
+          odoo_sync_at?: string | null
+          orden_id?: string | null
+          referencia?: string | null
+          saldo_odoo_usd?: number
+          saldo_pendiente?: number
+          saldo_usd?: number | null
+          subtotal?: number
+          tasa_cambio?: number | null
+          tipo?: string
+          total?: number
+          total_usd?: number
+          updated_at?: string | null
+          vendedor_odoo?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "facturas_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "facturas_orden_id_fkey"
+            columns: ["orden_id"]
+            isOneToOne: false
+            referencedRelation: "ordenes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       favoritos: {
         Row: {
           created_at: string | null
@@ -552,6 +1051,45 @@ export type Database = {
           orden?: number | null
         }
         Relationships: []
+      }
+      inventario_almacen: {
+        Row: {
+          almacen_id: string
+          cantidad: number
+          id: string
+          producto_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          almacen_id: string
+          cantidad?: number
+          id?: string
+          producto_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          almacen_id?: string
+          cantidad?: number
+          id?: string
+          producto_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventario_almacen_almacen_id_fkey"
+            columns: ["almacen_id"]
+            isOneToOne: false
+            referencedRelation: "almacenes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventario_almacen_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "productos"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       listas_precios: {
         Row: {
@@ -714,6 +1252,64 @@ export type Database = {
         }
         Relationships: []
       }
+      movimientos_bancarios: {
+        Row: {
+          banco_id: string
+          created_at: string | null
+          descripcion: string | null
+          fecha: string
+          id: string
+          monto: number
+          pago_id: string | null
+          referencia: string | null
+          tipo: string
+        }
+        Insert: {
+          banco_id: string
+          created_at?: string | null
+          descripcion?: string | null
+          fecha?: string
+          id?: string
+          monto: number
+          pago_id?: string | null
+          referencia?: string | null
+          tipo?: string
+        }
+        Update: {
+          banco_id?: string
+          created_at?: string | null
+          descripcion?: string | null
+          fecha?: string
+          id?: string
+          monto?: number
+          pago_id?: string | null
+          referencia?: string | null
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "movimientos_bancarios_banco_id_fkey"
+            columns: ["banco_id"]
+            isOneToOne: false
+            referencedRelation: "bancos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "movimientos_bancarios_pago_id_fkey"
+            columns: ["pago_id"]
+            isOneToOne: false
+            referencedRelation: "pagos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "movimientos_bancarios_pago_id_fkey"
+            columns: ["pago_id"]
+            isOneToOne: false
+            referencedRelation: "v_anticipos"
+            referencedColumns: ["pago_id"]
+          },
+        ]
+      }
       movimientos_inventario: {
         Row: {
           cantidad: number
@@ -821,9 +1417,12 @@ export type Database = {
           created_at: string | null
           descuento: number | null
           id: string
+          nombre_producto: string | null
+          odoo_id: number | null
           orden_id: string
           precio_unitario: number
-          producto_id: string
+          producto_id: string | null
+          sku_producto: string | null
           subtotal: number
         }
         Insert: {
@@ -831,9 +1430,12 @@ export type Database = {
           created_at?: string | null
           descuento?: number | null
           id?: string
+          nombre_producto?: string | null
+          odoo_id?: number | null
           orden_id: string
           precio_unitario: number
-          producto_id: string
+          producto_id?: string | null
+          sku_producto?: string | null
           subtotal: number
         }
         Update: {
@@ -841,9 +1443,12 @@ export type Database = {
           created_at?: string | null
           descuento?: number | null
           id?: string
+          nombre_producto?: string | null
+          odoo_id?: number | null
           orden_id?: string
           precio_unitario?: number
-          producto_id?: string
+          producto_id?: string | null
+          sku_producto?: string | null
           subtotal?: number
         }
         Relationships: [
@@ -873,13 +1478,19 @@ export type Database = {
           direccion_entrega: string | null
           envio: number | null
           estado: Database["public"]["Enums"]["orden_estado"] | null
+          estado_odoo: string | null
+          estado_pago: string
           fecha_entrega_estimada: string | null
           fecha_entrega_real: string | null
+          fecha_pedido: string | null
           id: string
           impuesto: number | null
           metodo_pago: Database["public"]["Enums"]["pago_metodo"] | null
+          moneda_original: string | null
+          monto_pagado: number
           notas: string | null
           numero: string
+          odoo_id: number | null
           pagado: boolean | null
           referencia_pago: string | null
           stock_descontado: boolean
@@ -888,6 +1499,7 @@ export type Database = {
           updated_at: string | null
           usuario_id: string | null
           vendedor_id: string | null
+          vendedor_odoo: string | null
         }
         Insert: {
           ciudad_entrega?: string | null
@@ -898,13 +1510,19 @@ export type Database = {
           direccion_entrega?: string | null
           envio?: number | null
           estado?: Database["public"]["Enums"]["orden_estado"] | null
+          estado_odoo?: string | null
+          estado_pago?: string
           fecha_entrega_estimada?: string | null
           fecha_entrega_real?: string | null
+          fecha_pedido?: string | null
           id?: string
           impuesto?: number | null
           metodo_pago?: Database["public"]["Enums"]["pago_metodo"] | null
+          moneda_original?: string | null
+          monto_pagado?: number
           notas?: string | null
           numero: string
+          odoo_id?: number | null
           pagado?: boolean | null
           referencia_pago?: string | null
           stock_descontado?: boolean
@@ -913,6 +1531,7 @@ export type Database = {
           updated_at?: string | null
           usuario_id?: string | null
           vendedor_id?: string | null
+          vendedor_odoo?: string | null
         }
         Update: {
           ciudad_entrega?: string | null
@@ -923,13 +1542,19 @@ export type Database = {
           direccion_entrega?: string | null
           envio?: number | null
           estado?: Database["public"]["Enums"]["orden_estado"] | null
+          estado_odoo?: string | null
+          estado_pago?: string
           fecha_entrega_estimada?: string | null
           fecha_entrega_real?: string | null
+          fecha_pedido?: string | null
           id?: string
           impuesto?: number | null
           metodo_pago?: Database["public"]["Enums"]["pago_metodo"] | null
+          moneda_original?: string | null
+          monto_pagado?: number
           notas?: string | null
           numero?: string
+          odoo_id?: number | null
           pagado?: boolean | null
           referencia_pago?: string | null
           stock_descontado?: boolean
@@ -938,6 +1563,7 @@ export type Database = {
           updated_at?: string | null
           usuario_id?: string | null
           vendedor_id?: string | null
+          vendedor_odoo?: string | null
         }
         Relationships: [
           {
@@ -963,6 +1589,154 @@ export type Database = {
           },
         ]
       }
+      pago_cuentas: {
+        Row: {
+          created_at: string | null
+          cuenta_id: string
+          id: string
+          monto_aplicado: number
+          pago_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          cuenta_id: string
+          id?: string
+          monto_aplicado: number
+          pago_id: string
+        }
+        Update: {
+          created_at?: string | null
+          cuenta_id?: string
+          id?: string
+          monto_aplicado?: number
+          pago_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pago_cuentas_cuenta_id_fkey"
+            columns: ["cuenta_id"]
+            isOneToOne: false
+            referencedRelation: "cuentas_cobrar"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pago_cuentas_pago_id_fkey"
+            columns: ["pago_id"]
+            isOneToOne: false
+            referencedRelation: "pagos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pago_cuentas_pago_id_fkey"
+            columns: ["pago_id"]
+            isOneToOne: false
+            referencedRelation: "v_anticipos"
+            referencedColumns: ["pago_id"]
+          },
+        ]
+      }
+      pago_facturas: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          factura_id: string
+          id: string
+          monto_aplicado: number
+          pago_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          factura_id: string
+          id?: string
+          monto_aplicado: number
+          pago_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          factura_id?: string
+          id?: string
+          monto_aplicado?: number
+          pago_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pago_facturas_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "usuarios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pago_facturas_factura_id_fkey"
+            columns: ["factura_id"]
+            isOneToOne: false
+            referencedRelation: "facturas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pago_facturas_pago_id_fkey"
+            columns: ["pago_id"]
+            isOneToOne: false
+            referencedRelation: "pagos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pago_facturas_pago_id_fkey"
+            columns: ["pago_id"]
+            isOneToOne: false
+            referencedRelation: "v_anticipos"
+            referencedColumns: ["pago_id"]
+          },
+        ]
+      }
+      pago_ordenes: {
+        Row: {
+          created_at: string | null
+          id: string
+          monto_aplicado: number
+          orden_id: string
+          pago_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          monto_aplicado: number
+          orden_id: string
+          pago_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          monto_aplicado?: number
+          orden_id?: string
+          pago_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pago_ordenes_orden_id_fkey"
+            columns: ["orden_id"]
+            isOneToOne: false
+            referencedRelation: "ordenes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pago_ordenes_pago_id_fkey"
+            columns: ["pago_id"]
+            isOneToOne: false
+            referencedRelation: "pagos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pago_ordenes_pago_id_fkey"
+            columns: ["pago_id"]
+            isOneToOne: false
+            referencedRelation: "v_anticipos"
+            referencedColumns: ["pago_id"]
+          },
+        ]
+      }
       pagos: {
         Row: {
           banco: string | null
@@ -979,6 +1753,7 @@ export type Database = {
           monto_moneda: number | null
           notas: string | null
           numero: string
+          odoo_id: number | null
           orden_id: string | null
           referencia: string | null
           tasa_cambio: number | null
@@ -1000,6 +1775,7 @@ export type Database = {
           monto_moneda?: number | null
           notas?: string | null
           numero: string
+          odoo_id?: number | null
           orden_id?: string | null
           referencia?: string | null
           tasa_cambio?: number | null
@@ -1021,6 +1797,7 @@ export type Database = {
           monto_moneda?: number | null
           notas?: string | null
           numero?: string
+          odoo_id?: number | null
           orden_id?: string | null
           referencia?: string | null
           tasa_cambio?: number | null
@@ -1204,6 +1981,7 @@ export type Database = {
           imagen_url: string | null
           imagenes: Json
           nombre: string
+          odoo_id: number | null
           porcentaje_descuento: number | null
           precio_base: number
           precio_oferta: number | null
@@ -1228,6 +2006,7 @@ export type Database = {
           imagen_url?: string | null
           imagenes?: Json
           nombre: string
+          odoo_id?: number | null
           porcentaje_descuento?: number | null
           precio_base: number
           precio_oferta?: number | null
@@ -1252,6 +2031,7 @@ export type Database = {
           imagen_url?: string | null
           imagenes?: Json
           nombre?: string
+          odoo_id?: number | null
           porcentaje_descuento?: number | null
           precio_base?: number
           precio_oferta?: number | null
@@ -1350,6 +2130,143 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "registros_clientes_revisado_por_fkey"
+            columns: ["revisado_por"]
+            isOneToOne: false
+            referencedRelation: "usuarios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      retencion_items: {
+        Row: {
+          created_at: string
+          factura_id: string
+          id: string
+          monto_aplicado: number
+          odoo_id: number | null
+          retencion_id: string
+        }
+        Insert: {
+          created_at?: string
+          factura_id: string
+          id?: string
+          monto_aplicado: number
+          odoo_id?: number | null
+          retencion_id: string
+        }
+        Update: {
+          created_at?: string
+          factura_id?: string
+          id?: string
+          monto_aplicado?: number
+          odoo_id?: number | null
+          retencion_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retencion_items_factura_id_fkey"
+            columns: ["factura_id"]
+            isOneToOne: false
+            referencedRelation: "facturas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retencion_items_retencion_id_fkey"
+            columns: ["retencion_id"]
+            isOneToOne: false
+            referencedRelation: "retenciones"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      retenciones: {
+        Row: {
+          base_imponible: number
+          cliente_id: string
+          comprobante_url: string | null
+          concepto_islr_id: string | null
+          created_at: string
+          declarado_por: string | null
+          estado: string
+          fecha: string
+          id: string
+          notas: string | null
+          numero: string
+          odoo_id: number | null
+          porcentaje: number | null
+          revisado_en: string | null
+          revisado_por: string | null
+          rol_declarante: string
+          tipo: string
+          total: number
+          updated_at: string
+        }
+        Insert: {
+          base_imponible?: number
+          cliente_id: string
+          comprobante_url?: string | null
+          concepto_islr_id?: string | null
+          created_at?: string
+          declarado_por?: string | null
+          estado?: string
+          fecha?: string
+          id?: string
+          notas?: string | null
+          numero: string
+          odoo_id?: number | null
+          porcentaje?: number | null
+          revisado_en?: string | null
+          revisado_por?: string | null
+          rol_declarante: string
+          tipo: string
+          total?: number
+          updated_at?: string
+        }
+        Update: {
+          base_imponible?: number
+          cliente_id?: string
+          comprobante_url?: string | null
+          concepto_islr_id?: string | null
+          created_at?: string
+          declarado_por?: string | null
+          estado?: string
+          fecha?: string
+          id?: string
+          notas?: string | null
+          numero?: string
+          odoo_id?: number | null
+          porcentaje?: number | null
+          revisado_en?: string | null
+          revisado_por?: string | null
+          rol_declarante?: string
+          tipo?: string
+          total?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retenciones_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retenciones_concepto_islr_id_fkey"
+            columns: ["concepto_islr_id"]
+            isOneToOne: false
+            referencedRelation: "conceptos_retencion_islr"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retenciones_declarado_por_fkey"
+            columns: ["declarado_por"]
+            isOneToOne: false
+            referencedRelation: "usuarios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retenciones_revisado_por_fkey"
             columns: ["revisado_por"]
             isOneToOne: false
             referencedRelation: "usuarios"
@@ -1512,7 +2429,44 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      v_anticipos: {
+        Row: {
+          aplicado: number | null
+          cliente_id: string | null
+          created_at: string | null
+          disponible: number | null
+          monto_usd: number | null
+          numero: string | null
+          pago_id: string | null
+        }
+        Insert: {
+          aplicado?: never
+          cliente_id?: string | null
+          created_at?: string | null
+          disponible?: never
+          monto_usd?: number | null
+          numero?: string | null
+          pago_id?: string | null
+        }
+        Update: {
+          aplicado?: never
+          cliente_id?: string | null
+          created_at?: string | null
+          disponible?: never
+          monto_usd?: number | null
+          numero?: string | null
+          pago_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pagos_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       actualizar_estado_entrega: {
@@ -1526,6 +2480,14 @@ export type Database = {
           p_receptor?: string
         }
         Returns: undefined
+      }
+      aplicar_anticipo: {
+        Args: { p_asignaciones: Json; p_pago_id: string }
+        Returns: Json
+      }
+      aplicar_pago_a_facturas: {
+        Args: { p_asignaciones: Json; p_pago_id: string }
+        Returns: number
       }
       aprobar_registro_cliente: {
         Args: {
@@ -1570,11 +2532,14 @@ export type Database = {
       }
       crear_orden_desde_carrito: {
         Args: {
+          p_banco_id?: string
           p_comprobante_url?: string
           p_cupon_id?: string
           p_metodo_pago: Database["public"]["Enums"]["pago_metodo"]
+          p_moneda?: string
           p_notas?: string
           p_referencia?: string
+          p_tasa?: number
         }
         Returns: {
           numero: string
@@ -1610,8 +2575,26 @@ export type Database = {
           usuario_id: string
         }[]
       }
+      declarar_retencion: {
+        Args: {
+          p_cliente_id: string
+          p_comprobante_url?: string
+          p_concepto_islr_id?: string
+          p_fecha?: string
+          p_items: Json
+          p_notas?: string
+          p_numero?: string
+          p_tipo: string
+        }
+        Returns: string
+      }
+      declarar_venta_consignacion: {
+        Args: { p_almacen_id: string; p_items: Json; p_notas?: string }
+        Returns: string
+      }
       es_admin_total: { Args: never; Returns: boolean }
       es_vendedor_de: { Args: { p_cliente_id: string }; Returns: boolean }
+      facturar_orden: { Args: { p_orden_id: string }; Returns: string }
       fmt_usd: { Args: { n: number }; Returns: string }
       generar_codigo_cliente: { Args: never; Returns: string }
       generar_numero_orden: { Args: never; Returns: string }
@@ -1680,6 +2663,21 @@ export type Database = {
         Args: { p_admin_id: string; p_notas?: string; p_registro_id: string }
         Returns: boolean
       }
+      registrar_cobro_facturas: {
+        Args: {
+          p_asignaciones?: Json
+          p_banco_id: string
+          p_cliente_id: string
+          p_comprobante_url: string
+          p_metodo: Database["public"]["Enums"]["pago_metodo"]
+          p_moneda: string
+          p_monto_moneda: number
+          p_notas: string
+          p_referencia: string
+          p_tasa: number
+        }
+        Returns: Json
+      }
       registrar_pago: {
         Args: {
           p_banco_id: string
@@ -1704,14 +2702,40 @@ export type Database = {
         }
         Returns: string
       }
+      revisar_declaracion_consignacion: {
+        Args: { p_aprobar: boolean; p_declaracion_id: string; p_notas?: string }
+        Returns: Json
+      }
+      revisar_retencion: {
+        Args: { p_aprobar: boolean; p_notas?: string; p_retencion_id: string }
+        Returns: Json
+      }
       upsert_tasa_bcv: {
         Args: { p_fuente?: string; p_tasa: number }
         Returns: Json
       }
-      verificar_pago: {
-        Args: { p_aprobar: boolean; p_notas?: string; p_pago_id: string }
-        Returns: undefined
-      }
+      verificar_pago:
+        | {
+            Args: {
+              p_aprobar: boolean
+              p_asignaciones?: Json
+              p_banco_id?: string
+              p_notas?: string
+              p_pago_id: string
+              p_tasa?: number
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_aprobar: boolean
+              p_banco_id: string
+              p_notas: string
+              p_pago_id: string
+              p_tasa: number
+            }
+            Returns: undefined
+          }
     }
     Enums: {
       entrega_estado: "asignada" | "en_camino" | "entregada" | "fallida"
@@ -1723,7 +2747,12 @@ export type Database = {
         | "completado"
         | "cancelado"
       pago_estado: "pendiente" | "verificado" | "rechazado"
-      pago_metodo: "transferencia" | "efectivo" | "credito" | "pago_movil"
+      pago_metodo:
+        | "transferencia"
+        | "efectivo"
+        | "credito"
+        | "pago_movil"
+        | "tarjeta"
       registro_estado: "pendiente" | "aprobado" | "rechazado"
       user_role: "admin" | "cliente" | "vendedor" | "delivery"
     }
@@ -1866,7 +2895,13 @@ export const Constants = {
         "cancelado",
       ],
       pago_estado: ["pendiente", "verificado", "rechazado"],
-      pago_metodo: ["transferencia", "efectivo", "credito", "pago_movil"],
+      pago_metodo: [
+        "transferencia",
+        "efectivo",
+        "credito",
+        "pago_movil",
+        "tarjeta",
+      ],
       registro_estado: ["pendiente", "aprobado", "rechazado"],
       user_role: ["admin", "cliente", "vendedor", "delivery"],
     },

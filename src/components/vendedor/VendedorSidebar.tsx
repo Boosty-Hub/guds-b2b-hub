@@ -7,7 +7,9 @@ import {
   Target,
   LogOut,
   TrendingUp,
-  Warehouse
+  Warehouse,
+  PackageCheck,
+  Receipt
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
@@ -20,6 +22,8 @@ const navItems = [
   { icon: CreditCard, label: "Pagos", path: "/vendedor/pagos" },
   { icon: Target, label: "Mis Metas", path: "/vendedor/metas" },
   { icon: Warehouse, label: "Inventario", path: "/vendedor/inventario" },
+  { icon: PackageCheck, label: "Consignación", path: "/vendedor/consignacion" },
+  { icon: Receipt, label: "Retenciones", path: "/vendedor/retenciones" },
 ];
 
 export const VendedorSidebar = () => {

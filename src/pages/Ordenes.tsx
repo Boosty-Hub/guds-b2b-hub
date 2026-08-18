@@ -32,7 +32,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Plus, Search, Eye, Truck, Loader2, Package, CheckCircle, Clock, X, Users, ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Plus, Search, Eye, Truck, Loader2, Package, CheckCircle, Clock, X, Users, ChevronRight, FileText } from "lucide-react";
 import { supabase, Cliente, Producto } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
@@ -106,7 +107,9 @@ const Ordenes = () => {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
   const [updatingStatus, setUpdatingStatus] = useState(false);
-  
+  const [facturaPorOrden, setFacturaPorOrden] = useState<Record<string, { id: string; numero: string }>>({});
+  const [facturando, setFacturando] = useState(false);
+
   // New order form
   const [newOrder, setNewOrder] = useState({
     cliente_id: "",
@@ -141,6 +144,30 @@ const Ordenes = () => {
     
     if (data) setOrdenes(data);
     setLoading(false);
+
+    const { data: facs } = await supabase
+      .from("facturas")
+      .select("id, numero, orden_id")
+      .not("orden_id", "is", null)
+      .eq("tipo", "factura")
+      .neq("estado_pago", "anulado");
+    if (facs) {
+      setFacturaPorOrden(Object.fromEntries((facs as { id: string; numero: string; orden_id: string }[]).map((f) => [f.orden_id, { id: f.id, numero: f.numero }])));
+    }
+  };
+
+  const facturarOrden = async (ordenId: string) => {
+    setFacturando(true);
+    const { data, error } = await supabase.rpc("facturar_orden", { p_orden_id: ordenId });
+    setFacturando(false);
+    if (error) {
+      toast({ title: "No se pudo facturar", description: error.message, variant: "destructive" });
+      return;
+    }
+    // Buscamos el número recién generado para el toast (facturar_orden devuelve solo el id).
+    const { data: fac } = await supabase.from("facturas").select("numero").eq("id", data as string).maybeSingle();
+    toast({ title: "Factura generada", description: fac?.numero ? `Factura ${fac.numero} creada` : "Factura creada" });
+    fetchOrdenes();
   };
 
   const fetchClientes = async () => {
@@ -410,9 +437,26 @@ const Ordenes = () => {
                       {formatDate(selectedOrder.fecha_pedido || selectedOrder.created_at)}
                     </p>
                   </div>
-                  <Badge variant={statusConfig[selectedOrder.estado]?.variant || "secondary"}>
-                    {statusConfig[selectedOrder.estado]?.label || selectedOrder.estado}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={statusConfig[selectedOrder.estado]?.variant || "secondary"}>
+                      {statusConfig[selectedOrder.estado]?.label || selectedOrder.estado}
+                    </Badge>
+                    {facturaPorOrden[selectedOrder.id] ? (
+                      <Link to={`/admin/facturas/${facturaPorOrden[selectedOrder.id].id}`}>
+                        <Button variant="outline" size="sm" className="gap-1.5">
+                          <FileText className="h-3.5 w-3.5" /> {facturaPorOrden[selectedOrder.id].numero}
+                        </Button>
+                      </Link>
+                    ) : (
+                      <Button
+                        variant="outline" size="sm" className="gap-1.5"
+                        disabled={facturando || selectedOrder.estado === "cancelado"}
+                        onClick={() => facturarOrden(selectedOrder.id)}
+                      >
+                        {facturando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />} Facturar
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
                   <div>

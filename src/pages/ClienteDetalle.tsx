@@ -229,6 +229,12 @@ const ClienteDetalle = () => {
         <Seccion icon={FileText} titulo="Fiscal y notas">
           <Campo label="Licencia de actividad">{cliente.licencia_actividad}</Campo>
           <Campo label="Contribuyente especial">{cliente.contribuyente_especial ? "Sí" : "No"}</Campo>
+          <Campo label="Agente de retención IVA">
+            {cliente.retiene_iva ? <Badge variant="secondary">Retiene IVA</Badge> : "No"}
+          </Campo>
+          <Campo label="Agente de retención ISLR">
+            {cliente.retiene_islr ? <Badge variant="secondary">Retiene ISLR</Badge> : "No"}
+          </Campo>
           <div className="sm:col-span-2">
             <Campo label="Notas">{cliente.notas}</Campo>
           </div>

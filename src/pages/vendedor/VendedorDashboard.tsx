@@ -27,18 +27,18 @@ const VendedorDashboard = () => {
     setClientes(ids.length);
     if (ids.length === 0) { setPedidosPend(0); setVentasMes(0); setSaldoCartera(0); setLoading(false); return; }
 
-    const [oRes, cxcRes] = await Promise.all([
-      supabase.from("ordenes").select("total, monto_pagado, estado, created_at").in("cliente_id", ids).neq("estado", "cancelado"),
-      supabase.from("cuentas_cobrar").select("monto, monto_pagado, estado_pago").in("cliente_id", ids),
+    const [oRes, facRes] = await Promise.all([
+      supabase.from("ordenes").select("total, estado, created_at").in("cliente_id", ids).neq("estado", "cancelado"),
+      // Deuda real = suma de facturas.saldo_usd (Fase 11 — ordenes/cuentas_cobrar quedaron deprecadas)
+      supabase.from("facturas").select("saldo_usd").in("cliente_id", ids).eq("estado", "posted"),
     ]);
     let saldo = 0, pend = 0, ventas = 0;
-    for (const o of (oRes.data ?? []) as { total: number; monto_pagado: number; estado: string; created_at: string }[]) {
-      saldo += Number(o.total) - Number(o.monto_pagado || 0);
+    for (const o of (oRes.data ?? []) as { total: number; estado: string; created_at: string }[]) {
       if (["pendiente", "confirmado", "procesando", "enviado"].includes(o.estado)) pend++;
       if (o.estado === "completado" && o.created_at >= inicioMes) ventas += Number(o.total);
     }
-    for (const c of (cxcRes.data ?? []) as { monto: number; monto_pagado: number; estado_pago: string }[]) {
-      if (c.estado_pago !== "anulada") saldo += Number(c.monto) - Number(c.monto_pagado || 0);
+    for (const f of (facRes.data ?? []) as { saldo_usd: number }[]) {
+      saldo += Number(f.saldo_usd);
     }
     setPedidosPend(pend);
     setVentasMes(ventas);

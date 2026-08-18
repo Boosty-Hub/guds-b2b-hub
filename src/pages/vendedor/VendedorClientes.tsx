@@ -39,21 +39,12 @@ const VendedorClientes = () => {
     const lista = (data ?? []) as Omit<Cli, "saldo">[];
     const ids = lista.map((c) => c.id);
 
-    // Deuda real = saldo de órdenes (total − pagado) + saldo de cuentas por cobrar
+    // Deuda real = suma de facturas.saldo_usd (Fase 11 — ya no ordenes/cuentas_cobrar, deprecadas)
     const saldos = new Map<string, number>();
     if (ids.length) {
-      const [oRes, cxcRes] = await Promise.all([
-        supabase.from("ordenes").select("cliente_id, total, monto_pagado").in("cliente_id", ids).neq("estado", "cancelado"),
-        supabase.from("cuentas_cobrar").select("cliente_id, monto, monto_pagado, estado_pago").in("cliente_id", ids),
-      ]);
-      for (const o of (oRes.data ?? []) as { cliente_id: string; total: number; monto_pagado: number }[]) {
-        const s = Number(o.total) - Number(o.monto_pagado || 0);
-        if (s > 0.009) saldos.set(o.cliente_id, (saldos.get(o.cliente_id) || 0) + s);
-      }
-      for (const c of (cxcRes.data ?? []) as { cliente_id: string; monto: number; monto_pagado: number; estado_pago: string }[]) {
-        if (c.estado_pago === "anulada") continue;
-        const s = Number(c.monto) - Number(c.monto_pagado || 0);
-        if (s > 0.009) saldos.set(c.cliente_id, (saldos.get(c.cliente_id) || 0) + s);
+      const { data: facs } = await supabase.from("facturas").select("cliente_id, saldo_usd").in("cliente_id", ids).eq("estado", "posted");
+      for (const f of (facs ?? []) as { cliente_id: string; saldo_usd: number }[]) {
+        saldos.set(f.cliente_id, (saldos.get(f.cliente_id) || 0) + Number(f.saldo_usd));
       }
     }
     setClientes(lista.map((c) => ({ ...c, saldo: saldos.get(c.id) || 0 })));

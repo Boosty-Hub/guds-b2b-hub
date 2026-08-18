@@ -56,15 +56,24 @@ interface InvAlmacenRow {
   producto: { id: string; nombre: string; sku: string } | null;
 }
 
+interface ProductoConCategoria extends Producto {
+  categoria?: { nombre: string } | null;
+}
+
 const Inventario = () => {
-  const [productos, setProductos] = useState<Producto[]>([]);
+  const [productos, setProductos] = useState<ProductoConCategoria[]>([]);
   const [movimientos, setMovimientos] = useState<MovimientoInventario[]>([]);
   const [invAlmacen, setInvAlmacen] = useState<InvAlmacenRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [categoriaFiltro, setCategoriaFiltro] = useState("all");
+  const [agruparCategoria, setAgruparCategoria] = useState(false);
+  const [openCat, setOpenCat] = useState<Set<string>>(new Set());
+  const toggleCat = (k: string) => setOpenCat((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const [movementSearchTerm, setMovementSearchTerm] = useState("");
   const [tipoFiltro, setTipoFiltro] = useState("all");
   const [almSearch, setAlmSearch] = useState("");
+  const [almTipoFiltro, setAlmTipoFiltro] = useState("all");
   const [openAlm, setOpenAlm] = useState<Set<string>>(new Set());
   const toggleAlm = (k: string) => setOpenAlm((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   
@@ -86,23 +95,41 @@ const Inventario = () => {
   const fetchData = async () => {
     setLoading(true);
     const [productosRes, movimientosRes, invAlmRes] = await Promise.all([
-      supabase.from('productos').select('*').order('nombre'),
+      supabase.from('productos').select('*, categoria:categorias(nombre)').order('nombre'),
       supabase.from('movimientos_inventario').select('*, producto:productos(nombre, sku)').order('created_at', { ascending: false }).limit(50),
       supabase.from('inventario_almacen').select('id, cantidad, almacen:almacenes(id, nombre, tipo), producto:productos(id, nombre, sku)').limit(5000),
     ]);
 
-    if (productosRes.data) setProductos(productosRes.data);
+    if (productosRes.data) setProductos(productosRes.data as unknown as ProductoConCategoria[]);
     if (movimientosRes.data) setMovimientos(movimientosRes.data);
     if (invAlmRes.data) setInvAlmacen(invAlmRes.data as unknown as InvAlmacenRow[]);
     setLoading(false);
   };
 
+  const categorias = useMemo(() => {
+    const set = new Map<string, string>();
+    for (const p of productos) if (p.categoria?.nombre) set.set(p.categoria.nombre, p.categoria.nombre);
+    return [...set.values()].sort((a, b) => a.localeCompare(b));
+  }, [productos]);
+
   const filteredProductos = productos.filter(p =>
-    p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.sku.toLowerCase().includes(searchTerm.toLowerCase())
+    (p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     p.sku.toLowerCase().includes(searchTerm.toLowerCase())) &&
+    (categoriaFiltro === "all" || p.categoria?.nombre === categoriaFiltro)
   );
 
   const pagination = usePagination(filteredProductos, 25);
+
+  const gruposCategoria = useMemo(() => {
+    const m = new Map<string, { key: string; nombre: string; items: ProductoConCategoria[] }>();
+    for (const p of filteredProductos) {
+      const key = p.categoria?.nombre || "Sin categoría";
+      const g = m.get(key) || { key, nombre: key, items: [] };
+      g.items.push(p);
+      m.set(key, g);
+    }
+    return [...m.values()].sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [filteredProductos]);
 
   const filteredMovimientos = movimientos.filter(m => {
     const matchesSearch = movementSearchTerm === "" ||
@@ -119,6 +146,7 @@ const Inventario = () => {
     const q = almSearch.toLowerCase();
     for (const r of invAlmacen) {
       if (!r.almacen) continue;
+      if (almTipoFiltro !== "all" && r.almacen.tipo !== almTipoFiltro) continue;
       if (q && !(r.almacen.nombre.toLowerCase().includes(q) || r.producto?.nombre?.toLowerCase().includes(q) || r.producto?.sku?.toLowerCase().includes(q))) continue;
       const key = r.almacen.id;
       const g = m.get(key) || { key, nombre: r.almacen.nombre, tipo: r.almacen.tipo, items: [], total: 0 };
@@ -126,7 +154,7 @@ const Inventario = () => {
       m.set(key, g);
     }
     return [...m.values()].sort((a, b) => a.nombre.localeCompare(b.nombre));
-  }, [invAlmacen, almSearch]);
+  }, [invAlmacen, almSearch, almTipoFiltro]);
 
   const openMovementDialog = (type: 'entrada' | 'salida' | 'ajuste') => {
     setMovementType(type);
@@ -278,18 +306,33 @@ const Inventario = () => {
             <div className="flex flex-1 items-center gap-4">
               <div className="relative flex-1 max-w-md">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input 
-                  placeholder="Buscar producto..." 
-                  className="pl-9" 
+                <Input
+                  placeholder="Buscar producto..."
+                  className="pl-9"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
+              <Select value={categoriaFiltro} onValueChange={setCategoriaFiltro}>
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="Categoría" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las categorías</SelectItem>
+                  {categorias.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
-            <Button className="gap-2" onClick={() => openMovementDialog('ajuste')}>
-              <RefreshCw className="h-4 w-4" />
-              Ajuste de Inventario
-            </Button>
+            <div className="flex gap-2">
+              <Button variant={agruparCategoria ? "default" : "outline"} className="gap-2" onClick={() => setAgruparCategoria((g) => !g)}>
+                <Boxes className="h-4 w-4" />
+                {agruparCategoria ? "Agrupado por categoría" : "Agrupar por categoría"}
+              </Button>
+              <Button className="gap-2" onClick={() => openMovementDialog('ajuste')}>
+                <RefreshCw className="h-4 w-4" />
+                Ajuste de Inventario
+              </Button>
+            </div>
           </div>
 
           {/* Inventory Table */}
@@ -311,7 +354,43 @@ const Inventario = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {pagination.pageItems.map((item) => {
+                  {agruparCategoria
+                    ? gruposCategoria.map((g) => (
+                        <Fragment key={g.key}>
+                          <TableRow className="cursor-pointer bg-muted/40 hover:bg-muted" onClick={() => toggleCat(g.key)}>
+                            <TableCell colSpan={6}>
+                              <div className="flex items-center gap-2 font-medium">
+                                <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", openCat.has(g.key) && "rotate-90")} />
+                                <span className="truncate">{g.nombre}</span>
+                                <Badge variant="secondary">{g.items.length} producto{g.items.length !== 1 ? "s" : ""}</Badge>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                          {openCat.has(g.key) && g.items.map((item) => {
+                            const status = item.stock_actual === 0 ? "agotado" : item.stock_actual <= item.stock_minimo ? "bajo" : "ok";
+                            return (
+                              <TableRow key={item.id} className="hover:bg-muted/50">
+                                <TableCell className="pl-10 font-mono text-sm text-primary">{item.sku}</TableCell>
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2">
+                                    {item.imagen_emoji && <span>{item.imagen_emoji}</span>}
+                                    {item.nombre}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-center font-semibold">{item.stock_actual}</TableCell>
+                                <TableCell className="text-center text-muted-foreground">{item.stock_minimo}</TableCell>
+                                <TableCell className="text-center text-muted-foreground">{item.stock_maximo || '-'}</TableCell>
+                                <TableCell>
+                                  <Badge variant={status === "ok" ? "default" : status === "bajo" ? "secondary" : "destructive"}>
+                                    {status === "ok" ? "OK" : status === "bajo" ? "Bajo" : "Agotado"}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </Fragment>
+                      ))
+                    : pagination.pageItems.map((item) => {
                     const status = item.stock_actual === 0 ? "agotado" : item.stock_actual <= item.stock_minimo ? "bajo" : "ok";
                     return (
                       <TableRow key={item.id} className="hover:bg-muted/50">
@@ -336,19 +415,36 @@ const Inventario = () => {
                 </TableBody>
               </Table>
             )}
-            {!loading && <DataTablePagination pagination={pagination} />}
+            {!loading && !agruparCategoria && <DataTablePagination pagination={pagination} />}
+            {!loading && agruparCategoria && (
+              <div className="border-t border-border px-4 py-2.5 text-sm text-muted-foreground">
+                {gruposCategoria.length} categoría{gruposCategoria.length !== 1 ? "s" : ""} · {filteredProductos.length} productos
+              </div>
+            )}
           </div>
         </TabsContent>
 
         <TabsContent value="almacenes" className="space-y-4">
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Buscar almacén o producto..."
-              className="pl-9"
-              value={almSearch}
-              onChange={(e) => setAlmSearch(e.target.value)}
-            />
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="relative max-w-md flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar almacén o producto..."
+                className="pl-9"
+                value={almSearch}
+                onChange={(e) => setAlmSearch(e.target.value)}
+              />
+            </div>
+            <Select value={almTipoFiltro} onValueChange={setAlmTipoFiltro}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Tipo de almacén" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los almacenes</SelectItem>
+                <SelectItem value="propio">Solo propios</SelectItem>
+                <SelectItem value="consignacion">Solo consignación</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
             {loading ? (

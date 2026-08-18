@@ -83,6 +83,30 @@ interface PermisoConModulo extends Permiso {
   modulo: Modulo;
 }
 
+// Traduce el nombre de tabla de la FK que bloqueó el borrado a una razón legible.
+const RAZON_POR_TABLA: Record<string, string> = {
+  clientes: "tiene clientes asignados como vendedor",
+  registros_clientes: "revisó solicitudes de registro de clientes",
+  ordenes: "tiene órdenes registradas a su nombre",
+  pagos: "verificó pagos de clientes",
+  entregas: "tiene entregas asignadas como repartidor",
+  movimientos_inventario: "registró movimientos de inventario",
+  metas_vendedor: "tiene metas de vendedor cargadas",
+  pago_facturas: "aplicó pagos a facturas",
+  declaraciones_consignacion: "declaró o revisó ventas en consignación",
+};
+
+/** Arma un mensaje descriptivo para el popup de error al eliminar un usuario. */
+function describirErrorEliminar(error: { code?: string; message: string; details?: string | null }, nombre: string): string {
+  if (error.code === "23503") {
+    const fuente = error.details || error.message;
+    const tabla = fuente.match(/table "(\w+)"/)?.[1];
+    const razon = (tabla && RAZON_POR_TABLA[tabla]) || "tiene actividad registrada en el sistema";
+    return `No se puede eliminar a ${nombre} porque ${razon}. Para retirarlo sin perder ese historial, desactivalo en vez de eliminarlo: dejará de poder ingresar pero sus registros se conservan.`;
+  }
+  return `No se pudo eliminar a ${nombre}: ${error.message}`;
+}
+
 const ConfigUsuarios = () => {
   const [usuarios, setUsuarios] = useState<UsuarioConRol[]>([]);
   const [roles, setRoles] = useState<Rol[]>([]);
@@ -105,6 +129,8 @@ const ConfigUsuarios = () => {
   const [showPassword, setShowPassword] = useState(false);
   // Credenciales temporales del usuario recién creado
   const [credencialesNuevo, setCredencialesNuevo] = useState<{ email: string; password: string } | null>(null);
+  // Popup descriptivo cuando falla el borrado de un usuario (FK u otro error)
+  const [errorEliminarUsuario, setErrorEliminarUsuario] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Form states
@@ -216,6 +242,8 @@ const ConfigUsuarios = () => {
 
     // Crear la cuenta en el servidor (sin signUp en el navegador, que cerraría
     // la sesión del admin). Devuelve una contraseña temporal para comunicar.
+    // p_rol_id va directo en la misma llamada — evita el update de enlace posterior
+    // que, si fallaba, dejaba el usuario creado pero "Sin rol" (bug real de Fase 14).
     const { data, error } = await supabase.rpc('crear_usuario_admin', {
       p_email: userForm.email,
       p_nombre: userForm.nombre,
@@ -224,6 +252,7 @@ const ConfigUsuarios = () => {
       p_telefono: userForm.telefono || null,
       p_cliente_id: null,
       p_password: userForm.password,
+      p_rol_id: userForm.rol_id,
     });
 
     if (error) {
@@ -232,14 +261,6 @@ const ConfigUsuarios = () => {
     }
 
     const row = Array.isArray(data) ? data[0] : data;
-    // Enlazar el rol granular seleccionado
-    if (userForm.rol_id && row?.usuario_id) {
-      const { error: rolError } = await supabase.from('usuarios').update({ rol_id: userForm.rol_id }).eq('id', row.usuario_id);
-      if (rolError) {
-        toast({ title: "Usuario creado, pero sin rol", description: `No se pudo asignar el rol: ${rolError.message}. Edítalo para asignarlo.`, variant: "destructive" });
-      }
-    }
-
     resetUserForm();
     setIsCreateUserOpen(false);
     fetchData();
@@ -251,6 +272,10 @@ const ConfigUsuarios = () => {
 
   const handleEditUser = async () => {
     if (!selectedUsuario) return;
+    if (!userForm.rol_id) {
+      toast({ title: "Error", description: "Selecciona un rol para el usuario", variant: "destructive" });
+      return;
+    }
 
     const rol = roles.find(r => r.id === userForm.rol_id);
     const { error } = await supabase
@@ -282,16 +307,24 @@ const ConfigUsuarios = () => {
     if (!selectedUsuario) return;
 
     const { error } = await supabase.from('usuarios').delete().eq('id', selectedUsuario.id);
+    setIsDeleteUserOpen(false);
 
     if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Usuario Eliminado", description: `${selectedUsuario.nombre} ha sido eliminado`, variant: "destructive" });
+      // Se mantiene selectedUsuario para poder ofrecer "Desactivar en su lugar".
+      setErrorEliminarUsuario(describirErrorEliminar(error, selectedUsuario.nombre));
+      return;
     }
-    
-    setIsDeleteUserOpen(false);
+
+    toast({ title: "Usuario Eliminado", description: `${selectedUsuario.nombre} ha sido eliminado`, variant: "destructive" });
     setSelectedUsuario(null);
     fetchData();
+  };
+
+  const handleDesactivarDesdeError = async () => {
+    if (!selectedUsuario) return;
+    await handleToggleUserStatus(selectedUsuario);
+    setErrorEliminarUsuario(null);
+    setSelectedUsuario(null);
   };
 
   const handleToggleUserStatus = async (usuario: UsuarioConRol) => {
@@ -909,6 +942,24 @@ const ConfigUsuarios = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* No se pudo eliminar el usuario */}
+      <Dialog open={!!errorEliminarUsuario} onOpenChange={(o) => { if (!o) { setErrorEliminarUsuario(null); setSelectedUsuario(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>No se pudo eliminar el usuario</DialogTitle>
+          </DialogHeader>
+          <p className="py-2 text-sm text-muted-foreground">{errorEliminarUsuario}</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setErrorEliminarUsuario(null); setSelectedUsuario(null); }}>
+              Cerrar
+            </Button>
+            <Button onClick={handleDesactivarDesdeError}>
+              Desactivar en su lugar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Create/Edit Rol Dialog */}
       <Dialog open={isCreateRolOpen || isEditRolOpen} onOpenChange={(open) => {
