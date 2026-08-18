@@ -10,6 +10,22 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-08-18 · Fix: módulo Retenciones no mostraba las 493 migradas de Odoo
+
+Reportado por el cliente: `/admin/retenciones` mostraba 0 en las tres pestañas, aunque las
+retenciones IVA históricas de clientes reales sí existían en la base (verificado directo en
+prod: **493 filas, todas `estado='aprobado'`**). Causa: `Retenciones.tsx` filtraba
+`.is("odoo_id", null)` — pensado para no mezclar el histórico con el flujo activo en los
+cálculos de saldo (mismo patrón que `v_anticipos`), pero de paso las escondía por completo de
+esta pantalla, que es donde el admin espera verlas todas.
+
+Fix: se quitó ese filtro (el módulo ahora trae tanto lo declarado en el sistema como lo migrado
+de Odoo) y se agregó una columna **"Origen"** (badge Odoo/Sistema) para distinguirlas a simple
+vista. Las migradas caen en la pestaña "Aprobadas" (ya vienen resueltas, sin botón de acción,
+igual que las demás filas de esa pestaña). `tsc`/`build` limpios.
+
+---
+
 ## 2026-08-18 · Fase 16: rol obligatorio al crear usuario + adaptación a Netlify
 
 ### Rol obligatorio

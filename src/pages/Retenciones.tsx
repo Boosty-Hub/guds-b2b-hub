@@ -19,7 +19,7 @@ import type { FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
 interface Retencion {
   id: string; numero: string; tipo: string; estado: string; fecha: string; total: number;
   base_imponible: number; porcentaje: number | null; comprobante_url: string | null; notas: string | null;
-  rol_declarante: string;
+  rol_declarante: string; odoo_id: number | null;
   cliente?: { nombre_negocio: string } | null;
   concepto?: { concepto: string } | null;
 }
@@ -49,9 +49,11 @@ const Retenciones = () => {
 
   const fetchAll = async () => {
     setLoading(true);
+    // Incluye tanto las declaradas en el sistema como las migradas de Odoo (odoo_id no
+    // nulo) — antes se excluían las migradas y el módulo mostraba 0 aunque hubiera
+    // histórico real de retenciones de clientes.
     const { data } = await supabase.from("retenciones")
-      .select("id, numero, tipo, estado, fecha, total, base_imponible, porcentaje, comprobante_url, notas, rol_declarante, cliente:clientes(nombre_negocio), concepto:conceptos_retencion_islr(concepto)")
-      .is("odoo_id", null)
+      .select("id, numero, tipo, estado, fecha, total, base_imponible, porcentaje, comprobante_url, notas, rol_declarante, odoo_id, cliente:clientes(nombre_negocio), concepto:conceptos_retencion_islr(concepto)")
       .order("created_at", { ascending: false });
     setRetenciones((data as unknown as Retencion[]) ?? []);
     setLoading(false);
@@ -118,7 +120,7 @@ const Retenciones = () => {
             <TableHeader>
               <TableRow>
                 <TableHead>Nº</TableHead><TableHead>Cliente</TableHead><TableHead>Tipo</TableHead>
-                <TableHead>Declarado por</TableHead><TableHead>Fecha</TableHead>
+                <TableHead>Declarado por</TableHead><TableHead>Origen</TableHead><TableHead>Fecha</TableHead>
                 <TableHead className="text-right">Total</TableHead>
                 {accionable && <TableHead className="text-right">Acción</TableHead>}
               </TableRow>
@@ -130,6 +132,7 @@ const Retenciones = () => {
                   <TableCell className="font-medium">{r.cliente?.nombre_negocio || "—"}</TableCell>
                   <TableCell className="uppercase text-muted-foreground">{r.tipo}</TableCell>
                   <TableCell className="capitalize text-muted-foreground">{r.rol_declarante}</TableCell>
+                  <TableCell><Badge variant="outline">{r.odoo_id ? "Odoo" : "Sistema"}</Badge></TableCell>
                   <TableCell className="text-muted-foreground">{new Date(r.fecha).toLocaleDateString("es-VE")}</TableCell>
                   <TableCell className="text-right font-semibold">{formatPrice(r.total)}</TableCell>
                   {accionable && <TableCell className="text-right"><Button size="sm" onClick={() => abrirDetalle(r)}>Revisar</Button></TableCell>}
