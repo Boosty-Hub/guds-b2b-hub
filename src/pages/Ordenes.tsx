@@ -50,6 +50,8 @@ interface OrdenDB {
   id: string;
   numero: string;
   odoo_id?: number | null;   // orden de Odoo: estado y facturación se manejan en Odoo
+  numero_guds?: string | null;      // pedido creado en GUDS y enviado a Odoo (Fase 9b)
+  odoo_enviado_at?: string | null;
   cliente_id: string;
   estado: string;
   subtotal: number;
@@ -354,6 +356,7 @@ const Ordenes = () => {
         <span className="flex items-center gap-1.5">
           {orden.numero}
           {orden.odoo_id ? <OdooBadge /> : <Badge variant="outline" className="px-1 py-0 text-[10px]" title="Creado en GUDS · pendiente de enviar a Odoo">GUDS</Badge>}
+          {orden.numero_guds && <Badge variant="secondary" className="px-1 py-0 text-[10px] font-normal" title={`Creado en GUDS como ${orden.numero_guds} y enviado a Odoo`}>{orden.numero_guds}</Badge>}
         </span>
       </TableCell>
       <TableCell className="font-medium">
@@ -516,6 +519,7 @@ const Ordenes = () => {
                   columnas={4}
                   campos={[
                     { label: "Fecha", valor: formatDate(selectedOrder.fecha_pedido || selectedOrder.created_at) },
+                    ...(selectedOrder.numero_guds ? [{ label: "Pedido GUDS", valor: `${selectedOrder.numero_guds} · enviado ${selectedOrder.odoo_enviado_at ? formatDate(selectedOrder.odoo_enviado_at) : ""}` }] : []),
                     { label: "Vendedor", valor: selectedOrder.vendedor_odoo },
                     { label: "Método de pago", valor: selectedOrder.metodo_pago ? <span className="capitalize">{selectedOrder.metodo_pago.replace('_', ' ')}</span> : null },
                     { label: "Moneda", valor: selectedOrder.moneda_original },

@@ -1,7 +1,10 @@
-// Cliente JSON-RPC de Odoo en SOLO LECTURA. Sin dependencias: corre en Node (scripts) y en Deno
-// (edge functions de Supabase). Cualquier método que no sea de lectura se rechaza antes de enviarse.
+// Cliente JSON-RPC de Odoo. Sin dependencias: corre en Node (scripts) y en Deno (edge functions de Supabase).
+// - `leer`: SOLO métodos de lectura; cualquier otro se rechaza antes de enviarse.
+// - `crear`: única vía de escritura (Fase 9b). Solo `create` y solo en los modelos de CREACION_PERMITIDA.
+//   Está PROHIBIDO borrar o modificar registros de Odoo desde GUDS: unlink/write/action_*/etc. no existen aquí.
 
 const METODOS_LECTURA = new Set(['search_read', 'read', 'search', 'search_count', 'read_group', 'fields_get']);
+const CREACION_PERMITIDA = new Set(['sale.order']);
 
 export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 }) {
   let uid = null;
@@ -50,7 +53,17 @@ export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 
     return out;
   }
 
-  return { autenticar, leer, leerTodo, get empresas() { return empresasPermitidas; } };
+  // Crea UN registro (solo modelos permitidos). Devuelve el id nuevo. No hay forma de borrar ni editar desde aquí.
+  async function crear(model, vals, empresaActiva) {
+    if (!CREACION_PERMITIDA.has(model)) throw new Error(`Bloqueado: GUDS no crea registros de "${model}" en Odoo`);
+    if (!vals || typeof vals !== 'object' || Array.isArray(vals)) throw new Error('crear: se espera un solo registro');
+    if (!uid) await autenticar();
+    if (!empresaActiva || !empresasPermitidas.includes(empresaActiva)) throw new Error(`crear: empresa ${empresaActiva} no permitida`);
+    const context = { allowed_company_ids: [empresaActiva, ...empresasPermitidas.filter((e) => e !== empresaActiva)] };
+    return rpc('object', 'execute_kw', [db, uid, apiKey, model, 'create', [vals], { context }]);
+  }
+
+  return { autenticar, leer, leerTodo, crear, get empresas() { return empresasPermitidas; } };
 }
 
 // Many2one de Odoo: [id, "nombre"] o false

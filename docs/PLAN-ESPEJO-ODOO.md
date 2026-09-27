@@ -41,7 +41,7 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 7 | Bancos y tesorería: cuentas, cajas, extractos, conciliación GUDS | ✅ 2026-09-27 |
 | 8 | Capa GUDS: tienda por empresa, portal cliente/vendedor, crédito, stock comprometido, contactos, delivery, reportes | ✅ 2026-09-27 |
 | 9a | Sincronización periódica Odoo → GUDS (15 min + nocturna), solo lectura de Odoo | ✅ 2026-09-27 |
-| 9b | Envío a Odoo de pedidos, clientes, contactos y límites de crédito creados en GUDS (marcados "(GUDS)") | ⏳ espera confirmación para la primera escritura |
+| 9b | Envío a Odoo de pedidos, clientes, contactos y límites de crédito creados en GUDS (marcados "(GUDS)") | 🟡 primera prueba hecha: 1 pedido → S00927 (27-sep); falta automatizar |
 
 ### Fase 0 — hecho
 - Respaldo completo en `C:\Users\gabri\GUDS-backups\2026-09-27` (fuera del repo y de OneDrive) con
@@ -84,6 +84,16 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
   registro por empresa), 15 verificaciones de punta a punta (admin da acceso → contacto cambia su clave → compra a crédito →
   cambia de empresa → vuelve a entrar → restablecer clave) y recorridos sin errores: 70 pantallas de administración y 52 del portal del cliente (13 × 2 empresas × móvil y escritorio); cuadre 68/68 e importación idempotente. Datos de prueba borrados (pedidos, notificaciones,
   usuarios, contactos y numeración).
+
+### Fase 9b — en curso (envío a Odoo; prohibido borrar en Odoo)
+- Motor `supabase/functions/_shared/odoo-sync/enviar.js` + `scripts/enviar-pedido-odoo.mjs <pedido> [--apply]`. El cliente de
+  Odoo (`odoo.js`) tiene una única vía de escritura, `crear()`, limitada a `create` en `sale.order`; no existe forma de borrar ni
+  modificar registros de Odoo desde GUDS.
+- El pedido se crea como **cotización en borrador** en la empresa del pedido, con almacén general P-01, precio de GUDS por unidad,
+  referencia `<número> (GUDS)`, origen `GUDS` y nota "(GUDS)". Solo clientes con lista de precios en USD (en Bs habría que convertir).
+- Idempotente (busca la referencia antes de crear) y vincula pedido y líneas con su `odoo_id` para que la sincronización no duplique.
+- **Primera prueba (27-sep):** GUDS-ORD-00001 → **S00927** (Quirutec como cliente de GUDS, 1 × CARAMELOS CHAO $0,38, "No procesar").
+  Detalle y hallazgos en la bitácora (almacén de consignación en S00927, envío de $50 sin equivalente en Odoo).
 
 ### Fase 9a — hecho (sincronización periódica, solo lectura de Odoo)
 - Función edge **`sync-odoo`** (`supabase/functions/sync-odoo/`) con el mismo motor del importador; escribe por conexión
@@ -349,3 +359,5 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 30 | ~~Reportes (ventas por empresa, vendedor, producto; cobranza; inventario)~~ | ✅ `/admin/reportes` (migración 18u), ver "Reportes" en la Fase 8 |
 | 31 | **Documentos que no son venta**: 986 facturas + 353 NC del "Diario Saldo Inicial CXC" y 113 del "ND CxC Saldos Iniciales" (saldos de apertura migrados a Odoo, fechados 2021–2026) y 493 notas del diario "Nota debito cliente" en Bs con cuenta *Diferencia en cambio* y 0 en USD (ajustes cambiarios). GUDS ahora guarda el diario (`facturas.diario_odoo`, `es_saldo_inicial`) y marca como ND lo emitido en diarios de ND | ✅ migración 18t + importador; los reportes de ventas los excluyen |
 | 32 | Los montos negativos se muestran como `$-1,234.69` (formato de `formatPrice`) | Cosmético |
+| 33 | **Envío**: GUDS cobra $50 en pedidos menores de $500; Odoo no tiene línea de envío, el total enviado no lo incluye | Decisión de GUDS (producto "Envío" en Odoo o sin envío en B2B) |
+| 34 | S00927 (prueba) quedó con almacén G-CONSIGNADO REPRESENTACIONES FAW; los envíos nuevos usan P-01 | Si se confirma, cambiar almacén en Odoo (GUDS no edita en Odoo) |

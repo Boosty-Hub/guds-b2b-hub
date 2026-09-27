@@ -10,6 +10,33 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-27 · Fase 9b: primer pedido de GUDS enviado a Odoo (prueba única)
+
+- Pedido creado en GUDS desde Órdenes → Nueva Orden: **GUDS-ORD-00001** (cliente DISTRIBUIDORA MEDICO QUIRURGICA QUIRUTEC,
+  intercompañía; 1 × CARAMELOS CHAO PASTILLA CEREZA a $0,38; nota "PEDIDO DE PRUEBA … No procesar").
+- Enviado con `node scripts/enviar-pedido-odoo.mjs GUDS-ORD-00001 --apply` → **S00927** en Odoo (GUDS SUPPLY), **cotización
+  en borrador** (no reserva stock ni genera asientos), referencia del cliente `GUDS-ORD-00001 (GUDS)`, origen `GUDS`, nota
+  "(GUDS) Pedido creado desde la plataforma GUDS…", lista "Predeterminado (USD)", total $0,4408, vendedora ISABELA GAVIDIA
+  (la toma Odoo del cliente). Creado por el usuario de la API (FREDDY CARDOSO).
+- La sincronización lo vinculó en GUDS sin duplicar: el pedido pasó a llamarse S00927 (`numero_guds = GUDS-ORD-00001`) y su
+  línea quedó ligada a la línea 9308 de Odoo. Un segundo envío del mismo pedido se rechaza; si hubiera un corte, el envío busca
+  primero la referencia en Odoo y la vincula en vez de crear otra.
+- **Nada se borró ni se modificó en Odoo.** El cliente de Odoo de GUDS solo permite `create` en `sale.order`; `unlink`,
+  `write` y cualquier otro método de escritura quedan bloqueados en el código.
+- Hallazgos de la prueba:
+  - Odoo le puso a S00927 el almacén predeterminado del usuario de la API (**G-CONSIGNADO REPRESENTACIONES FAW**). Corregido
+    para los próximos envíos: se fija el almacén general P-01 de la empresa (G-ALMACEN GENERAL / Q-ALMACEN GENERAL). S00927
+    queda como está (GUDS no edita en Odoo); si se quisiera confirmar, cambiar el almacén en Odoo antes.
+  - GUDS agrega **$50 de envío** a pedidos menores de $500 (Configuración → Envíos); en Odoo no hay línea de envío, así que el
+    total de Odoo ($0,44) no lo incluye. Decisión pendiente: agregar un producto de servicio "Envío" en Odoo para enviarlo como
+    línea, o no cobrar envío en pedidos B2B.
+- Interfaz: la lista y el detalle de Órdenes muestran el número GUDS de los pedidos enviados, y el buscador global los encuentra
+  por ese número (migraciones `20260927_fase19e_envio_pedidos.sql`, `…19f_buscador_numero_guds.sql`).
+- Pendiente de 9b: envío automático de pedidos (al confirmar en GUDS o en la sincronización), clientes nuevos, contactos y
+  límites de crédito; decisión sobre el envío.
+
+---
+
 ## 2026-09-27 · GUDS espejo de Odoo multiempresa (Fases 0–9a) · rediseño denso · buscador global · reportes · sincronización automática
 
 Trabajo de varios días en una misma línea. Detalle completo por fase en `docs/PLAN-ESPEJO-ODOO.md` y `docs/PLAN-REDISENO-DENSO.md`.
