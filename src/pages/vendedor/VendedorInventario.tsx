@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { VendedorLayout } from "@/components/vendedor/VendedorLayout";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -10,130 +10,102 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, Package, Warehouse, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { supabase, Producto } from "@/lib/supabase";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
+import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
 
-// Vista de solo lectura para el vendedor: mismo stock que ve el admin en
-// Inventario.tsx, pero sin la pestaña de Movimientos (movimientos_inventario
-// está gateado por el permiso "inventario" que un vendedor no tiene — fase5
-// permisos_rls.sql — así que esa pestaña le devolvería siempre vacío) y sin
-// costo (fase0b_ajustes.sql solo le revoca esa columna a anon, no a un
-// vendedor autenticado, así que se oculta aquí en la UI).
+// Vista de solo lectura para el vendedor: el DISPONIBLE para vender (existencia − comprometido en entregas de Odoo y
+// pedidos de GUDS), igual que valida el servidor al crear el pedido. Sin movimientos (movimientos_inventario está
+// gateado por el permiso "inventario" que un vendedor no tiene) y sin costo.
 const VendedorInventario = () => {
+  const [params] = useSearchParams();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState(params.get("q") || "");
+  const [filtro, setFiltro] = useState<"todos" | "disponibles" | "agotados">("todos");
+  // El buscador global abre esta página con ?q=
+  useEffect(() => { const q = params.get("q"); if (q !== null) setSearchTerm(q); }, [params]);
 
   useEffect(() => {
-    fetchData();
+    (async () => {
+      setLoading(true);
+      const { data } = await supabase.from('productos').select('*').eq('activo', true).order('nombre');
+      if (data) setProductos(data);
+      setLoading(false);
+    })();
   }, []);
 
-  const fetchData = async () => {
-    setLoading(true);
-    const { data } = await supabase.from('productos').select('*').eq('activo', true).order('nombre');
-    if (data) setProductos(data);
-    setLoading(false);
-  };
-
-  const filteredProductos = productos.filter(p =>
-    p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.sku.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const pagination = usePagination(filteredProductos, 25);
-
+  const disponible = (p: Producto) => Number(p.stock_disponible ?? p.stock_actual ?? 0);
+  const esServicio = (p: Producto) => p.controla_stock === false;
+  const almacenables = productos.filter((p) => !esServicio(p));
   const stats = {
-    total: productos.length,
-    bajoMinimo: productos.filter(p => p.stock_actual > 0 && p.stock_actual <= p.stock_minimo).length,
-    agotados: productos.filter(p => p.stock_actual === 0).length,
+    total: almacenables.length,
+    disponibles: almacenables.filter((p) => disponible(p) > 0).length,
+    agotados: almacenables.filter((p) => disponible(p) <= 0).length,
+    comprometidos: almacenables.filter((p) => Number(p.comprometido_odoo || 0) + Number(p.comprometido_guds || 0) > 0).length,
   };
+
+  const texto = searchTerm.trim().toLowerCase();
+  const filtrados = productos.filter((p) =>
+    (filtro === "todos" || (!esServicio(p) && (filtro === "disponibles" ? disponible(p) > 0 : disponible(p) <= 0))) &&
+    (!texto || p.nombre.toLowerCase().includes(texto) || (p.sku || "").toLowerCase().includes(texto)));
+  const { ordenadas, orden, alternar } = useOrdenTabla(filtrados, {
+    sku: (p) => p.sku, nombre: (p) => p.nombre, stock: (p) => Number(p.stock_actual || 0), disponible: (p) => (esServicio(p) ? null : disponible(p)),
+  });
+  const pagination = usePagination(ordenadas, 50);
 
   return (
     <VendedorLayout title="Inventario">
-      <div className="mb-6 grid gap-4 grid-cols-3">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2">
-              <Warehouse className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.total}</p>
-              <p className="text-sm text-muted-foreground">Productos</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-warning/10 p-2">
-              <Package className="h-5 w-5 text-warning" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.bajoMinimo}</p>
-              <p className="text-sm text-muted-foreground">Bajo Mínimo</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-destructive/10 p-2">
-              <Package className="h-5 w-5 text-destructive" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.agotados}</p>
-              <p className="text-sm text-muted-foreground">Agotados</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <KpiStrip items={[
+        { label: "Productos", valor: stats.total, tono: "primario", onClick: () => setFiltro("todos"), activo: filtro === "todos" },
+        { label: "Con disponible", valor: stats.disponibles, tono: "positivo", onClick: () => setFiltro("disponibles"), activo: filtro === "disponibles" },
+        { label: "Sin disponible", valor: stats.agotados, tono: stats.agotados ? "negativo" : "normal", onClick: () => setFiltro("agotados"), activo: filtro === "agotados" },
+        { label: "Con pedidos en curso", valor: stats.comprometidos, detalle: "parte comprometida", tono: "tenue" },
+      ]} />
 
-      <div className="relative max-w-md mb-4">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Buscar producto..."
-          className="pl-9"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-      </div>
+      <BarraLista busqueda={searchTerm} onBusqueda={setSearchTerm} placeholder="Buscar producto o SKU..."
+        contador={loading ? undefined : `${filtrados.length} registros`} />
 
-      <div className="rounded-xl border border-border bg-card shadow-sm">
+      <div className="rounded-lg border border-border bg-card">
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <div className="flex items-center justify-center py-10">
+            <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
           </div>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>SKU</TableHead>
-                <TableHead>Producto</TableHead>
-                <TableHead className="text-center">Stock</TableHead>
-                <TableHead className="text-center">Mínimo</TableHead>
-                <TableHead className="text-center">Máximo</TableHead>
+                <EncabezadoOrdenable clave="sku" orden={orden} onOrdenar={alternar} className="hidden sm:table-cell">SKU</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="nombre" orden={orden} onOrdenar={alternar}>Producto</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="stock" orden={orden} onOrdenar={alternar} alinear="derecha" className="hidden md:table-cell">Existencia</EncabezadoOrdenable>
+                <TableHead className="hidden text-right md:table-cell">Comprometido</TableHead>
+                <EncabezadoOrdenable clave="disponible" orden={orden} onOrdenar={alternar} alinear="derecha">Disponible</EncabezadoOrdenable>
                 <TableHead>Estado</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {pagination.pageItems.map((item) => {
-                const status = item.stock_actual === 0 ? "agotado" : item.stock_actual <= item.stock_minimo ? "bajo" : "ok";
+                const servicio = esServicio(item);
+                const disp = disponible(item);
+                const comprometido = Number(item.comprometido_odoo || 0) + Number(item.comprometido_guds || 0);
                 return (
-                  <TableRow key={item.id} className="hover:bg-muted/50">
-                    <TableCell className="font-mono text-sm text-primary">{item.sku}</TableCell>
+                  <TableRow key={item.id}>
+                    <TableCell className="hidden whitespace-nowrap font-mono text-xs text-primary sm:table-cell">{item.sku}</TableCell>
                     <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        {item.imagen_emoji && <span>{item.imagen_emoji}</span>}
-                        {item.nombre}
-                      </div>
+                      <span className="block max-w-[340px] truncate" title={item.nombre}>{item.imagen_emoji && <span className="mr-1.5">{item.imagen_emoji}</span>}{item.nombre}</span>
                     </TableCell>
-                    <TableCell className="text-center font-semibold">{item.stock_actual}</TableCell>
-                    <TableCell className="text-center text-muted-foreground">{item.stock_minimo}</TableCell>
-                    <TableCell className="text-center text-muted-foreground">{item.stock_maximo || '-'}</TableCell>
-                    <TableCell>
-                      <Badge variant={status === "ok" ? "default" : status === "bajo" ? "secondary" : "destructive"}>
-                        {status === "ok" ? "OK" : status === "bajo" ? "Bajo" : "Agotado"}
-                      </Badge>
+                    <TableCell className="hidden whitespace-nowrap text-right text-muted-foreground md:table-cell">{servicio ? "—" : Number(item.stock_actual).toLocaleString("es-VE")}</TableCell>
+                    <TableCell className="hidden whitespace-nowrap text-right text-muted-foreground md:table-cell">{!servicio && comprometido > 0 ? comprometido.toLocaleString("es-VE") : "—"}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right font-semibold">{servicio ? <span className="text-xs font-normal text-muted-foreground">Sin tope</span> : disp.toLocaleString("es-VE")}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {servicio ? <Badge variant="outline">Servicio</Badge>
+                        : disp <= 0 ? <Badge variant="destructive">Sin disponible</Badge>
+                        : item.stock_minimo > 0 && disp <= item.stock_minimo ? <Badge variant="secondary">Bajo</Badge>
+                        : <Badge>Disponible</Badge>}
                     </TableCell>
                   </TableRow>
                 );

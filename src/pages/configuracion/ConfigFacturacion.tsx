@@ -30,11 +30,11 @@ const ConfigFacturacion = () => {
     >
       <div className="space-y-6">
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Datos Fiscales</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Datos Fiscales</CardTitle>
             <CardDescription>Información para la emisión de facturas</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Razón Social</Label>
@@ -71,11 +71,11 @@ const ConfigFacturacion = () => {
         </Card>
 
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Certificados Digitales</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Certificados Digitales</CardTitle>
             <CardDescription>Certificados para firma electrónica (CFDI)</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Certificado (.cer)</Label>
@@ -103,11 +103,11 @@ const ConfigFacturacion = () => {
         </Card>
 
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Configuración de Facturación</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Configuración de Facturación</CardTitle>
             <CardDescription>Opciones generales de facturación</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium">Facturación automática</p>

@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { StatCard } from "@/components/dashboard/StatCard";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { Panel } from "@/components/datos/FichaCampos";
 import { RecentOrders } from "@/components/dashboard/RecentOrders";
 import { TopClients } from "@/components/dashboard/TopClients";
 import { Badge } from "@/components/ui/badge";
-import { ShoppingCart, Users, Package, DollarSign, Loader2, Wallet, UserCog, PiggyBank, ListTodo } from "lucide-react";
+import { Loader2, ListTodo } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { usePendingActions } from "@/hooks/use-pending-actions";
@@ -41,6 +42,28 @@ const Index = () => {
     anticiposSinAplicar: 0,
   });
   const [loading, setLoading] = useState(true);
+  // Operación: compras, tesorería, despachos y vencimientos
+  const [op, setOp] = useState<{ porPagar: number; bancosUsd: number; bancosBs: number; entregasListas: number; lotesVencidos: number; sinDisponible: number } | null>(null);
+  useEffect(() => {
+    (async () => {
+      const hoy = new Date().toISOString().slice(0, 10);
+      const [fp, bancos, ent, lot, sd] = await Promise.all([
+        supabase.from("facturas_proveedor").select("saldo_usd").eq("estado", "posted"),
+        supabase.from("bancos").select("moneda, saldo_odoo, saldo_extracto, cuenta_compartida").eq("activo", true).not("odoo_id", "is", null),
+        supabase.from("transferencias").select("id", { count: "exact", head: true }).eq("tipo", "entrega").eq("estado", "lista"),
+        supabase.from("lotes").select("id", { count: "exact", head: true }).gt("cantidad", 0).lt("vencimiento", hoy),
+        supabase.from("productos").select("id", { count: "exact", head: true }).eq("activo", true).eq("controla_stock", true).eq("stock_disponible", 0).gt("comprometido_odoo", 0),
+      ]);
+      const saldo = (b: { saldo_odoo: number | null; saldo_extracto: number | null; cuenta_compartida: boolean }) => Number((b.cuenta_compartida ? b.saldo_extracto : b.saldo_odoo) ?? 0);
+      const bs = (bancos.data as { moneda: string; saldo_odoo: number | null; saldo_extracto: number | null; cuenta_compartida: boolean }[] | null) ?? [];
+      setOp({
+        porPagar: ((fp.data as { saldo_usd: number }[] | null) ?? []).reduce((a, f) => a + Number(f.saldo_usd || 0), 0),
+        bancosUsd: bs.filter((b) => b.moneda === "USD").reduce((a, b) => a + saldo(b), 0),
+        bancosBs: bs.filter((b) => b.moneda !== "USD").reduce((a, b) => a + saldo(b), 0),
+        entregasListas: ent.count ?? 0, lotesVencidos: lot.count ?? 0, sinDisponible: sd.count ?? 0,
+      });
+    })();
+  }, []);
   const { formatPrice } = useCurrency();
   const navigate = useNavigate();
   const { items: pendientes, total: totalPendientes, loading: loadingPendientes } = usePendingActions();
@@ -84,7 +107,7 @@ const Index = () => {
       // Total productos
       supabase.from('productos').select('id', { count: 'exact' }).eq('activo', true),
       // Productos bajo stock
-      supabase.from('productos').select('id', { count: 'exact' }).lt('stock_actual', 10).eq('activo', true),
+      supabase.from('productos').select('id', { count: 'exact', head: true }).lt('stock_actual', 10).eq('activo', true).eq('controla_stock', true),
       // Ventas del mes
       supabase.from('ordenes').select('total').gte('created_at', startOfMonth),
       // Ventas mes anterior
@@ -159,95 +182,48 @@ const Index = () => {
 
   return (
     <MainLayout title="Dashboard">
-      {/* Stats Grid */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Órdenes Hoy"
-          value={stats.ordenesHoy.toString()}
-          change={getOrdenesChange().text}
-          changeType={getOrdenesChange().type}
-          icon={ShoppingCart}
-        />
-        <StatCard
-          title="Clientes Activos"
-          value={stats.clientesActivos.toString()}
-          change={`+${stats.clientesNuevosSemana} nuevos esta semana`}
-          changeType="positive"
-          icon={Users}
-        />
-        <StatCard
-          title="Productos"
-          value={stats.totalProductos.toString()}
-          change={`${stats.productosBajoStock} bajo stock`}
-          changeType={stats.productosBajoStock > 0 ? "negative" : "positive"}
-          icon={Package}
-        />
-        <StatCard
-          title="Ventas del Mes"
-          value={formatPrice(stats.ventasMes)}
-          change={getVentasChange().text}
-          changeType={getVentasChange().type}
-          icon={DollarSign}
-        />
-      </div>
+      <KpiStrip items={[
+        { label: "Órdenes hoy", valor: stats.ordenesHoy, detalle: getOrdenesChange().text, tono: getOrdenesChange().type === "negative" ? "negativo" : "normal", onClick: () => navigate("/admin/ordenes") },
+        { label: "Pedidos del mes", valor: formatPrice(stats.ventasMes), detalle: getVentasChange().text, tono: getVentasChange().type === "negative" ? "negativo" : "positivo", onClick: () => navigate("/admin/reportes"), titulo: "Total de pedidos (órdenes) del mes. La venta facturada neta de IVA está en Reportes" },
+        { label: "Por cobrar", valor: formatPrice(stats.deudaTotal), detalle: `${stats.clientesConDeuda} clientes con deuda`, tono: "negativo", onClick: () => navigate("/admin/cuentas-por-cobrar") },
+        { label: "Cartera de vendedores", valor: formatPrice(stats.carteraVendedores), onClick: () => navigate("/admin/vendedores") },
+        { label: "Anticipos sin aplicar", valor: formatPrice(stats.anticiposSinAplicar), onClick: () => navigate("/admin/cuentas-por-cobrar") },
+        { label: "Clientes activos", valor: stats.clientesActivos, detalle: `+${stats.clientesNuevosSemana} esta semana`, onClick: () => navigate("/admin/clientes") },
+        { label: "Productos", valor: stats.totalProductos, detalle: `${stats.productosBajoStock} con poco stock`, tono: stats.productosBajoStock > 0 ? "alerta" : "normal", onClick: () => navigate("/admin/inventario") },
+      ]} />
+      {op && (
+        <KpiStrip items={[
+          { label: "Por pagar a proveedores", valor: formatPrice(op.porPagar), tono: "negativo", onClick: () => navigate("/admin/cuentas-por-pagar") },
+          { label: "Bancos en dólares", valor: formatPrice(op.bancosUsd), tono: "positivo", onClick: () => navigate("/admin/bancos") },
+          { label: "Bancos en bolívares", valor: `Bs. ${op.bancosBs.toLocaleString("es-VE", { maximumFractionDigits: 0 })}`, onClick: () => navigate("/admin/bancos") },
+          { label: "Entregas listas", valor: op.entregasListas, detalle: "para despachar en Odoo", tono: op.entregasListas > 0 ? "primario" : "normal", onClick: () => navigate("/admin/transferencias?tipo=entrega&estado=lista") },
+          { label: "Sin disponible", valor: op.sinDisponible, detalle: "productos comprometidos", tono: op.sinDisponible > 0 ? "alerta" : "normal", onClick: () => navigate("/admin/inventario") },
+          { label: "Lotes vencidos", valor: op.lotesVencidos, detalle: "con existencia", tono: op.lotesVencidos > 0 ? "negativo" : "normal", onClick: () => navigate("/admin/inventario?tab=lotes&lotes=vencidos") },
+        ]} />
+      )}
 
-      {/* Stats Grid — módulos financieros (Fases 11-14) */}
-      <div className="mt-6 grid gap-6 md:grid-cols-3">
-        <StatCard
-          title="Deuda por Cobrar"
-          value={formatPrice(stats.deudaTotal)}
-          change={`${stats.clientesConDeuda} cliente(s) con deuda`}
-          changeType={stats.clientesConDeuda > 0 ? "negative" : "positive"}
-          icon={Wallet}
-        />
-        <StatCard
-          title="Cartera de Vendedores"
-          value={formatPrice(stats.carteraVendedores)}
-          change="Gestionada por vendedores"
-          changeType="neutral"
-          icon={UserCog}
-        />
-        <StatCard
-          title="Anticipos sin Aplicar"
-          value={formatPrice(stats.anticiposSinAplicar)}
-          change="Pagos con saldo a favor"
-          changeType="neutral"
-          icon={PiggyBank}
-        />
-      </div>
-
-      {/* Charts and Tables */}
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <RecentOrders />
+      <div className="grid gap-3 xl:grid-cols-3">
+        <div className="min-w-0 xl:col-span-2"><RecentOrders /></div>
+        <div className="min-w-0">
         <TopClients />
-      </div>
-
-      {/* Acciones pendientes — misma fuente que la Torre de Control */}
-      <div className="mt-6 rounded-xl border border-border bg-card p-6 shadow-sm">
-        <div className="mb-4 flex items-center gap-2">
-          <ListTodo className="h-5 w-5 text-primary" />
-          <h2 className="font-semibold">Acciones pendientes</h2>
-          {totalPendientes > 0 && <Badge variant="destructive">{totalPendientes}</Badge>}
+        <Panel titulo={<><ListTodo className="h-4 w-4 text-primary" /> Acciones pendientes {totalPendientes > 0 && <Badge variant="destructive">{totalPendientes}</Badge>}</>} sinPadding>
+          {loadingPendientes ? (
+            <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+          ) : totalPendientes === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground">Todo al día — nada pendiente por revisar.</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {pendientes.filter((p) => p.count > 0).map((p) => (
+                <button key={p.clave} onClick={() => navigate(p.link)} className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] hover:bg-muted/50">
+                  <p.icono className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate">{p.label}</span>
+                  <Badge variant="secondary">{p.count}</Badge>
+                </button>
+              ))}
+            </div>
+          )}
+        </Panel>
         </div>
-        {loadingPendientes ? (
-          <div className="flex justify-center py-6"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
-        ) : totalPendientes === 0 ? (
-          <p className="text-sm text-muted-foreground">Todo al día — nada pendiente por revisar.</p>
-        ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {pendientes.filter((p) => p.count > 0).map((p) => (
-              <button
-                key={p.clave}
-                onClick={() => navigate(p.link)}
-                className="flex items-center gap-3 rounded-lg border border-border px-3 py-2.5 text-left text-sm hover:bg-muted/60"
-              >
-                <p.icono className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{p.label}</span>
-                <Badge variant="secondary">{p.count}</Badge>
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </MainLayout>
   );

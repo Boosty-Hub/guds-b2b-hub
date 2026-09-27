@@ -7,6 +7,7 @@ import { NavLink } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
+import { EmpresaSelector, ModoConsultaBanner } from "@/components/EmpresaSelector";
 
 interface ConfiguracionLayoutProps {
   children: ReactNode;
@@ -47,6 +48,7 @@ export const ConfiguracionLayout = ({ children, title, description }: Configurac
           </button>
           <h1 className="font-semibold truncate">{title}</h1>
           <div className="flex items-center gap-2">
+            <EmpresaSelector variant="header" compacto />
             <BoostySupportSlot media="(max-width: 1023.98px)" />
             <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center">
               <span className="text-sm font-semibold">{getInitials()}</span>
@@ -63,6 +65,7 @@ export const ConfiguracionLayout = ({ children, title, description }: Configurac
             )}
           </div>
           <div className="flex items-center gap-4">
+            <EmpresaSelector />
             <NotificationsDropdown />
             <BoostySupportSlot media="(min-width: 1024px)" />
             <div className="flex items-center gap-3">
@@ -76,6 +79,7 @@ export const ConfiguracionLayout = ({ children, title, description }: Configurac
             </div>
           </div>
         </header>
+        <ModoConsultaBanner />
 
         {/* Main Content */}
         <main className="p-4 lg:p-6">

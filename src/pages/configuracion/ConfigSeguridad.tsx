@@ -92,11 +92,11 @@ const ConfigSeguridad = () => {
     >
       <div className="space-y-6">
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Cambiar Contraseña</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Cambiar Contraseña</CardTitle>
             <CardDescription>Actualiza tu contraseña de acceso</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="space-y-2">
               <Label htmlFor="current-password">Contraseña Actual</Label>
               <Input 
@@ -132,11 +132,11 @@ const ConfigSeguridad = () => {
         </Card>
 
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Autenticación de Dos Factores</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Autenticación de Dos Factores</CardTitle>
             <CardDescription>Añade una capa extra de seguridad a tu cuenta</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium">Activar 2FA</p>
@@ -155,8 +155,8 @@ const ConfigSeguridad = () => {
         </Card>
 
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Sesiones Activas</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Sesiones Activas</CardTitle>
             <CardDescription>Administra las sesiones de tu cuenta</CardDescription>
           </CardHeader>
           <CardContent>
@@ -188,11 +188,11 @@ const ConfigSeguridad = () => {
         </Card>
 
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Políticas de Seguridad</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Políticas de Seguridad</CardTitle>
             <CardDescription>Configuración de seguridad del sistema</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium">Expiración de sesión</p>

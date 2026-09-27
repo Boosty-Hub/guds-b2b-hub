@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -13,13 +11,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,27 +29,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { 
-  Search,
-  MoreHorizontal,
+import {
   Eye,
   CheckCircle,
   XCircle,
   Clock,
   Building2,
   User,
-  Mail,
-  Phone,
   MapPin,
   FileText,
-  UserPlus,
-  Filter
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, RegistroCliente } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { useEmpresa } from "@/contexts/EmpresaContext";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
 
 const statusConfig = {
   pendiente: { label: "Pendiente", color: "bg-yellow-500", icon: Clock },
@@ -68,6 +56,7 @@ const statusConfig = {
 
 const RegistrosClientes = () => {
   const { registros, aprobarRegistro, rechazarRegistro, getPendingRegistros } = useAuth();
+  const { empresas } = useEmpresa();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedRegistro, setSelectedRegistro] = useState<RegistroCliente | null>(null);
@@ -91,7 +80,7 @@ const RegistrosClientes = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const pagination = usePagination(filteredRegistros, 25);
+  const pagination = usePagination(filteredRegistros, 50);
 
   const handleApprove = async () => {
     if (!selectedRegistro) return;
@@ -150,182 +139,120 @@ const RegistrosClientes = () => {
   return (
     <MainLayout title="Registros de Clientes">
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-4 mb-6">
-        <Card className="border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <UserPlus className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{registros.length}</p>
-                <p className="text-xs text-muted-foreground">Total Solicitudes</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border border-yellow-500/50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-yellow-500/10 flex items-center justify-center">
-                <Clock className="h-5 w-5 text-yellow-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{pendingCount}</p>
-                <p className="text-xs text-muted-foreground">Pendientes</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
-                <CheckCircle className="h-5 w-5 text-green-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">
-                  {registros.filter(r => r.estado === "aprobado").length}
-                </p>
-                <p className="text-xs text-muted-foreground">Aprobados</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-red-500/10 flex items-center justify-center">
-                <XCircle className="h-5 w-5 text-red-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">
-                  {registros.filter(r => r.estado === "rechazado").length}
-                </p>
-                <p className="text-xs text-muted-foreground">Rechazados</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <KpiStrip
+        items={[
+          { label: "Total Solicitudes", valor: registros.length, tono: "primario" },
+          { label: "Pendientes", valor: pendingCount, tono: "alerta" },
+          { label: "Aprobados", valor: registros.filter(r => r.estado === "aprobado").length, tono: "positivo" },
+          { label: "Rechazados", valor: registros.filter(r => r.estado === "rechazado").length, tono: "negativo" },
+        ]}
+      />
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por negocio, email o contacto..."
-            className="pl-9"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {["all", "pendiente", "aprobado", "rechazado"].map((status) => (
-            <Button
-              key={status}
-              variant={statusFilter === status ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter(status)}
-            >
-              {status === "all" ? "Todos" : statusConfig[status as keyof typeof statusConfig]?.label}
-              {status === "pendiente" && pendingCount > 0 && (
-                <Badge className="ml-2 bg-yellow-500">{pendingCount}</Badge>
-              )}
-            </Button>
-          ))}
-        </div>
-      </div>
+      <BarraLista
+        busqueda={searchTerm}
+        onBusqueda={setSearchTerm}
+        placeholder="Buscar por negocio, email o contacto..."
+        contador={`${filteredRegistros.length} registros`}
+        filtros={
+          <div className="flex flex-wrap gap-1.5">
+            {["all", "pendiente", "aprobado", "rechazado"].map((status) => (
+              <Button
+                key={status}
+                variant={statusFilter === status ? "default" : "outline"}
+                size="sm"
+                className="h-8 text-[13px]"
+                onClick={() => setStatusFilter(status)}
+              >
+                {status === "all" ? "Todos" : statusConfig[status as keyof typeof statusConfig]?.label}
+                {status === "pendiente" && pendingCount > 0 && (
+                  <Badge className="ml-1.5 bg-yellow-500">{pendingCount}</Badge>
+                )}
+              </Button>
+            ))}
+          </div>
+        }
+      />
 
       {/* Table */}
-      <Card className="border-border">
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Negocio</TableHead>
-                <TableHead>Contacto</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>Ciudad</TableHead>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pagination.pageItems.map((registro) => {
-                const StatusIcon = statusConfig[registro.estado].icon;
-                return (
-                  <TableRow
-                    key={registro.id}
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => openViewDialog(registro)}
-                  >
-                    <TableCell>
-                      <div>
-                        <p className="font-medium">{registro.nombreNegocio}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {registro.rif}
-                          {registro.contribuyenteEspecial && " · Contrib. especial"}
-                        </p>
+      <div className="rounded-lg border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Negocio</TableHead>
+              <TableHead>Contacto</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Tipo</TableHead>
+              <TableHead>Ciudad</TableHead>
+              <TableHead>Fecha</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead className="text-right">Acciones</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pagination.pageItems.map((registro) => {
+              const StatusIcon = statusConfig[registro.estado].icon;
+              return (
+                <TableRow
+                  key={registro.id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => openViewDialog(registro)}
+                >
+                  <TableCell>
+                    <div className="flex min-w-0 items-center whitespace-nowrap">
+                      <span className="max-w-[260px] truncate font-medium" title={registro.nombreNegocio}>{registro.nombreNegocio}</span>
+                      <span className="ml-1.5 font-mono text-xs text-muted-foreground">{registro.rif}</span>
+                      {registro.contribuyenteEspecial && <span className="ml-1.5 text-xs text-muted-foreground">· Contrib. especial</span>}
+                    </div>
+                  </TableCell>
+                  <TableCell className="max-w-[200px] truncate whitespace-nowrap" title={registro.nombreContacto}>{registro.nombreContacto}</TableCell>
+                  <TableCell className="max-w-[220px] truncate whitespace-nowrap text-muted-foreground" title={registro.email}>{registro.email}</TableCell>
+                  <TableCell className="whitespace-nowrap">{registro.tipoNegocio}</TableCell>
+                  <TableCell className="whitespace-nowrap">{registro.ciudad}</TableCell>
+                  <TableCell className="whitespace-nowrap">{registro.fechaRegistro}</TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <Badge className={`${statusConfig[registro.estado].color} text-white`}>
+                      <StatusIcon className="h-3 w-3 mr-1" />
+                      {statusConfig[registro.estado].label}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                    {registro.estado === "pendiente" && (
+                      <div className="flex justify-end gap-0.5">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-green-600 hover:text-green-700"
+                          title="Aprobar"
+                          onClick={() => {
+                            setSelectedRegistro(registro);
+                            setIsApproveOpen(true);
+                          }}
+                        >
+                          <CheckCircle className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-red-600 hover:text-red-700"
+                          title="Rechazar"
+                          onClick={() => {
+                            setSelectedRegistro(registro);
+                            setIsRejectOpen(true);
+                          }}
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium">{registro.nombreContacto}</p>
-                        <p className="text-sm text-muted-foreground">{registro.email}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>{registro.tipoNegocio}</TableCell>
-                    <TableCell>{registro.ciudad}</TableCell>
-                    <TableCell>{registro.fechaRegistro}</TableCell>
-                    <TableCell>
-                      <Badge className={`${statusConfig[registro.estado].color} text-white`}>
-                        <StatusIcon className="h-3 w-3 mr-1" />
-                        {statusConfig[registro.estado].label}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      {registro.estado === "pendiente" && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              className="text-green-600"
-                              onClick={() => {
-                                setSelectedRegistro(registro);
-                                setIsApproveOpen(true);
-                              }}
-                            >
-                              <CheckCircle className="h-4 w-4 mr-2" />
-                              Aprobar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-red-600"
-                              onClick={() => {
-                                setSelectedRegistro(registro);
-                                setIsRejectOpen(true);
-                              }}
-                            >
-                              <XCircle className="h-4 w-4 mr-2" />
-                              Rechazar
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-          <DataTablePagination pagination={pagination} />
-        </CardContent>
-      </Card>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+        <DataTablePagination pagination={pagination} />
+      </div>
 
       {/* View Dialog */}
       <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
@@ -359,6 +286,10 @@ const RegistrosClientes = () => {
                   <div>
                     <p className="text-muted-foreground">Tipo</p>
                     <p className="font-medium">{selectedRegistro.tipoNegocio}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Quiere comprar con</p>
+                    <p className="font-medium">{empresas.find((e) => e.id === selectedRegistro.empresaId)?.nombre_corto || "Sin indicar (se crea en la empresa activa)"}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">RIF</p>

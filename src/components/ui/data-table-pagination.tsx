@@ -22,7 +22,7 @@ interface DataTablePaginationProps {
  */
 export function DataTablePagination({
   pagination,
-  pageSizeOptions = [10, 25, 50, 100],
+  pageSizeOptions = [25, 50, 100, 200],
   className,
 }: DataTablePaginationProps) {
   const { page, pageSize, pageCount, total, from, to, setPage, setPageSize } = pagination;
@@ -30,7 +30,7 @@ export function DataTablePagination({
   return (
     <div
       className={cn(
-        "flex flex-col gap-3 border-t border-border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between",
+        "flex flex-col gap-2 border-t border-border px-3 py-1.5 text-xs sm:flex-row sm:items-center sm:justify-between",
         className,
       )}
     >
@@ -38,11 +38,11 @@ export function DataTablePagination({
         {total === 0 ? "Sin resultados" : <>Mostrando <span className="font-medium text-foreground">{from}–{to}</span> de <span className="font-medium text-foreground">{total}</span></>}
       </p>
 
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-2">
           <span className="whitespace-nowrap text-muted-foreground">Filas por página</span>
           <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
-            <SelectTrigger className="h-8 w-[72px]">
+            <SelectTrigger className="h-7 w-[72px] text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -59,16 +59,16 @@ export function DataTablePagination({
           <span className="mr-1 whitespace-nowrap text-muted-foreground">
             Pág. {page} de {pageCount}
           </span>
-          <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)} aria-label="Primera página">
+          <Button variant="outline" size="icon" className="h-7 w-7" disabled={page <= 1} onClick={() => setPage(1)} aria-label="Primera página">
             <ChevronsLeft className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(page - 1)} aria-label="Página anterior">
+          <Button variant="outline" size="icon" className="h-7 w-7" disabled={page <= 1} onClick={() => setPage(page - 1)} aria-label="Página anterior">
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= pageCount} onClick={() => setPage(page + 1)} aria-label="Página siguiente">
+          <Button variant="outline" size="icon" className="h-7 w-7" disabled={page >= pageCount} onClick={() => setPage(page + 1)} aria-label="Página siguiente">
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= pageCount} onClick={() => setPage(pageCount)} aria-label="Última página">
+          <Button variant="outline" size="icon" className="h-7 w-7" disabled={page >= pageCount} onClick={() => setPage(pageCount)} aria-label="Última página">
             <ChevronsRight className="h-4 w-4" />
           </Button>
         </div>

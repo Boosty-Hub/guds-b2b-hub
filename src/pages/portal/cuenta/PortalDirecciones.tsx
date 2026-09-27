@@ -8,10 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { 
   ChevronLeft,
   MapPin,
-  Plus,
   Loader2,
-  Trash2,
-  Edit2,
   Home,
   Building2
 } from "lucide-react";
@@ -32,7 +29,7 @@ const PortalDirecciones = () => {
   
   const [loading, setLoading] = useState(true);
   const [cliente, setCliente] = useState<Cliente | null>(null);
-  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [direcciones, setDirecciones] = useState<{ id: string; nombre: string | null; direccion: string | null; ciudad: string | null; estado: string | null; telefono: string | null }[]>([]);
 
   useEffect(() => {
     if (user?.cliente_id) {
@@ -43,13 +40,12 @@ const PortalDirecciones = () => {
   }, [user]);
 
   const fetchCliente = async () => {
-    const { data } = await supabase
-      .from('clientes')
-      .select('*')
-      .eq('id', user?.cliente_id)
-      .single();
-    
+    const [{ data }, { data: dirs }] = await Promise.all([
+      supabase.from('clientes').select('*').eq('id', user?.cliente_id).single(),
+      supabase.from('cliente_direcciones').select('id, nombre, direccion, ciudad, estado, telefono').eq('cliente_id', user?.cliente_id).eq('activo', true).order('nombre'),
+    ]);
     if (data) setCliente(data);
+    setDirecciones(dirs ?? []);
     setLoading(false);
   };
 
@@ -107,19 +103,27 @@ const PortalDirecciones = () => {
             </div>
           </div>
 
-          {/* Additional Addresses Placeholder */}
-          <div className="text-center py-8">
-            <div className="h-16 w-16 rounded-full bg-muted mx-auto flex items-center justify-center mb-4">
-              <Home className="h-8 w-8 text-muted-foreground" />
+          {/* Direcciones de entrega registradas en Odoo */}
+          {direcciones.length > 0 ? (
+            <div className="space-y-3">
+              <p className="text-sm font-semibold">Otras direcciones de entrega ({direcciones.length})</p>
+              {direcciones.map((d) => (
+                <div key={d.id} className="rounded-xl border border-border bg-card p-4 text-sm">
+                  <p className="flex items-center gap-2 font-medium"><MapPin className="h-4 w-4 text-primary" />{d.nombre || "Dirección de entrega"}</p>
+                  <p className="mt-1 text-foreground">{d.direccion || "—"}</p>
+                  <p className="text-muted-foreground">{[d.ciudad, d.estado].filter(Boolean).join(", ")}</p>
+                  {d.telefono && <p className="text-muted-foreground">Tel: {d.telefono}</p>}
+                </div>
+              ))}
             </div>
-            <p className="text-muted-foreground mb-4">
-              Próximamente podrás agregar direcciones adicionales
-            </p>
-            <Button variant="outline" disabled className="gap-2">
-              <Plus className="h-4 w-4" />
-              Agregar dirección
-            </Button>
-          </div>
+          ) : (
+            <div className="text-center py-8">
+              <div className="h-16 w-16 rounded-full bg-muted mx-auto flex items-center justify-center mb-4">
+                <Home className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <p className="text-muted-foreground">No tienes otras direcciones de entrega registradas.</p>
+            </div>
+          )}
         </div>
       )}
     </PortalMobileLayout>

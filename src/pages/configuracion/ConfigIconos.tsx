@@ -227,7 +227,7 @@ const ConfigIconos = () => {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold">Iconos y Emojis</h2>
+            <h2 className="text-lg font-semibold">Iconos y Emojis</h2>
             <p className="text-muted-foreground">
               Gestiona los iconos disponibles para productos y categorías
             </p>
@@ -247,7 +247,7 @@ const ConfigIconos = () => {
                   <Smile className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{iconos.length}</p>
+                  <p className="text-lg font-semibold">{iconos.length}</p>
                   <p className="text-sm text-muted-foreground">Total Iconos</p>
                 </div>
               </div>
@@ -260,7 +260,7 @@ const ConfigIconos = () => {
                   <Package className="h-5 w-5 text-blue-500" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{iconosProductos.filter(i => i.activo).length}</p>
+                  <p className="text-lg font-semibold">{iconosProductos.filter(i => i.activo).length}</p>
                   <p className="text-sm text-muted-foreground">Para Productos</p>
                 </div>
               </div>
@@ -273,7 +273,7 @@ const ConfigIconos = () => {
                   <FolderOpen className="h-5 w-5 text-amber-500" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{iconosCategorias.filter(i => i.activo).length}</p>
+                  <p className="text-lg font-semibold">{iconosCategorias.filter(i => i.activo).length}</p>
                   <p className="text-sm text-muted-foreground">Para Categorías</p>
                 </div>
               </div>
@@ -301,8 +301,8 @@ const ConfigIconos = () => {
 
             <TabsContent value="productos">
               <Card>
-                <CardHeader>
-                  <CardTitle>Iconos para Productos</CardTitle>
+                <CardHeader className="p-3 pb-2">
+                  <CardTitle className="text-sm">Iconos para Productos</CardTitle>
                   <CardDescription>
                     Estos iconos aparecen al crear o editar productos
                   </CardDescription>
@@ -321,8 +321,8 @@ const ConfigIconos = () => {
 
             <TabsContent value="categorias">
               <Card>
-                <CardHeader>
-                  <CardTitle>Iconos para Categorías</CardTitle>
+                <CardHeader className="p-3 pb-2">
+                  <CardTitle className="text-sm">Iconos para Categorías</CardTitle>
                   <CardDescription>
                     Estos iconos aparecen al crear o editar categorías
                   </CardDescription>

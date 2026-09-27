@@ -9,6 +9,11 @@
  */
 import pg from 'pg';
 
+// ⛔ RETIRADO (2026-09-27): carga inicial vieja, NO usar. Recarga todo, altera tablas, apaga triggers
+// y no separa por empresa. Queda solo como referencia del mapeo Odoo→GUDS; lo reemplaza el importador
+// nuevo (docs/PLAN-ESPEJO-ODOO.md, Fase 2). Para leerlo no hace falta ejecutarlo.
+if (!process.argv.includes('--legacy-confirmo')) { console.error('⛔ Script retirado. Ver docs/PLAN-ESPEJO-ODOO.md'); process.exit(1); }
+
 const APPLY = process.argv.includes('--apply');
 const REF = process.env.SUPABASE_PROJECT_REF;
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN;

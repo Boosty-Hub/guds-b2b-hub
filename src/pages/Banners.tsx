@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -21,12 +20,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,15 +39,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Plus,
-  MoreHorizontal,
   Edit,
   Trash2,
   GripVertical,
   Eye,
   EyeOff,
-  Image,
   Smartphone,
-  Calendar,
   Upload,
   X
 } from "lucide-react";
@@ -57,6 +54,9 @@ import { useStoreConfig, Banner } from "@/contexts/StoreConfigContext";
 import { supabase } from "@/lib/supabase";
 import { compressImage } from "@/lib/image";
 import { BannerVisual } from "@/components/BannerVisual";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
+import { Panel } from "@/components/datos/FichaCampos";
 
 const MAX_BANNER_IMAGE_SIZE = 2 * 1024 * 1024;
 
@@ -243,171 +243,131 @@ const Banners = () => {
 
   return (
     <MainLayout title="Banners Promocionales">
-      {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3 mb-6">
-        <Card className="border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <Image className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{banners.length}</p>
-                <p className="text-xs text-muted-foreground">Total Banners</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
-                <Eye className="h-5 w-5 text-green-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{activeBanners}</p>
-                <p className="text-xs text-muted-foreground">Activos</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <Smartphone className="h-5 w-5 text-blue-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">App</p>
-                <p className="text-xs text-muted-foreground">Portal Cliente</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <KpiStrip items={[
+        { label: "Total Banners", valor: banners.length, tono: "primario" },
+        { label: "Activos", valor: activeBanners, tono: "positivo" },
+        { label: "Portal Cliente", valor: "App", tono: "tenue" },
+      ]} />
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-lg font-semibold">Gestión de Banners</h2>
-          <p className="text-sm text-muted-foreground">Los banners se muestran en el carrusel del portal cliente</p>
-        </div>
-        <Button className="gap-2" onClick={() => {
-          resetForm();
-          setIsCreateOpen(true);
-        }}>
-          <Plus className="h-4 w-4" />
-          Nuevo Banner
-        </Button>
-      </div>
-
-      {/* Preview */}
-      <Card className="border-border mb-6">
-        <CardHeader>
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Smartphone className="h-4 w-4" />
-            Vista Previa - Portal Cliente
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="bg-muted rounded-xl p-4 max-w-md mx-auto">
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {banners.filter(b => b.activo).sort((a, b) => a.orden - b.orden).map((banner) => (
-                <BannerVisual
-                  key={banner.id}
-                  banner={banner}
-                  className="rounded-xl p-4 min-w-[180px] flex-shrink-0"
-                />
-              ))}
-            </div>
+      <BarraLista
+        filtros={
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold">Gestión de Banners</h2>
+            <p className="text-xs text-muted-foreground">Los banners se muestran en el carrusel del portal cliente</p>
           </div>
-        </CardContent>
-      </Card>
+        }
+        contador={`${banners.length} registros`}
+        acciones={
+          <Button size="sm" className="gap-1.5" onClick={() => {
+            resetForm();
+            setIsCreateOpen(true);
+          }}>
+            <Plus className="h-3.5 w-3.5" />
+            Nuevo Banner
+          </Button>
+        }
+      />
 
       {/* Banners List */}
-      <div className="space-y-3">
-        {banners.sort((a, b) => a.orden - b.orden).map((banner) => (
-          <Card key={banner.id} className={`border-border ${!banner.activo ? "opacity-60" : ""}`}>
-            <CardContent className="p-4">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                <div className="hidden sm:block cursor-grab text-muted-foreground hover:text-foreground">
-                  <GripVertical className="h-5 w-5" />
-                </div>
-
-                {/* Banner Preview */}
-                <BannerVisual banner={banner} className="rounded-lg p-3 sm:min-w-[150px] text-sm" />
-
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-semibold">{banner.title}</h3>
-                    {!banner.activo && (
-                      <Badge variant="secondary">Inactivo</Badge>
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground">{banner.subtitle}</p>
-                  <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      {banner.fechaInicio} - {banner.fechaFin}
-                    </span>
-                    <span>Link: {banner.link}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-4 sm:justify-start">
+      <div className="rounded-lg border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-6" />
+              <TableHead>Imagen</TableHead>
+              <TableHead>Título</TableHead>
+              <TableHead>Subtítulo</TableHead>
+              <TableHead>Vigencia</TableHead>
+              <TableHead>Link</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead className="text-right">Acciones</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {banners.length === 0 ? (
+              <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">No hay banners</TableCell></TableRow>
+            ) : banners.sort((a, b) => a.orden - b.orden).map((banner) => (
+              <TableRow key={banner.id} className={!banner.activo ? "opacity-60" : ""}>
+                <TableCell className="pr-0">
+                  <GripVertical className="h-3.5 w-3.5 cursor-grab text-muted-foreground hover:text-foreground" />
+                </TableCell>
+                <TableCell>
+                  {banner.imagenUrl ? (
+                    <img src={banner.imagenUrl} alt={banner.title} className="h-6 w-10 rounded object-cover" />
+                  ) : (
+                    <div className={`h-6 w-10 rounded bg-gradient-to-r ${banner.bgColor}`} />
+                  )}
+                </TableCell>
+                <TableCell className="max-w-[220px] truncate font-medium" title={banner.title}>
+                  {banner.title}
+                  {!banner.activo && (
+                    <Badge variant="secondary" className="ml-1.5">Inactivo</Badge>
+                  )}
+                </TableCell>
+                <TableCell className="max-w-[260px] truncate text-muted-foreground" title={banner.subtitle}>{banner.subtitle}</TableCell>
+                <TableCell className="whitespace-nowrap text-muted-foreground">{banner.fechaInicio} - {banner.fechaFin}</TableCell>
+                <TableCell className="max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={banner.link}>{banner.link}</TableCell>
+                <TableCell className="whitespace-nowrap">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">
-                      {banner.activo ? "Activo" : "Inactivo"}
-                    </span>
                     <Switch
                       checked={banner.activo}
                       onCheckedChange={() => handleToggleActivo(banner)}
                     />
+                    <span className="text-xs text-muted-foreground">
+                      {banner.activo ? "Activo" : "Inactivo"}
+                    </span>
                   </div>
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => openEditDialog(banner)}>
-                        <Edit className="h-4 w-4 mr-2" />
-                        Editar
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleToggleActivo(banner)}>
-                        {banner.activo ? (
-                          <>
-                            <EyeOff className="h-4 w-4 mr-2" />
-                            Desactivar
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="h-4 w-4 mr-2" />
-                            Activar
-                          </>
-                        )}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem 
-                        className="text-destructive"
-                        onClick={() => {
-                          setSelectedBanner(banner);
-                          setIsDeleteOpen(true);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Eliminar
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" aria-label="Editar" onClick={() => openEditDialog(banner)}>
+                      <Edit className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title={banner.activo ? "Desactivar" : "Activar"}
+                      aria-label={banner.activo ? "Desactivar" : "Activar"}
+                      onClick={() => handleToggleActivo(banner)}
+                    >
+                      {banner.activo ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      title="Eliminar"
+                      aria-label="Eliminar"
+                      onClick={() => {
+                        setSelectedBanner(banner);
+                        setIsDeleteOpen(true);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </div>
+
+      {/* Vista previa del portal (debajo de la lista para priorizar los datos) */}
+      <Panel className="mt-3" titulo={<><Smartphone className="h-3.5 w-3.5" /> Vista Previa - Portal Cliente</>}>
+        <div className="mx-auto max-w-md rounded-lg bg-muted p-3">
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {banners.filter(b => b.activo).sort((a, b) => a.orden - b.orden).map((banner) => (
+              <BannerVisual
+                key={banner.id}
+                banner={banner}
+                className="min-w-[180px] flex-shrink-0 rounded-lg p-3"
+              />
+            ))}
+          </div>
+        </div>
+      </Panel>
 
       {/* Create Dialog */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>

@@ -82,11 +82,11 @@ const ConfigNotificaciones = () => {
     >
       <div className="space-y-6">
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Notificaciones por Email</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Notificaciones por Email</CardTitle>
             <CardDescription>Alertas enviadas a tu correo electrónico</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium">Nuevas órdenes</p>
@@ -119,11 +119,11 @@ const ConfigNotificaciones = () => {
         </Card>
 
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Notificaciones Push</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Notificaciones Push</CardTitle>
             <CardDescription>Alertas en tiempo real en el navegador</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium">Activar notificaciones push</p>
@@ -142,11 +142,11 @@ const ConfigNotificaciones = () => {
         </Card>
 
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Resumen Diario</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Resumen Diario</CardTitle>
             <CardDescription>Recibe un resumen de actividad por email</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium">Enviar resumen diario</p>

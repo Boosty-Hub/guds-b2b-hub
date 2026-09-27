@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Warehouse, Boxes, Users, Search, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
 
 interface Almacen {
   id: string;
@@ -19,24 +20,26 @@ interface Almacen {
   tipo: "propio" | "consignacion";
   activo: boolean;
   cliente?: { nombre_negocio: string } | null;
+  vinculo_cliente: "nombre" | "entregas" | "manual" | null;
   n_productos: number;
   unidades: number;
 }
 
 const nf = (n: number) => n.toLocaleString("es-VE");
+const VINCULO: Record<string, string> = { nombre: "por nombre", entregas: "por entregas en Odoo", manual: "manual" };
 
 function TablaAlmacenes({ data, mostrarCliente }: { data: Almacen[]; mostrarCliente?: boolean }) {
   const navigate = useNavigate();
-  const pg = usePagination(data, 25);
+  const pg = usePagination(data, 50);
   return (
-    <div className="rounded-xl border border-border bg-card shadow-sm">
+    <div className="rounded-lg border border-border bg-card">
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Almacén</TableHead>
             <TableHead>Código</TableHead>
             {mostrarCliente && <TableHead>Cliente</TableHead>}
-            <TableHead className="text-center">Productos</TableHead>
+            <TableHead className="text-right">Productos</TableHead>
             <TableHead className="text-right">Unidades</TableHead>
             <TableHead>Estado</TableHead>
           </TableRow>
@@ -48,16 +51,17 @@ function TablaAlmacenes({ data, mostrarCliente }: { data: Almacen[]; mostrarClie
               className="cursor-pointer hover:bg-muted/50"
               onClick={() => navigate(`/admin/almacenes/${a.id}`)}
             >
-              <TableCell className="font-medium">{a.nombre}</TableCell>
-              <TableCell className="font-mono text-sm text-muted-foreground">{a.codigo || "—"}</TableCell>
+              <TableCell className="max-w-[300px] truncate font-medium" title={a.nombre}>{a.nombre}</TableCell>
+              <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{a.codigo || "—"}</TableCell>
               {mostrarCliente && (
-                <TableCell className="text-muted-foreground">
-                  {a.cliente?.nombre_negocio || <span className="italic opacity-60">sin match</span>}
+                <TableCell className="max-w-[320px] truncate text-muted-foreground" title={a.cliente?.nombre_negocio || undefined}>
+                  {a.cliente?.nombre_negocio || <span className="italic opacity-60">{a.vinculo_cliente === "manual" ? "sin cliente (manual)" : "sin cliente identificado"}</span>}
+                  {a.cliente && a.vinculo_cliente && <span className="ml-1.5 text-xs opacity-70">{VINCULO[a.vinculo_cliente]}</span>}
                 </TableCell>
               )}
-              <TableCell className="text-center">{a.n_productos}</TableCell>
-              <TableCell className="text-right font-semibold">{nf(a.unidades)}</TableCell>
-              <TableCell>
+              <TableCell className="whitespace-nowrap text-right">{a.n_productos}</TableCell>
+              <TableCell className="whitespace-nowrap text-right font-semibold">{nf(a.unidades)}</TableCell>
+              <TableCell className="whitespace-nowrap">
                 <Badge variant={a.activo ? "default" : "secondary"}>{a.activo ? "Activo" : "Inactivo"}</Badge>
               </TableCell>
             </TableRow>
@@ -78,7 +82,7 @@ const Almacenes = () => {
     (async () => {
       setLoading(true);
       const [{ data: alm }, { data: inv }] = await Promise.all([
-        supabase.from("almacenes").select("id, nombre, codigo, tipo, activo, cliente:clientes(nombre_negocio)").order("nombre"),
+        supabase.from("almacenes").select("id, nombre, codigo, tipo, activo, vinculo_cliente, cliente:clientes(nombre_negocio)").order("nombre"),
         supabase.from("inventario_almacen").select("almacen_id, cantidad"),
       ]);
       const agg = new Map<string, { n: number; sum: number }>();
@@ -109,58 +113,38 @@ const Almacenes = () => {
 
   return (
     <MainLayout title="Almacenes">
-      {/* Stats */}
-      <div className="mb-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2"><Warehouse className="h-5 w-5 text-primary" /></div>
-            <div>
-              <p className="text-2xl font-bold">{almacenes.filter((a) => a.tipo === "propio").length}</p>
-              <p className="text-sm text-muted-foreground">Almacenes propios</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-warning/10 p-2"><Users className="h-5 w-5 text-warning" /></div>
-            <div>
-              <p className="text-2xl font-bold">{almacenes.filter((a) => a.tipo === "consignacion").length}</p>
-              <p className="text-sm text-muted-foreground">Consignaciones</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-success/10 p-2"><Boxes className="h-5 w-5 text-success" /></div>
-            <div>
-              <p className="text-2xl font-bold">{nf(totalUnidadesPropias)}</p>
-              <p className="text-sm text-muted-foreground">Unidades en almacén propio</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <KpiStrip items={[
+        { label: "Almacenes propios", valor: almacenes.filter((a) => a.tipo === "propio").length, tono: "primario" },
+        { label: "Consignaciones", valor: almacenes.filter((a) => a.tipo === "consignacion").length, tono: "alerta" },
+        { label: "Unidades en almacén propio", valor: nf(totalUnidadesPropias), tono: "positivo" },
+      ]} />
 
-      <div className="mb-4 relative max-w-md">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder="Buscar almacén o cliente..." className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} />
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
-      ) : (
-        <Tabs defaultValue="propios">
-          <TabsList>
-            <TabsTrigger value="propios">Propios ({propios.length})</TabsTrigger>
-            <TabsTrigger value="consignacion">Consignaciones ({consig.length})</TabsTrigger>
-          </TabsList>
-          <TabsContent value="propios" className="mt-4">
-            <TablaAlmacenes data={propios} />
-          </TabsContent>
-          <TabsContent value="consignacion" className="mt-4">
-            <TablaAlmacenes data={consig} mostrarCliente />
-          </TabsContent>
-        </Tabs>
-      )}
+      <Tabs defaultValue="propios">
+        <BarraLista
+          busqueda={q}
+          onBusqueda={setQ}
+          placeholder="Buscar almacén o cliente..."
+          filtros={
+            <TabsList>
+              <TabsTrigger value="propios">Propios ({propios.length})</TabsTrigger>
+              <TabsTrigger value="consignacion">Consignaciones ({consig.length})</TabsTrigger>
+            </TabsList>
+          }
+          contador={`${propios.length + consig.length} registros`}
+        />
+        {loading ? (
+          <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+        ) : (
+          <>
+            <TabsContent value="propios" className="mt-0">
+              <TablaAlmacenes data={propios} />
+            </TabsContent>
+            <TabsContent value="consignacion" className="mt-0">
+              <TablaAlmacenes data={consig} mostrarCliente />
+            </TabsContent>
+          </>
+        )}
+      </Tabs>
     </MainLayout>
   );
 };

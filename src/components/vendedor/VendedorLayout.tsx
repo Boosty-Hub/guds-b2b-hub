@@ -1,5 +1,7 @@
 import { ReactNode, useState } from "react";
 import { VendedorSidebar } from "./VendedorSidebar";
+import { navItems as navVendedor } from "./navegacion";
+import { BuscadorGlobal, type ModuloBuscador } from "@/components/BuscadorGlobal";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -26,6 +28,7 @@ import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
+import { EmpresaSelector, ModoConsultaBanner } from "@/components/EmpresaSelector";
 
 interface VendedorLayoutProps {
   children: ReactNode;
@@ -46,6 +49,9 @@ const sheetNavItems = [
   ...mobileNavItems,
   { icon: Warehouse, label: "Inventario", path: "/vendedor/inventario" },
 ];
+
+// Accesos "Ir a" del buscador del vendedor
+const modulosVendedor: ModuloBuscador[] = navVendedor.map((i) => ({ label: i.label, path: i.path, seccion: "Portal vendedor" }));
 
 export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -70,45 +76,53 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
 
       {/* Mobile Header */}
       <header className="md:hidden sticky top-0 z-50 bg-emerald-500 text-white">
-        <div className="flex items-center justify-between h-14 px-4">
-          <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2">
+        <div className="flex h-14 items-center justify-between gap-1 px-2">
+          <button onClick={() => setIsMobileMenuOpen(true)} className="shrink-0 p-1.5" aria-label="Abrir menú">
             <Menu className="h-6 w-6" />
           </button>
-          <h1 className="font-semibold">{title}</h1>
-          <div className="flex items-center gap-2">
+          <h1 className="min-w-0 flex-1 truncate font-semibold">{title}</h1>
+          <div className="flex shrink-0 items-center gap-1">
+            <BuscadorGlobal compacto atajo={false} contexto="vendedor" modulos={modulosVendedor} className="border-white/30 bg-white/15 text-white hover:bg-white/25" />
+            <EmpresaSelector variant="header" compacto />
             <CurrencySwitch variant="header" />
             <BoostySupportSlot media="(max-width: 767.98px)" />
             <NotificationsDropdown variant="header" />
           </div>
         </div>
       </header>
+      <div className="md:hidden">
+        <ModoConsultaBanner />
+      </div>
 
       {/* Desktop Header */}
-      <div className="hidden md:block md:pl-64">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card px-6">
-          <h1 className="text-xl font-semibold text-foreground">{title}</h1>
-          <div className="flex items-center gap-4">
+      <div className="hidden md:block md:pl-56">
+        <header className="sticky top-0 z-30 flex h-12 items-center justify-between gap-3 border-b border-border bg-card px-4">
+          <h1 className="min-w-0 truncate text-base font-semibold text-foreground">{title}</h1>
+          <div className="flex items-center gap-3">
+            <BuscadorGlobal contexto="vendedor" modulos={modulosVendedor} className="hidden lg:flex" />
+            <EmpresaSelector />
             <CurrencySwitch />
             <NotificationsDropdown />
             <BoostySupportSlot media="(min-width: 768px)" />
             <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full bg-emerald-500/20 flex items-center justify-center">
+              <div className="h-8 w-8 rounded-full bg-emerald-500/20 flex items-center justify-center">
                 <span className="text-sm font-semibold text-emerald-500">
                   {user ? getInitials(user.nombre, user.apellido) : 'V'}
                 </span>
               </div>
               <div>
-                <p className="text-sm font-medium">{user?.nombre} {user?.apellido}</p>
-                <p className="text-xs text-muted-foreground">Vendedor</p>
+                <p className="text-[13px] font-medium leading-tight">{user?.nombre} {user?.apellido}</p>
+                <p className="text-[11px] leading-tight text-muted-foreground">Vendedor</p>
               </div>
             </div>
           </div>
         </header>
+        <ModoConsultaBanner />
       </div>
 
       {/* Main Content */}
-      <main className="md:pl-64 pb-20 md:pb-0">
-        <div className="p-4 md:p-6">{children}</div>
+      <main className="md:pl-56 pb-20 md:pb-0">
+        <div className="p-3 md:p-4">{children}</div>
       </main>
 
       {/* Mobile Bottom Navigation */}

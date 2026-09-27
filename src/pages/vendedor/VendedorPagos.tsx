@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import { VendedorLayout } from "@/components/vendedor/VendedorLayout";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +20,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { useSearchParams } from "react-router-dom";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
+import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
 
 interface Pago { id: string; numero: string; monto: number; metodo: string; estado: string; referencia: string | null; created_at: string; cliente?: { nombre_negocio: string } | null; }
 interface Cli { id: string; nombre_negocio: string; }
@@ -47,6 +50,11 @@ const VendedorPagos = () => {
   const [form, setForm] = useState({ cliente_id: "", orden_id: "", monto: "", banco_id: "", metodo: "", tasa: "", referencia: "" });
   const [bancos, setBancos] = useState<Banco[]>([]);
   const [saving, setSaving] = useState(false);
+  const [params] = useSearchParams();
+  const [q, setQ] = useState(params.get("q") || "");
+  const [estadoFiltro, setEstadoFiltro] = useState<"todos" | "pendiente">("todos");
+  // El buscador global abre esta página con ?q=
+  useEffect(() => { const v = params.get("q"); if (v !== null) setQ(v); }, [params]);
 
   const fetchData = useCallback(async () => {
     if (!user?.id) return;
@@ -92,46 +100,58 @@ const VendedorPagos = () => {
 
   const fmt = (s: string) => new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short" });
 
-  const pagination = usePagination(pagos, 25);
+  const texto = q.trim().toLowerCase();
+  const filtrados = pagos.filter((p) => (estadoFiltro === "todos" || p.estado === "pendiente") &&
+    (!texto || [p.numero, p.cliente?.nombre_negocio, p.referencia].some((v) => (v || "").toLowerCase().includes(texto))));
+  const { ordenadas, orden, alternar } = useOrdenTabla(filtrados, {
+    numero: (p) => p.numero, cliente: (p) => p.cliente?.nombre_negocio, fecha: (p) => p.created_at, monto: (p) => Number(p.monto || 0),
+    metodo: (p) => p.metodo, estado: (p) => p.estado,
+  });
+  const pagination = usePagination(ordenadas, 50);
+  const nPendientes = pagos.filter((p) => p.estado === "pendiente").length;
 
   return (
     <VendedorLayout title="Pagos">
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Card className="border-border"><CardContent className="p-4"><p className="text-2xl font-bold text-emerald-600">{formatPrice(verificados)}</p><p className="text-sm text-muted-foreground">Verificados</p></CardContent></Card>
-          <Card className="border-border"><CardContent className="p-4"><p className="text-2xl font-bold">{formatPrice(pendientes)}</p><p className="text-sm text-muted-foreground">Pendientes de verificar</p></CardContent></Card>
-          <Card className="border-border"><CardContent className="p-4"><p className="text-2xl font-bold">{pagos.length}</p><p className="text-sm text-muted-foreground">Total registros</p></CardContent></Card>
-        </div>
+      <div>
+        <KpiStrip items={[
+          { label: "Verificados", valor: formatPrice(verificados), tono: "positivo", onClick: () => setEstadoFiltro("todos"), activo: estadoFiltro === "todos" },
+          { label: "Pendientes de verificar", valor: formatPrice(pendientes), detalle: `${nPendientes} cobros`, tono: nPendientes ? "alerta" : "normal", onClick: () => setEstadoFiltro("pendiente"), activo: estadoFiltro === "pendiente" },
+          { label: "Total registros", valor: pagos.length },
+        ]} />
 
-        <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold">Pagos de mis clientes</h2>
-          <Button className="bg-emerald-500 hover:bg-emerald-600" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1" />Registrar Cobro</Button>
-        </div>
+        <BarraLista busqueda={q} onBusqueda={setQ} placeholder="Buscar cobro, cliente o referencia..."
+          contador={loading ? undefined : `${filtrados.length} registros`}
+          acciones={<Button size="sm" className="gap-1.5 bg-emerald-500 hover:bg-emerald-600" onClick={() => setOpen(true)}><Plus className="h-3.5 w-3.5" />Registrar Cobro</Button>} />
 
-        <div className="rounded-xl border border-border bg-card">
-          {loading ? <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-emerald-500" /></div>
-          : pagos.length === 0 ? <div className="py-16 text-center text-muted-foreground">Aún no hay pagos registrados</div>
+        <div className="rounded-lg border border-border bg-card">
+          {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
+          : pagos.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay pagos registrados</div>
+          : filtrados.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Sin resultados{texto ? ` para "${q.trim()}"` : ""}</div>
           : (
             <Table>
               <TableHeader><TableRow>
-                <TableHead>Pago</TableHead><TableHead>Cliente</TableHead><TableHead>Fecha</TableHead>
-                <TableHead className="text-right">Monto</TableHead><TableHead>Método</TableHead><TableHead>Estado</TableHead>
+                <EncabezadoOrdenable clave="numero" orden={orden} onOrdenar={alternar}>Pago</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="cliente" orden={orden} onOrdenar={alternar}>Cliente</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="fecha" orden={orden} onOrdenar={alternar} className="hidden sm:table-cell">Fecha</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="monto" orden={orden} onOrdenar={alternar} alinear="derecha">Monto</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="metodo" orden={orden} onOrdenar={alternar} className="hidden md:table-cell">Método</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="estado" orden={orden} onOrdenar={alternar}>Estado</EncabezadoOrdenable>
               </TableRow></TableHeader>
               <TableBody>
                 {pagination.pageItems.map((p) => (
-                  <TableRow key={p.id} className="hover:bg-muted/50">
-                    <TableCell className="font-medium text-emerald-600">{p.numero}</TableCell>
-                    <TableCell>{p.cliente?.nombre_negocio || "—"}</TableCell>
-                    <TableCell className="text-muted-foreground">{fmt(p.created_at)}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatPrice(Number(p.monto))}</TableCell>
-                    <TableCell>{metodoLabel[p.metodo] || p.metodo}</TableCell>
-                    <TableCell><Badge variant={estadoConfig[p.estado]?.variant || "secondary"}>{estadoConfig[p.estado]?.label || p.estado}</Badge></TableCell>
+                  <TableRow key={p.id}>
+                    <TableCell className="whitespace-nowrap font-medium text-emerald-600">{p.numero}</TableCell>
+                    <TableCell><span className="block max-w-[260px] truncate" title={p.cliente?.nombre_negocio || undefined}>{p.cliente?.nombre_negocio || "—"}</span></TableCell>
+                    <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">{fmt(p.created_at)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(Number(p.monto))}</TableCell>
+                    <TableCell className="hidden whitespace-nowrap md:table-cell">{metodoLabel[p.metodo] || p.metodo}</TableCell>
+                    <TableCell className="whitespace-nowrap"><Badge variant={estadoConfig[p.estado]?.variant || "secondary"}>{estadoConfig[p.estado]?.label || p.estado}</Badge></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           )}
-          {!loading && pagos.length > 0 && <DataTablePagination pagination={pagination} />}
+          {!loading && filtrados.length > 0 && <DataTablePagination pagination={pagination} />}
         </div>
       </div>
 

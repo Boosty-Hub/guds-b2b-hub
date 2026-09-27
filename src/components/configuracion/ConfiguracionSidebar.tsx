@@ -19,7 +19,7 @@ import { Logo } from "@/components/Logo";
 
 export const configNavItems = [
   { icon: Users, label: "Usuarios", path: "/admin/configuracion/usuarios" },
-  { icon: Building2, label: "Empresa", path: "/admin/configuracion/empresa" },
+  { icon: Building2, label: "Empresas", path: "/admin/configuracion/empresa" },
   { icon: Wallet, label: "Métodos de Pago", path: "/admin/configuracion/metodos-pago" },
   { icon: DollarSign, label: "Moneda", path: "/admin/configuracion/moneda" },
   { icon: Package, label: "Empaques", path: "/admin/configuracion/empaques" },

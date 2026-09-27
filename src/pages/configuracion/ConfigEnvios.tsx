@@ -32,11 +32,11 @@ const ConfigEnvios = () => {
     >
       <div className="space-y-6">
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Configuración General</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Configuración General</CardTitle>
             <CardDescription>Opciones generales de envío</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium">Envío gratis sobre monto mínimo</p>
@@ -74,7 +74,7 @@ const ConfigEnvios = () => {
         <Card className="border-border">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
-              <CardTitle>Zonas de Envío</CardTitle>
+              <CardTitle className="text-sm">Zonas de Envío</CardTitle>
               <CardDescription>Configura las zonas y costos de entrega</CardDescription>
             </div>
             <Button size="sm" className="gap-2">
@@ -101,7 +101,7 @@ const ConfigEnvios = () => {
                       <p className="text-sm text-muted-foreground">{zona.cobertura}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-3">
                     <div className="text-right">
                       <p className="font-medium">${zona.costoBase}</p>
                       <p className="text-xs text-muted-foreground">{zona.tiempoEntrega}</p>
@@ -122,11 +122,11 @@ const ConfigEnvios = () => {
         </Card>
 
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Transportistas</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Transportistas</CardTitle>
             <CardDescription>Servicios de paquetería integrados</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="flex items-center justify-between rounded-lg border border-border p-4">
               <div className="flex items-center gap-4">
                 <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,8 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { DeclararRetencionForm } from "@/components/retenciones/DeclararRetencionForm";
 import type { FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
+import { OdooBadge } from "@/components/OdooBadge";
+import { BarraLista } from "@/components/datos/BarraLista";
 
 interface Retencion {
   id: string; numero: string; tipo: string; estado: string; fecha: string; total: number;
@@ -63,9 +65,9 @@ const Retenciones = () => {
   const pendientes = retenciones.filter((r) => r.estado === "pendiente");
   const aprobadas = retenciones.filter((r) => r.estado === "aprobado");
   const rechazadas = retenciones.filter((r) => r.estado === "rechazado");
-  const pgPend = usePagination(pendientes, 25);
-  const pgApr = usePagination(aprobadas, 25);
-  const pgRech = usePagination(rechazadas, 25);
+  const pgPend = usePagination(pendientes, 50);
+  const pgApr = usePagination(aprobadas, 50);
+  const pgRech = usePagination(rechazadas, 50);
 
   const abrirDetalle = async (r: Retencion) => {
     setDetalle(r);
@@ -111,9 +113,9 @@ const Retenciones = () => {
   };
 
   const renderTabla = (rows: Retencion[], pg: ReturnType<typeof usePagination<Retencion>>, accionable: boolean) => (
-    <div className="rounded-xl border border-border bg-card shadow-sm">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
       {rows.length === 0 ? (
-        <p className="p-8 text-center text-muted-foreground">Sin retenciones en esta categoría.</p>
+        <p className="p-6 text-center text-sm text-muted-foreground">Sin retenciones en esta categoría.</p>
       ) : (
         <>
           <Table>
@@ -128,14 +130,20 @@ const Retenciones = () => {
             <TableBody>
               {pg.pageItems.map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="font-mono text-sm text-primary">{r.numero}</TableCell>
-                  <TableCell className="font-medium">{r.cliente?.nombre_negocio || "—"}</TableCell>
-                  <TableCell className="uppercase text-muted-foreground">{r.tipo}</TableCell>
-                  <TableCell className="capitalize text-muted-foreground">{r.rol_declarante}</TableCell>
-                  <TableCell><Badge variant="outline">{r.odoo_id ? "Odoo" : "Sistema"}</Badge></TableCell>
-                  <TableCell className="text-muted-foreground">{new Date(r.fecha).toLocaleDateString("es-VE")}</TableCell>
-                  <TableCell className="text-right font-semibold">{formatPrice(r.total)}</TableCell>
-                  {accionable && <TableCell className="text-right"><Button size="sm" onClick={() => abrirDetalle(r)}>Revisar</Button></TableCell>}
+                  <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{r.numero}</TableCell>
+                  <TableCell className="font-medium">
+                    <span className="block max-w-[260px] truncate" title={r.cliente?.nombre_negocio || undefined}>{r.cliente?.nombre_negocio || "—"}</span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap uppercase text-muted-foreground">{r.tipo}</TableCell>
+                  <TableCell className="whitespace-nowrap capitalize text-muted-foreground">{r.rol_declarante}</TableCell>
+                  <TableCell className="whitespace-nowrap">{r.odoo_id ? <OdooBadge /> : <Badge variant="outline" className="px-1 py-0 text-[10px]">GUDS</Badge>}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(r.fecha).toLocaleDateString("es-VE")}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(r.total)}</TableCell>
+                  {accionable && (
+                    <TableCell className="whitespace-nowrap text-right">
+                      <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => abrirDetalle(r)}>Revisar</Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -148,24 +156,29 @@ const Retenciones = () => {
 
   return (
     <MainLayout title="Retenciones">
-      <div className="mb-4 flex justify-end">
-        <Button className="gap-2" onClick={abrirNueva}><Plus className="h-4 w-4" /> Registrar retención</Button>
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
-      ) : (
-        <Tabs defaultValue="pendientes">
-          <TabsList>
-            <TabsTrigger value="pendientes" className="gap-1.5"><Receipt className="h-3.5 w-3.5" /> Pendientes ({pendientes.length})</TabsTrigger>
-            <TabsTrigger value="aprobadas">Aprobadas ({aprobadas.length})</TabsTrigger>
-            <TabsTrigger value="rechazadas">Rechazadas ({rechazadas.length})</TabsTrigger>
-          </TabsList>
-          <TabsContent value="pendientes" className="mt-4">{renderTabla(pendientes, pgPend, true)}</TabsContent>
-          <TabsContent value="aprobadas" className="mt-4">{renderTabla(aprobadas, pgApr, false)}</TabsContent>
-          <TabsContent value="rechazadas" className="mt-4">{renderTabla(rechazadas, pgRech, false)}</TabsContent>
-        </Tabs>
-      )}
+      {/* Pestañas, contador y acciones en una sola fila */}
+      <Tabs defaultValue="pendientes">
+        <BarraLista
+          pestanas={
+            <TabsList>
+              <TabsTrigger value="pendientes" className="gap-1.5"><Receipt className="h-3.5 w-3.5" /> Pendientes ({pendientes.length})</TabsTrigger>
+              <TabsTrigger value="aprobadas">Aprobadas ({aprobadas.length})</TabsTrigger>
+              <TabsTrigger value="rechazadas">Rechazadas ({rechazadas.length})</TabsTrigger>
+            </TabsList>
+          }
+          contador={loading ? undefined : `${retenciones.length} registros`}
+          acciones={<Button size="sm" className="gap-1.5" onClick={abrirNueva}><Plus className="h-3.5 w-3.5" /> Registrar retención</Button>}
+        />
+        {loading ? (
+          <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+        ) : (
+          <>
+            <TabsContent value="pendientes">{renderTabla(pendientes, pgPend, true)}</TabsContent>
+            <TabsContent value="aprobadas">{renderTabla(aprobadas, pgApr, false)}</TabsContent>
+            <TabsContent value="rechazadas">{renderTabla(rechazadas, pgRech, false)}</TabsContent>
+          </>
+        )}
+      </Tabs>
 
       {/* Revisar */}
       <Dialog open={!!detalle} onOpenChange={(o) => !o && setDetalle(null)}>

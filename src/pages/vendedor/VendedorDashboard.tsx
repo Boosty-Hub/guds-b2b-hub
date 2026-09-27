@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { VendedorLayout } from "@/components/vendedor/VendedorLayout";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
-import { Users, ShoppingCart, DollarSign, Target, ArrowRight, Loader2 } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { ShoppingCart, DollarSign, ArrowRight, Loader2 } from "lucide-react";
+import { KpiStrip } from "@/components/datos/KpiStrip";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -11,6 +10,7 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 const VendedorDashboard = () => {
   const { user } = useAuth();
   const { formatPrice } = useCurrency();
+  const navigate = useNavigate();
   const [clientes, setClientes] = useState(0);
   const [pedidosPend, setPedidosPend] = useState(0);
   const [ventasMes, setVentasMes] = useState(0);
@@ -47,38 +47,29 @@ const VendedorDashboard = () => {
   }, [user?.id]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const stat = (icon: React.ReactNode, val: string | number, label: string, cls: string) => (
-    <Card className="border-border"><CardContent className="p-4 flex items-center gap-3">
-      <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${cls}`}>{icon}</div>
-      <div><p className="text-2xl font-bold">{val}</p><p className="text-sm text-muted-foreground">{label}</p></div>
-    </CardContent></Card>
-  );
 
   return (
     <VendedorLayout title="Dashboard">
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-emerald-500" /></div>
       ) : (
-        <div className="space-y-6">
-          <div>
-            <h2 className="text-lg font-semibold">Hola, {user?.nombre} 👋</h2>
-            <p className="text-muted-foreground">Resumen de tu cartera y ventas.</p>
-          </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {stat(<Users className="h-5 w-5 text-emerald-500" />, clientes, "Mis clientes", "bg-emerald-500/10")}
-            {stat(<ShoppingCart className="h-5 w-5 text-primary" />, pedidosPend, "Pedidos activos", "bg-primary/10")}
-            {stat(<DollarSign className="h-5 w-5 text-green-600" />, formatPrice(ventasMes), "Ventas del mes", "bg-green-500/10")}
-            {stat(<Target className="h-5 w-5 text-amber-600" />, formatPrice(saldoCartera), "Saldo cartera", "bg-amber-500/10")}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Card className="border-border"><CardContent className="p-5 flex items-center justify-between">
-              <div className="flex items-center gap-3"><ShoppingCart className="h-6 w-6 text-emerald-500" /><div><p className="font-medium">Tomar pedido</p><p className="text-sm text-muted-foreground">Crear un pedido para un cliente</p></div></div>
-              <Button asChild variant="outline"><Link to="/vendedor/pedidos">Ir <ArrowRight className="h-4 w-4 ml-1" /></Link></Button>
-            </CardContent></Card>
-            <Card className="border-border"><CardContent className="p-5 flex items-center justify-between">
-              <div className="flex items-center gap-3"><DollarSign className="h-6 w-6 text-emerald-500" /><div><p className="font-medium">Registrar cobro</p><p className="text-sm text-muted-foreground">Reportar un pago recibido</p></div></div>
-              <Button asChild variant="outline"><Link to="/vendedor/pagos">Ir <ArrowRight className="h-4 w-4 ml-1" /></Link></Button>
-            </CardContent></Card>
+        <div>
+          <p className="mb-2 text-[13px] text-muted-foreground">Hola, <span className="font-medium text-foreground">{user?.nombre}</span> — resumen de tu cartera y ventas.</p>
+          <KpiStrip items={[
+            { label: "Mis clientes", valor: clientes, tono: "primario", onClick: () => navigate("/vendedor/clientes") },
+            { label: "Pedidos activos", valor: pedidosPend, tono: pedidosPend ? "alerta" : "normal", onClick: () => navigate("/vendedor/pedidos") },
+            { label: "Ventas del mes", valor: formatPrice(ventasMes), tono: "positivo", onClick: () => navigate("/vendedor/metas") },
+            { label: "Saldo de cartera", valor: formatPrice(saldoCartera), tono: saldoCartera > 0 ? "negativo" : "normal", onClick: () => navigate("/vendedor/clientes") },
+          ]} />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Link to="/vendedor/pedidos" className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/50">
+              <span className="flex items-center gap-2.5"><ShoppingCart className="h-4 w-4 text-emerald-500" /><span><span className="block text-[13px] font-medium">Tomar pedido</span><span className="block text-[11px] text-muted-foreground">Crear un pedido para un cliente</span></span></span>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+            <Link to="/vendedor/pagos" className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/50">
+              <span className="flex items-center gap-2.5"><DollarSign className="h-4 w-4 text-emerald-500" /><span><span className="block text-[13px] font-medium">Registrar cobro</span><span className="block text-[11px] text-muted-foreground">Reportar un pago recibido</span></span></span>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
           </div>
         </div>
       )}

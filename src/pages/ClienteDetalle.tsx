@@ -13,10 +13,16 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { supabase, Cliente, ListaPrecios } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import { OdooBadge } from "@/components/OdooBadge";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { FichaCampos, Panel } from "@/components/datos/FichaCampos";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface ClienteFull extends Cliente {
   lista_precios?: ListaPrecios | null;
+  limite_credito_pendiente?: boolean;
 }
+interface ContactoResumen { id: string; nombre: string; cargo: string | null; email: string | null; es_principal: boolean }
 
 interface OrdenResumen {
   id: string;
@@ -44,33 +50,6 @@ const ESTADO: Record<string, { label: string; variant: "default" | "secondary" |
   cancelado: { label: "Cancelado", variant: "destructive" },
 };
 
-/** Un campo etiqueta/valor. Muestra "—" si no hay dato. */
-function Campo({ label, children, mono }: { label: string; children?: ReactNode; mono?: boolean }) {
-  const vacio = children === null || children === undefined || children === "" || children === false;
-  return (
-    <div className="min-w-0">
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={`mt-0.5 break-words font-medium ${mono ? "font-mono text-sm" : ""}`}>
-        {vacio ? <span className="font-normal text-muted-foreground">—</span> : children}
-      </p>
-    </div>
-  );
-}
-
-function Seccion({ icon: Icon, titulo, children }: { icon: typeof User; titulo: string; children: ReactNode }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-      <div className="mb-4 flex items-center gap-2">
-        <div className="rounded-lg bg-primary/10 p-1.5">
-          <Icon className="h-4 w-4 text-primary" />
-        </div>
-        <h2 className="font-semibold">{titulo}</h2>
-      </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{children}</div>
-    </div>
-  );
-}
-
 const ClienteDetalle = () => {
   const { clienteId } = useParams();
   const navigate = useNavigate();
@@ -78,6 +57,10 @@ const ClienteDetalle = () => {
   const [cliente, setCliente] = useState<ClienteFull | null>(null);
   const [ordenes, setOrdenes] = useState<OrdenResumen[]>([]);
   const [consignacion, setConsignacion] = useState<ConsigRow[]>([]);
+  const [direcciones, setDirecciones] = useState<{ id: string; nombre: string | null; direccion: string | null; ciudad: string | null; estado: string | null; telefono: string | null; activo: boolean }[]>([]);
+  const [contactos, setContactos] = useState<ContactoResumen[]>([]);
+  const [accesos, setAccesos] = useState<{ contacto_id: string | null; activo: boolean }[]>([]);
+  const [credito, setCredito] = useState<{ modo: string; disponible: number; en_pedidos: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const ordenesPag = usePagination(ordenes, 10);
   const consigPag = usePagination(consignacion, 10);
@@ -86,7 +69,7 @@ const ClienteDetalle = () => {
     let activo = true;
     (async () => {
       setLoading(true);
-      const [{ data }, { data: ords }, { data: alms }] = await Promise.all([
+      const [{ data }, { data: ords }, { data: alms }, { data: dirs }, { data: kts }, { data: accs }, { data: cred }] = await Promise.all([
         supabase.from("clientes").select("*, lista_precios:listas_precios(*)").eq("id", clienteId).maybeSingle(),
         supabase.from("ordenes")
           .select("id, numero, estado, total, created_at, fecha_pedido, items:orden_items(count)")
@@ -96,11 +79,18 @@ const ClienteDetalle = () => {
           .select("nombre, inventario_almacen(cantidad, producto:productos(nombre, sku))")
           .eq("cliente_id", clienteId)
           .eq("tipo", "consignacion"),
+        supabase.from("cliente_direcciones")
+          .select("id, nombre, direccion, ciudad, estado, telefono, activo")
+          .eq("cliente_id", clienteId)
+          .order("nombre"),
+        supabase.from("cliente_contactos").select("id, nombre, cargo, email, es_principal").eq("cliente_id", clienteId).order("es_principal", { ascending: false }).order("nombre"),
+        supabase.from("usuarios").select("contacto_id, activo").eq("cliente_id", clienteId).eq("role", "cliente"),
+        supabase.rpc("credito_disponible", { p_cliente_id: clienteId }),
       ]);
       if (activo) {
         setCliente((data as ClienteFull) ?? null);
         setOrdenes((ords as OrdenResumen[]) ?? []);
-        const rows: ConsigRow[] = ((alms as { nombre: string; inventario_almacen?: { cantidad: number; producto?: { nombre: string; sku: string } | null }[] }[]) ?? [])
+        const rows: ConsigRow[] = ((alms as unknown as { nombre: string; inventario_almacen?: { cantidad: number; producto?: { nombre: string; sku: string } | null }[] }[]) ?? [])
           .flatMap((a) => (a.inventario_almacen ?? []).map((r) => ({
             almacen: a.nombre,
             producto: r.producto?.nombre ?? "Producto",
@@ -109,6 +99,10 @@ const ClienteDetalle = () => {
           })))
           .sort((x, y) => y.cantidad - x.cantidad);
         setConsignacion(rows);
+        setDirecciones(dirs ?? []);
+        setContactos((kts as ContactoResumen[]) ?? []);
+        setAccesos((accs as { contacto_id: string | null; activo: boolean }[]) ?? []);
+        setCredito((cred as { modo: string; disponible: number; en_pedidos: number }[] | null)?.[0] ?? null);
         setLoading(false);
       }
     })();
@@ -123,8 +117,8 @@ const ClienteDetalle = () => {
     d ? new Date(d).toLocaleDateString("es-VE", { day: "2-digit", month: "long", year: "numeric" }) : null;
 
   const volver = (
-    <Button variant="ghost" className="mb-4 gap-2" onClick={() => navigate("/admin/clientes")}>
-      <ArrowLeft className="h-4 w-4" /> Volver a clientes
+    <Button variant="ghost" size="sm" className="mb-2 h-7 gap-1.5 px-2 text-xs" onClick={() => navigate("/admin/clientes")}>
+      <ArrowLeft className="h-3.5 w-3.5" /> Clientes
     </Button>
   );
 
@@ -151,187 +145,179 @@ const ClienteDetalle = () => {
     );
   }
 
-  const iniciales = cliente.nombre_negocio.split(" ").map((w) => w[0]).join("").slice(0, 2);
+  const odoo = !!cliente.odoo_id;
+  const fechaCorta = (d?: string | null) => (d ? new Date(d).toLocaleDateString("es-VE") : "—");
 
   return (
     <MainLayout title={cliente.nombre_negocio}>
       {volver}
 
-      {/* Encabezado */}
-      <div className="mb-6 flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          <Avatar className="h-14 w-14">
-            <AvatarFallback className="bg-primary/10 text-lg text-primary">{iniciales}</AvatarFallback>
-          </Avatar>
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-bold">{cliente.nombre_negocio}</h1>
-            <p className="font-mono text-sm text-muted-foreground">{cliente.codigo}</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Badge variant={cliente.activo ? "default" : "secondary"}>{cliente.activo ? "Activo" : "Inactivo"}</Badge>
-              {cliente.tipo_negocio && <Badge variant="outline">{cliente.tipo_negocio}</Badge>}
-              {cliente.es_empresa != null && (
-                <Badge variant="outline">{cliente.es_empresa ? "Empresa" : "Persona natural"}</Badge>
-              )}
-              {cliente.contribuyente_especial && <Badge variant="outline">Contribuyente especial</Badge>}
-            </div>
-          </div>
+      {/* Cabecera compacta del documento */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Building2 className="h-4 w-4 shrink-0 text-primary" />
+          <h1 className="truncate text-base font-semibold" title={cliente.nombre_negocio}>{cliente.nombre_negocio}</h1>
+          {odoo && <OdooBadge />}
+          <span className="font-mono text-xs text-muted-foreground">{cliente.codigo}{cliente.rif ? ` · ${cliente.rif}` : ""}</span>
+          <Badge variant={cliente.activo ? "default" : "secondary"}>{cliente.activo ? "Activo" : "Inactivo"}</Badge>
+          {cliente.tipo_negocio && <Badge variant="outline">{cliente.tipo_negocio}</Badge>}
+          {cliente.es_empresa != null && <Badge variant="outline">{cliente.es_empresa ? "Empresa" : "Persona natural"}</Badge>}
+          {cliente.contribuyente_especial && <Badge variant="outline">Contribuyente especial</Badge>}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link to={`/admin/clientes/${cliente.id}/usuarios`}>
-            <Button variant="outline" className="gap-2"><Users className="h-4 w-4" /> Usuarios del portal</Button>
-          </Link>
-          <Link to="/admin/clientes">
-            <Button variant="outline" className="gap-2"><Edit className="h-4 w-4" /> Editar</Button>
-          </Link>
+        <div className="flex flex-wrap gap-1.5">
+          <Link to={`/admin/cuentas/${cliente.id}`}><Button size="sm" variant="outline" className="h-8 gap-1.5"><CreditCard className="h-3.5 w-3.5" /> Estado de cuenta</Button></Link>
+          <Link to={`/admin/clientes/${cliente.id}/usuarios`}><Button size="sm" variant="outline" className="h-8 gap-1.5"><Users className="h-3.5 w-3.5" /> Contactos y portal</Button></Link>
+          <Link to="/admin/clientes"><Button size="sm" variant="outline" className="h-8 gap-1.5"><Edit className="h-3.5 w-3.5" /> Editar</Button></Link>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Seccion icon={IdCard} titulo="Identificación">
-          <Campo label="Código" mono>{cliente.codigo}</Campo>
-          <Campo label="RIF" mono>{cliente.rif}</Campo>
-          <Campo label="Cédula" mono>{cliente.cedula}</Campo>
-          <Campo label="Tipo de negocio">{cliente.tipo_negocio}</Campo>
-          <Campo label="Tipo de residencia">{cliente.tipo_residencia}</Campo>
-          <Campo label="Persona / Empresa">{cliente.es_empresa == null ? null : cliente.es_empresa ? "Empresa" : "Persona natural"}</Campo>
-        </Seccion>
+      <KpiStrip items={[
+        { label: "Órdenes", valor: ordenes.length.toLocaleString("es-VE") },
+        { label: "Total órdenes", valor: formatPrice(totalFacturado) },
+        { label: "Por cobrar", valor: formatPrice(Number(cliente.credito_utilizado || 0)), tono: Number(cliente.credito_utilizado) > 0 ? "negativo" : "normal" },
+        { label: "Límite de crédito", valor: cliente.limite_credito ? formatPrice(cliente.limite_credito) : "—", detalle: cliente.limite_credito_pendiente ? "Pendiente de enviar a Odoo" : undefined, tono: cliente.limite_credito_pendiente ? "alerta" : "normal" },
+        { label: "Crédito disponible", valor: credito ? (credito.modo === "abierto" ? "Abierto" : formatPrice(Number(credito.disponible))) : "—", tono: credito?.modo === "abierto" ? "positivo" : "normal",
+          detalle: credito && Number(credito.en_pedidos) > 0 ? `${formatPrice(Number(credito.en_pedidos))} en pedidos` : undefined },
+        { label: "Consignado", valor: `${totalConsignado.toLocaleString("es-VE")} u`, detalle: consignacion.length ? `${consignacion.length} productos` : undefined },
+        { label: "Contactos", valor: contactos.length, detalle: `${accesos.filter((a) => a.activo).length} con acceso` },
+      ]} />
 
-        <Seccion icon={Phone} titulo="Contacto">
-          <Campo label="Email">{cliente.email}</Campo>
-          <Campo label="Teléfono">{cliente.telefono}</Campo>
-          <Campo label="Celular">{cliente.celular}</Campo>
-          <Campo label="Sitio web">
-            {cliente.sitio_web ? (
-              <a href={cliente.sitio_web} target="_blank" rel="noreferrer" className="text-primary underline">{cliente.sitio_web}</a>
-            ) : null}
-          </Campo>
-        </Seccion>
+      <Panel titulo="Datos del cliente">
+        <FichaCampos campos={[
+          { label: "RIF", valor: cliente.rif, odoo, mono: true },
+          { label: "Cédula", valor: cliente.cedula, odoo, mono: true },
+          { label: "Tipo de residencia", valor: cliente.tipo_residencia, odoo },
+          { label: "Email", valor: cliente.email, odoo },
+          { label: "Teléfono", valor: cliente.telefono, odoo },
+          { label: "Celular", valor: cliente.celular, odoo },
+          { label: "Dirección", valor: cliente.direccion, odoo, ancho: 2 },
+          { label: "Dirección de entrega", valor: cliente.direccion_entrega, ancho: 2 },
+          { label: "Ciudad", valor: cliente.ciudad, odoo },
+          { label: "Estado", valor: cliente.estado, odoo },
+          { label: "Vendedor", valor: cliente.vendedor_odoo, odoo },
+          { label: "Lista de precios", valor: cliente.lista_precios?.nombre },
+          { label: "Condición de pago", valor: cliente.condicion_pago, odoo },
+          { label: "Días de crédito", valor: cliente.dias_credito != null ? `${cliente.dias_credito} días` : null, odoo },
+          { label: "Retiene IVA", valor: cliente.retiene_iva ? "Sí" : "No" },
+          { label: "Retiene ISLR", valor: cliente.retiene_islr ? "Sí" : "No" },
+          { label: "Licencia de actividad", valor: cliente.licencia_actividad, odoo },
+          { label: "Sitio web", valor: cliente.sitio_web ? <a href={cliente.sitio_web} target="_blank" rel="noreferrer" className="text-primary underline">{cliente.sitio_web}</a> : null, odoo },
+          { label: "Registrado en Odoo", valor: fechaCorta(cliente.fecha_registro_odoo) },
+          { label: "Creado en GUDS", valor: fechaCorta(cliente.created_at) },
+          ...(cliente.latitud != null || cliente.longitud != null ? [{ label: "Coordenadas", valor: `${cliente.latitud}, ${cliente.longitud}`, mono: true }] : []),
+          ...(cliente.notas ? [{ label: "Notas", valor: cliente.notas, odoo, ancho: 3 as const }] : []),
+        ]} />
+      </Panel>
 
-        <Seccion icon={MapPin} titulo="Ubicación">
-          <Campo label="Dirección">{cliente.direccion}</Campo>
-          <Campo label="Dirección de entrega">{cliente.direccion_entrega}</Campo>
-          <Campo label="Ciudad">{cliente.ciudad}</Campo>
-          <Campo label="Estado">{cliente.estado}</Campo>
-          {(cliente.latitud != null || cliente.longitud != null) && (
-            <Campo label="Coordenadas" mono>{cliente.latitud}, {cliente.longitud}</Campo>
-          )}
-        </Seccion>
+      <Tabs defaultValue="ordenes">
+        <TabsList className="h-auto flex-wrap justify-start">
+          <TabsTrigger value="ordenes"><ShoppingCart className="mr-1.5 h-3.5 w-3.5" />Órdenes ({ordenes.length})</TabsTrigger>
+          <TabsTrigger value="contactos"><Users className="mr-1.5 h-3.5 w-3.5" />Contactos ({contactos.length})</TabsTrigger>
+          <TabsTrigger value="direcciones"><MapPin className="mr-1.5 h-3.5 w-3.5" />Direcciones ({direcciones.length})</TabsTrigger>
+          <TabsTrigger value="consignacion"><Boxes className="mr-1.5 h-3.5 w-3.5" />Consignación ({consignacion.length})</TabsTrigger>
+        </TabsList>
 
-        <Seccion icon={CreditCard} titulo="Comercial">
-          <Campo label="Lista de precios">{cliente.lista_precios?.nombre}</Campo>
-          <Campo label="Vendedor asignado">{cliente.vendedor_odoo}</Campo>
-          <Campo label="Límite de crédito">{cliente.limite_credito ? formatPrice(cliente.limite_credito) : null}</Campo>
-          <Campo label="Crédito utilizado">{cliente.credito_utilizado ? formatPrice(cliente.credito_utilizado) : null}</Campo>
-          <Campo label="Días de crédito">{cliente.dias_credito != null ? `${cliente.dias_credito} días` : null}</Campo>
-          <Campo label="Condición de pago">{cliente.condicion_pago}</Campo>
-        </Seccion>
-
-        <Seccion icon={FileText} titulo="Fiscal y notas">
-          <Campo label="Licencia de actividad">{cliente.licencia_actividad}</Campo>
-          <Campo label="Contribuyente especial">{cliente.contribuyente_especial ? "Sí" : "No"}</Campo>
-          <Campo label="Agente de retención IVA">
-            {cliente.retiene_iva ? <Badge variant="secondary">Retiene IVA</Badge> : "No"}
-          </Campo>
-          <Campo label="Agente de retención ISLR">
-            {cliente.retiene_islr ? <Badge variant="secondary">Retiene ISLR</Badge> : "No"}
-          </Campo>
-          <div className="sm:col-span-2">
-            <Campo label="Notas">{cliente.notas}</Campo>
+        <TabsContent value="ordenes">
+          <div className="rounded-lg border border-border bg-card">
+            {ordenes.length === 0 ? (
+              <p className="p-6 text-center text-sm text-muted-foreground">Este cliente no tiene órdenes.</p>
+            ) : (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow><TableHead>Orden</TableHead><TableHead>Fecha</TableHead><TableHead className="text-right">Ítems</TableHead><TableHead>Estado</TableHead><TableHead className="text-right">Total</TableHead></TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {ordenesPag.pageItems.map((o) => (
+                      <TableRow key={o.id} className="cursor-pointer" onClick={() => navigate(`/admin/ordenes?orden=${o.id}`)}>
+                        <TableCell className="whitespace-nowrap font-mono text-xs font-medium text-primary">{o.numero}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{fechaCorta(o.fecha_pedido || o.created_at)}</TableCell>
+                        <TableCell className="text-right">{o.items?.[0]?.count ?? 0}</TableCell>
+                        <TableCell><Badge variant={ESTADO[o.estado]?.variant ?? "secondary"}>{ESTADO[o.estado]?.label ?? o.estado}</Badge></TableCell>
+                        <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(o.total)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <DataTablePagination pagination={ordenesPag} />
+              </>
+            )}
           </div>
-        </Seccion>
+        </TabsContent>
 
-        <Seccion icon={Calendar} titulo="Trazabilidad">
-          <Campo label="ID Odoo" mono>{cliente.odoo_id}</Campo>
-          <Campo label="Registrado en Odoo">{fmtFecha(cliente.fecha_registro_odoo)}</Campo>
-          <Campo label="Creado en el sistema">{fmtFecha(cliente.created_at)}</Campo>
-        </Seccion>
-      </div>
-
-      {/* Órdenes del cliente */}
-      <div className="mt-6 rounded-xl border border-border bg-card shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5">
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg bg-primary/10 p-1.5">
-              <ShoppingCart className="h-4 w-4 text-primary" />
-            </div>
-            <h2 className="font-semibold">Órdenes ({ordenes.length})</h2>
+        <TabsContent value="contactos">
+          <div className="rounded-lg border border-border bg-card">
+            {contactos.length === 0 ? (
+              <p className="p-6 text-center text-sm text-muted-foreground">Sin contactos. <Link to={`/admin/clientes/${cliente.id}/usuarios`} className="text-primary underline">Agregar contactos y darles acceso al portal</Link></p>
+            ) : (
+              <Table>
+                <TableHeader><TableRow><TableHead>Contacto</TableHead><TableHead>Cargo</TableHead><TableHead>Correo</TableHead><TableHead>Portal</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {contactos.map((k) => {
+                    const acceso = accesos.find((a) => a.contacto_id === k.id);
+                    return (
+                      <TableRow key={k.id}>
+                        <TableCell className="whitespace-nowrap font-medium">{k.nombre}{k.es_principal && <Badge variant="secondary" className="ml-1.5">Principal</Badge>}</TableCell>
+                        <TableCell className="text-muted-foreground">{k.cargo || "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{k.email || "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs">{acceso ? (acceso.activo ? <span className="text-success">Con acceso</span> : <span className="text-destructive">Desactivado</span>) : <span className="text-muted-foreground">Sin acceso</span>}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
           </div>
-          <p className="text-sm text-muted-foreground">
-            Total facturado: <span className="font-semibold text-foreground">{formatPrice(totalFacturado)}</span>
-          </p>
-        </div>
-        {ordenes.length === 0 ? (
-          <p className="p-8 text-center text-muted-foreground">Este cliente no tiene órdenes.</p>
-        ) : (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Orden</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead className="text-center">Ítems</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {ordenesPag.pageItems.map((o) => (
-                  <TableRow key={o.id}>
-                    <TableCell className="font-medium text-primary">{o.numero}</TableCell>
-                    <TableCell className="text-muted-foreground">{fmtFecha(o.fecha_pedido || o.created_at)}</TableCell>
-                    <TableCell className="text-center">{o.items?.[0]?.count ?? 0}</TableCell>
-                    <TableCell>
-                      <Badge variant={ESTADO[o.estado]?.variant ?? "secondary"}>
-                        {ESTADO[o.estado]?.label ?? o.estado}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">{formatPrice(o.total)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <DataTablePagination pagination={ordenesPag} />
-          </>
-        )}
-      </div>
+        </TabsContent>
 
-      {/* Consignación del cliente */}
-      {consignacion.length > 0 && (
-        <div className="mt-6 rounded-xl border border-border bg-card shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5">
-            <div className="flex items-center gap-2">
-              <div className="rounded-lg bg-primary/10 p-1.5">
-                <Boxes className="h-4 w-4 text-primary" />
-              </div>
-              <h2 className="font-semibold">Consignación ({consignacion.length} productos)</h2>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Total consignado: <span className="font-semibold text-foreground">{totalConsignado.toLocaleString("es-VE")} uds</span>
-            </p>
+        <TabsContent value="direcciones">
+          <div className="rounded-lg border border-border bg-card">
+            {direcciones.length === 0 ? (
+              <p className="p-6 text-center text-sm text-muted-foreground">Sin direcciones de entrega adicionales.</p>
+            ) : (
+              <Table>
+                <TableHeader><TableRow><TableHead>Nombre</TableHead><TableHead>Dirección</TableHead><TableHead>Ciudad</TableHead><TableHead>Teléfono</TableHead><TableHead>Estado</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {direcciones.map((d) => (
+                    <TableRow key={d.id}>
+                      <TableCell className="whitespace-nowrap font-medium">{d.nombre || "Dirección"} <OdooBadge /></TableCell>
+                      <TableCell className="max-w-[360px] truncate text-muted-foreground" title={d.direccion ?? ""}>{d.direccion || "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{[d.ciudad, d.estado].filter(Boolean).join(", ") || "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{d.telefono || "—"}</TableCell>
+                      <TableCell>{d.activo ? <Badge variant="outline">Activa</Badge> : <Badge variant="secondary">Archivada</Badge>}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>SKU</TableHead>
-                <TableHead>Producto</TableHead>
-                <TableHead>Almacén</TableHead>
-                <TableHead className="text-right">Cantidad</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {consigPag.pageItems.map((r, i) => (
-                <TableRow key={r.sku + i}>
-                  <TableCell className="font-mono text-sm text-primary">{r.sku || "—"}</TableCell>
-                  <TableCell className="font-medium">{r.producto}</TableCell>
-                  <TableCell className="text-muted-foreground">{r.almacen}</TableCell>
-                  <TableCell className="text-right font-semibold">{r.cantidad.toLocaleString("es-VE")}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <DataTablePagination pagination={consigPag} />
-        </div>
-      )}
+        </TabsContent>
+
+        <TabsContent value="consignacion">
+          <div className="rounded-lg border border-border bg-card">
+            {consignacion.length === 0 ? (
+              <p className="p-6 text-center text-sm text-muted-foreground">Sin mercancía en consignación.</p>
+            ) : (
+              <>
+                <Table>
+                  <TableHeader><TableRow><TableHead>SKU</TableHead><TableHead>Producto</TableHead><TableHead>Almacén</TableHead><TableHead className="text-right">Cantidad</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {consigPag.pageItems.map((r, i) => (
+                      <TableRow key={r.sku + i}>
+                        <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{r.sku || "—"}</TableCell>
+                        <TableCell className="max-w-[360px] truncate font-medium" title={r.producto}>{r.producto}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{r.almacen}</TableCell>
+                        <TableCell className="text-right font-semibold">{r.cantidad.toLocaleString("es-VE")}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <DataTablePagination pagination={consigPag} />
+              </>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
     </MainLayout>
   );
 };

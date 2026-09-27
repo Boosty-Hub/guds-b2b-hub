@@ -56,9 +56,9 @@ const VendedorMetas = () => {
               {metaVentas > 0 ? (
                 <>
                   <div className="grid grid-cols-3 gap-4 mb-4 text-center">
-                    <div><p className="text-sm text-muted-foreground">Meta</p><p className="text-xl font-bold">{formatPrice(metaVentas)}</p></div>
-                    <div><p className="text-sm text-muted-foreground">Logrado</p><p className="text-xl font-bold text-emerald-600">{formatPrice(ventasMes)}</p></div>
-                    <div><p className="text-sm text-muted-foreground">Restante</p><p className="text-xl font-bold">{formatPrice(restante)}</p></div>
+                    <div><p className="text-sm text-muted-foreground">Meta</p><p className="text-base font-semibold">{formatPrice(metaVentas)}</p></div>
+                    <div><p className="text-sm text-muted-foreground">Logrado</p><p className="text-base font-semibold text-emerald-600">{formatPrice(ventasMes)}</p></div>
+                    <div><p className="text-sm text-muted-foreground">Restante</p><p className="text-base font-semibold">{formatPrice(restante)}</p></div>
                   </div>
                   <Progress value={progreso} className="h-3" />
                   <p className="text-sm text-muted-foreground mt-2">{progreso}% completado</p>
@@ -75,10 +75,10 @@ const VendedorMetas = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Card className="border-border"><CardContent className="p-4 flex items-center gap-3">
               <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center"><TrendingUp className="h-5 w-5 text-emerald-500" /></div>
-              <div><p className="text-2xl font-bold">{formatPrice(ventasMes)}</p><p className="text-sm text-muted-foreground">Ventas completadas (mes)</p></div>
+              <div><p className="text-lg font-semibold">{formatPrice(ventasMes)}</p><p className="text-sm text-muted-foreground">Ventas completadas (mes)</p></div>
             </CardContent></Card>
-            <Card className="border-border"><CardContent className="p-4"><p className="text-2xl font-bold">{pedidosMes}</p><p className="text-sm text-muted-foreground">Pedidos del mes</p></CardContent></Card>
-            <Card className="border-border"><CardContent className="p-4"><p className="text-2xl font-bold">{meta ? formatPrice(Number(meta.comision_ganada || 0)) : "—"}</p><p className="text-sm text-muted-foreground">Comisión ganada</p></CardContent></Card>
+            <Card className="border-border"><CardContent className="p-4"><p className="text-lg font-semibold">{pedidosMes}</p><p className="text-sm text-muted-foreground">Pedidos del mes</p></CardContent></Card>
+            <Card className="border-border"><CardContent className="p-4"><p className="text-lg font-semibold">{meta ? formatPrice(Number(meta.comision_ganada || 0)) : "—"}</p><p className="text-sm text-muted-foreground">Comisión ganada</p></CardContent></Card>
           </div>
         </div>
       )}

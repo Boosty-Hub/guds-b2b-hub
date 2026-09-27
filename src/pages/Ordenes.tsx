@@ -32,17 +32,24 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Link } from "react-router-dom";
-import { Plus, Search, Eye, Truck, Loader2, Package, CheckCircle, Clock, X, Users, ChevronRight, FileText } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { EstadoTransferencia, TIPO_TRANSF, fmtFechaHora } from "@/components/inventario/EstadoTransferencia";
+import { Plus, Eye, Loader2, X, Users, ChevronRight, FileText } from "lucide-react";
 import { supabase, Cliente, Producto } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { OdooBadge } from "@/components/OdooBadge";
+import { BarraLista } from "@/components/datos/BarraLista";
+import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
+import { FichaCampos } from "@/components/datos/FichaCampos";
+import { useColumnas } from "@/components/datos/columnas";
 
 interface OrdenDB {
   id: string;
   numero: string;
+  odoo_id?: number | null;   // orden de Odoo: estado y facturación se manejan en Odoo
   cliente_id: string;
   estado: string;
   subtotal: number;
@@ -100,7 +107,7 @@ const Ordenes = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [grouped, setGrouped] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
-  const toggleGroup = (k: string) => setOpenGroups((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggleGroup = (k: string) => setOpenGroups((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const [selectedOrder, setSelectedOrder] = useState<OrdenDB | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -109,6 +116,8 @@ const Ordenes = () => {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [facturaPorOrden, setFacturaPorOrden] = useState<Record<string, { id: string; numero: string }>>({});
   const [facturando, setFacturando] = useState(false);
+  const [despachos, setDespachos] = useState<{ id: string; numero: string; tipo: string; estado: string; fecha_programada: string | null; fecha_realizada: string | null; ubicacion_origen: string | null }[]>([]);
+  const [params, setParams] = useSearchParams();
 
   // New order form
   const [newOrder, setNewOrder] = useState({
@@ -129,6 +138,25 @@ const Ordenes = () => {
     fetchClientes();
     fetchProductos();
   }, []);
+
+  // Enlace directo a una orden (?orden=<id>), p. ej. desde una transferencia de Odoo
+  useEffect(() => {
+    const id = params.get("orden");
+    if (!id || ordenes.length === 0) return;
+    const o = ordenes.find((x) => x.id === id);
+    if (o) { setSelectedOrder(o); setIsDetailOpen(true); }
+    params.delete("orden");
+    setParams(params, { replace: true });
+  }, [ordenes, params, setParams]);
+
+  // Despachos de Odoo (transferencias) de la orden abierta
+  useEffect(() => {
+    setDespachos([]);
+    if (!selectedOrder?.odoo_id) return;
+    supabase.from("transferencias").select("id, numero, tipo, estado, fecha_programada, fecha_realizada, ubicacion_origen")
+      .eq("orden_id", selectedOrder.id).order("fecha_programada")
+      .then(({ data }) => setDespachos((data as typeof despachos | null) ?? []));
+  }, [selectedOrder?.id, selectedOrder?.odoo_id]);
 
   const fetchOrdenes = async () => {
     setLoading(true);
@@ -291,57 +319,71 @@ const Ordenes = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const pagination = usePagination(filteredOrdenes, 25);
+  const fechaOrden = (o: OrdenDB) => o.fecha_pedido || o.created_at;
+  const { ordenadas, orden, alternar } = useOrdenTabla(filteredOrdenes, {
+    numero: (o) => o.numero, cliente: (o) => o.cliente?.nombre_negocio, items: (o) => o.items?.length ?? 0,
+    total: (o) => Number(o.total || 0), estado: (o) => o.estado, fecha: (o) => fechaOrden(o), metodo: (o) => o.metodo_pago,
+  });
+  const pagination = usePagination(ordenadas, 50);
+  const exportar = () => exportarCSV("ordenes", ordenadas, [
+    { titulo: "Orden", valor: (o) => o.numero }, { titulo: "Origen", valor: (o) => (o.odoo_id ? "Odoo" : "GUDS") },
+    { titulo: "Cliente", valor: (o) => o.cliente?.nombre_negocio }, { titulo: "Items", valor: (o) => o.items?.length ?? 0 },
+    { titulo: "Total USD", valor: (o) => Number(o.total || 0) }, { titulo: "Estado", valor: (o) => statusConfig[o.estado]?.label || o.estado },
+    { titulo: "Fecha", valor: (o) => fechaOrden(o)?.slice(0, 10) }, { titulo: "Método de pago", valor: (o) => o.metodo_pago },
+    { titulo: "Vendedor (Odoo)", valor: (o) => o.vendedor_odoo },
+  ]);
 
   const grupos = useMemo(() => {
     const m = new Map<string, { key: string; nombre: string; orders: OrdenDB[]; total: number }>();
-    for (const o of filteredOrdenes) {
+    for (const o of ordenadas) {
       const key = o.cliente_id || "sin";
       const g = m.get(key) || { key, nombre: o.cliente?.nombre_negocio || "Sin cliente", orders: [], total: 0 };
       g.orders.push(o); g.total += Number(o.total || 0);
       m.set(key, g);
     }
     return [...m.values()].sort((a, b) => b.orders.length - a.orders.length);
-  }, [filteredOrdenes]);
+  }, [ordenadas]);
 
   const renderOrderRow = (orden: OrdenDB) => (
     <TableRow
       key={orden.id}
-      className="cursor-pointer hover:bg-muted/50"
+      className="cursor-pointer"
       onClick={() => { setSelectedOrder(orden); setIsDetailOpen(true); }}
     >
-      <TableCell className="font-medium text-primary">{orden.numero}</TableCell>
-      <TableCell className="font-medium">{orden.cliente?.nombre_negocio || 'N/A'}</TableCell>
-      <TableCell className="text-center">{orden.items?.length || 0}</TableCell>
-      <TableCell className="text-right font-semibold">{formatPrice(orden.total)}</TableCell>
-      <TableCell>
+      <TableCell className="whitespace-nowrap font-medium text-primary">
+        <span className="flex items-center gap-1.5">
+          {orden.numero}
+          {orden.odoo_id ? <OdooBadge /> : <Badge variant="outline" className="px-1 py-0 text-[10px]" title="Creado en GUDS · pendiente de enviar a Odoo">GUDS</Badge>}
+        </span>
+      </TableCell>
+      <TableCell className="font-medium">
+        <span className="block max-w-[260px] truncate" title={orden.cliente?.nombre_negocio || undefined}>{orden.cliente?.nombre_negocio || 'N/A'}</span>
+      </TableCell>
+      <TableCell className="text-right">{orden.items?.length || 0}</TableCell>
+      <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(orden.total)}</TableCell>
+      <TableCell className="whitespace-nowrap">
         <Badge variant={statusConfig[orden.estado]?.variant || "secondary"}>
           {statusConfig[orden.estado]?.label || orden.estado}
         </Badge>
       </TableCell>
-      <TableCell className="text-muted-foreground">{formatDate(orden.created_at)}</TableCell>
-      <TableCell className="text-muted-foreground capitalize">{orden.metodo_pago?.replace('_', ' ') || 'N/A'}</TableCell>
+      <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(fechaOrden(orden))}</TableCell>
+      <TableCell className="whitespace-nowrap capitalize text-muted-foreground">{orden.metodo_pago?.replace('_', ' ') || 'N/A'}</TableCell>
     </TableRow>
   );
 
   const orderTotal = newOrder.items.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
 
+  const cols = useColumnas("ordenes", [{ etiqueta: "Orden", fija: true }, { etiqueta: "Cliente" }, { etiqueta: "Items" }, { etiqueta: "Total" }, { etiqueta: "Estado" }, { etiqueta: "Fecha" }, { etiqueta: "Método Pago" }]);
   return (
     <MainLayout title="Órdenes">
-      {/* Header Actions */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 items-center gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input 
-              placeholder="Buscar por ID, cliente..." 
-              className="pl-9"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+      {cols.estilo}
+      <BarraLista
+        busqueda={searchTerm}
+        onBusqueda={setSearchTerm}
+        placeholder="Buscar por ID, cliente..."
+        filtros={
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-40">
+            <SelectTrigger className="h-8 w-40 text-[13px]">
               <SelectValue placeholder="Estado" />
             </SelectTrigger>
             <SelectContent>
@@ -354,40 +396,45 @@ const Ordenes = () => {
               <SelectItem value="cancelado">Cancelado</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div className="flex gap-2">
-          <Button variant={grouped ? "default" : "outline"} className="gap-2" onClick={() => setGrouped((g) => !g)}>
-            <Users className="h-4 w-4" />
-            {grouped ? "Agrupado por cliente" : "Agrupar por cliente"}
-          </Button>
-          <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Nueva Orden
-          </Button>
-        </div>
-      </div>
+        }
+        contador={loading ? undefined : `${filteredOrdenes.length} registros`}
+        acciones={
+          <>
+            {cols.selector}
+            <Button variant={grouped ? "default" : "outline"} size="sm" className="gap-1.5" onClick={() => setGrouped((g) => !g)}>
+              <Users className="h-3.5 w-3.5" />
+              {grouped ? "Agrupado por cliente" : "Agrupar por cliente"}
+            </Button>
+            <BotonExportar onClick={exportar} total={ordenadas.length} />
+            <Button size="sm" className="gap-1.5" onClick={() => setIsCreateOpen(true)}>
+              <Plus className="h-3.5 w-3.5" />
+              Nueva Orden
+            </Button>
+          </>
+        }
+      />
 
       {/* Orders Table */}
-      <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
+      <div className="overflow-hidden rounded-lg border border-border bg-card animate-fade-in">
         {loading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <div className="flex justify-center py-10">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : filteredOrdenes.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">
+          <div className="py-10 text-center text-sm text-muted-foreground">
             No se encontraron órdenes
           </div>
         ) : (
-          <Table>
+          <Table data-tabla="ordenes">
             <TableHeader>
               <TableRow>
-                <TableHead>Orden</TableHead>
-                <TableHead>Cliente</TableHead>
-                <TableHead className="text-center">Items</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Método Pago</TableHead>
+                <EncabezadoOrdenable clave="numero" orden={orden} onOrdenar={alternar}>Orden</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="cliente" orden={orden} onOrdenar={alternar}>Cliente</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="items" orden={orden} onOrdenar={alternar} alinear="derecha">Items</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="total" orden={orden} onOrdenar={alternar} alinear="derecha">Total</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="estado" orden={orden} onOrdenar={alternar}>Estado</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="fecha" orden={orden} onOrdenar={alternar}>Fecha</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="metodo" orden={orden} onOrdenar={alternar}>Método Pago</EncabezadoOrdenable>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -397,10 +444,10 @@ const Ordenes = () => {
                       <TableRow className="cursor-pointer bg-muted/40 hover:bg-muted" onClick={() => toggleGroup(g.key)}>
                         <TableCell colSpan={7}>
                           <div className="flex items-center gap-2 font-medium">
-                            <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", openGroups.has(g.key) && "rotate-90")} />
+                            <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 transition-transform", openGroups.has(g.key) && "rotate-90")} />
                             <span className="truncate">{g.nombre}</span>
-                            <Badge variant="secondary">{g.orders.length} órden{g.orders.length !== 1 ? "es" : ""}</Badge>
-                            <span className="ml-auto font-semibold text-primary">{formatPrice(g.total)}</span>
+                            <Badge variant="secondary" className="whitespace-nowrap px-1.5 py-0 text-[11px]">{g.orders.length} órden{g.orders.length !== 1 ? "es" : ""}</Badge>
+                            <span className="ml-auto whitespace-nowrap font-semibold text-primary">{formatPrice(g.total)}</span>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -413,7 +460,7 @@ const Ordenes = () => {
         )}
         {!loading && !grouped && <DataTablePagination pagination={pagination} />}
         {!loading && grouped && filteredOrdenes.length > 0 && (
-          <div className="border-t border-border px-4 py-2.5 text-sm text-muted-foreground">
+          <div className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
             {grupos.length} cliente{grupos.length !== 1 ? "s" : ""} · {filteredOrdenes.length} órdenes
           </div>
         )}
@@ -427,128 +474,69 @@ const Ordenes = () => {
           </SheetHeader>
           
           {selectedOrder && (
-            <div className="mt-6 space-y-6">
+            <div className="mt-3 space-y-3">
               {/* Cabecera */}
-              <div className="rounded-xl border bg-muted/40 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-2xl font-bold text-primary">{selectedOrder.numero}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {formatDate(selectedOrder.fecha_pedido || selectedOrder.created_at)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="flex items-center gap-2 text-base font-semibold text-primary">{selectedOrder.numero}{selectedOrder.odoo_id && <OdooBadge />}</p>
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <Badge variant={statusConfig[selectedOrder.estado]?.variant || "secondary"}>
                       {statusConfig[selectedOrder.estado]?.label || selectedOrder.estado}
                     </Badge>
                     {facturaPorOrden[selectedOrder.id] ? (
                       <Link to={`/admin/facturas/${facturaPorOrden[selectedOrder.id].id}`}>
-                        <Button variant="outline" size="sm" className="gap-1.5">
+                        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
                           <FileText className="h-3.5 w-3.5" /> {facturaPorOrden[selectedOrder.id].numero}
                         </Button>
                       </Link>
-                    ) : (
+                    ) : selectedOrder.odoo_id ? null : (
                       <Button
-                        variant="outline" size="sm" className="gap-1.5"
+                        variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs"
                         disabled={facturando || selectedOrder.estado === "cancelado"}
                         onClick={() => facturarOrden(selectedOrder.id)}
                       >
                         {facturando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />} Facturar
                       </Button>
                     )}
+                    {selectedOrder.comprobante_url && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1.5 px-2 text-xs"
+                        onClick={() => verComprobanteOrden(selectedOrder.comprobante_url!)}
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        Ver comprobante
+                      </Button>
+                    )}
                   </div>
                 </div>
-                <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Vendedor</p>
-                    <p className="font-medium">{selectedOrder.vendedor_odoo || '—'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Método de pago</p>
-                    <p className="font-medium capitalize">{selectedOrder.metodo_pago?.replace('_', ' ') || '—'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Moneda</p>
-                    <p className="font-medium">{selectedOrder.moneda_original || '—'}</p>
-                  </div>
-                  {selectedOrder.referencia_pago && (
-                    <div>
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Referencia</p>
-                      <p className="font-mono font-medium">{selectedOrder.referencia_pago}</p>
-                    </div>
-                  )}
-                </div>
-                {selectedOrder.comprobante_url && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="mt-4"
-                    onClick={() => verComprobanteOrden(selectedOrder.comprobante_url!)}
-                  >
-                    <Eye className="mr-2 h-4 w-4" />
-                    Ver comprobante
-                  </Button>
-                )}
+                <FichaCampos
+                  columnas={4}
+                  campos={[
+                    { label: "Fecha", valor: formatDate(selectedOrder.fecha_pedido || selectedOrder.created_at) },
+                    { label: "Vendedor", valor: selectedOrder.vendedor_odoo },
+                    { label: "Método de pago", valor: selectedOrder.metodo_pago ? <span className="capitalize">{selectedOrder.metodo_pago.replace('_', ' ')}</span> : null },
+                    { label: "Moneda", valor: selectedOrder.moneda_original },
+                    ...(selectedOrder.referencia_pago ? [{ label: "Referencia", valor: selectedOrder.referencia_pago, mono: true }] : []),
+                    { label: "Cliente", valor: selectedOrder.cliente?.nombre_negocio, ancho: 2 as const },
+                    { label: "Teléfono", valor: selectedOrder.cliente?.telefono },
+                    { label: "Ciudad", valor: selectedOrder.cliente?.ciudad },
+                    { label: "Dirección", valor: selectedOrder.cliente?.direccion, ancho: 3 as const },
+                  ]}
+                />
               </div>
 
-              {/* Cliente + Resumen */}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="rounded-xl border p-4">
-                  <h3 className="mb-2 font-semibold">Cliente</h3>
-                  <p className="font-medium">{selectedOrder.cliente?.nombre_negocio}</p>
-                  {selectedOrder.cliente?.direccion && (
-                    <p className="text-sm text-muted-foreground">{selectedOrder.cliente.direccion}</p>
-                  )}
-                  {selectedOrder.cliente?.ciudad && (
-                    <p className="text-sm text-muted-foreground">{selectedOrder.cliente.ciudad}</p>
-                  )}
-                  {selectedOrder.cliente?.telefono && (
-                    <p className="text-sm text-muted-foreground">Tel: {selectedOrder.cliente.telefono}</p>
-                  )}
-                </div>
-                <div className="rounded-xl border p-4">
-                  <h3 className="mb-2 font-semibold">Resumen</h3>
-                  <div className="space-y-1.5 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Subtotal</span>
-                      <span>{formatPrice(selectedOrder.subtotal)}</span>
-                    </div>
-                    {selectedOrder.impuesto > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Impuesto</span>
-                        <span>{formatPrice(selectedOrder.impuesto)}</span>
-                      </div>
-                    )}
-                    {selectedOrder.descuento > 0 && (
-                      <div className="flex justify-between text-green-600">
-                        <span>Descuento</span>
-                        <span>-{formatPrice(selectedOrder.descuento)}</span>
-                      </div>
-                    )}
-                    {selectedOrder.envio > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Envío</span>
-                        <span>{formatPrice(selectedOrder.envio)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between border-t pt-2 text-base font-bold">
-                      <span>Total</span>
-                      <span className="text-primary">{formatPrice(selectedOrder.total)}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Productos */}
+              {/* Productos + Resumen */}
               <div>
-                <h3 className="mb-2 font-semibold">Productos ({selectedOrder.items?.length || 0})</h3>
-                <div className="rounded-xl border">
+                <h3 className="mb-1.5 text-[13px] font-semibold">Productos ({selectedOrder.items?.length || 0})</h3>
+                <div className="overflow-hidden rounded-lg border">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Producto</TableHead>
-                        <TableHead className="text-center">Cant.</TableHead>
+                        <TableHead className="text-right">Cant.</TableHead>
                         <TableHead className="text-right">Precio</TableHead>
                         <TableHead className="text-right">Subtotal</TableHead>
                       </TableRow>
@@ -557,42 +545,106 @@ const Ordenes = () => {
                       {selectedOrder.items?.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell className="font-medium">
-                            <span className="mr-2">{item.producto?.imagen_emoji || '📦'}</span>
-                            {item.producto?.nombre || item.nombre_producto || 'Producto'}
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <span className="shrink-0">{item.producto?.imagen_emoji || '📦'}</span>
+                              <span className="max-w-[320px] truncate" title={item.producto?.nombre || item.nombre_producto || undefined}>{item.producto?.nombre || item.nombre_producto || 'Producto'}</span>
+                            </span>
                           </TableCell>
-                          <TableCell className="text-center">{item.cantidad}</TableCell>
-                          <TableCell className="text-right">{formatPrice(item.precio_unitario)}</TableCell>
-                          <TableCell className="text-right font-medium">{formatPrice(item.subtotal)}</TableCell>
+                          <TableCell className="whitespace-nowrap text-right">{item.cantidad}</TableCell>
+                          <TableCell className="whitespace-nowrap text-right">{formatPrice(item.precio_unitario)}</TableCell>
+                          <TableCell className="whitespace-nowrap text-right font-medium">{formatPrice(item.subtotal)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </div>
+                <div className="ml-auto mt-2 w-full max-w-xs space-y-0.5 rounded-lg border p-2.5 text-[13px] tabular-nums">
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Resumen</p>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span>{formatPrice(selectedOrder.subtotal)}</span>
+                  </div>
+                  {selectedOrder.impuesto > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Impuesto</span>
+                      <span>{formatPrice(selectedOrder.impuesto)}</span>
+                    </div>
+                  )}
+                  {selectedOrder.descuento > 0 && (
+                    <div className="flex justify-between text-green-600">
+                      <span>Descuento</span>
+                      <span>-{formatPrice(selectedOrder.descuento)}</span>
+                    </div>
+                  )}
+                  {selectedOrder.envio > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Envío</span>
+                      <span>{formatPrice(selectedOrder.envio)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between border-t pt-1 text-sm font-bold">
+                    <span>Total</span>
+                    <span className="text-primary">{formatPrice(selectedOrder.total)}</span>
+                  </div>
+                </div>
               </div>
 
-              {/* Cambiar estado */}
+              {!selectedOrder.odoo_id && (
+                <p className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[13px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                  Pedido creado en GUDS · pendiente de enviar a Odoo (se enviará cuando se active la sincronización).
+                </p>
+              )}
+              {/* Despachos en Odoo */}
+              {selectedOrder.odoo_id && (
+                <div>
+                  <h3 className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold">Despachos ({despachos.length}) <OdooBadge titulo="Transferencias de Odoo ligadas a esta orden" /></h3>
+                  {despachos.length === 0 ? (
+                    <p className="rounded-lg border border-border px-3 py-2 text-[13px] text-muted-foreground">Esta orden no tiene transferencias en Odoo.</p>
+                  ) : (
+                    <div className="divide-y divide-border rounded-lg border border-border">
+                      {despachos.map((d) => (
+                        <Link key={d.id} to={`/admin/transferencias/${d.id}`} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-1.5 text-[13px] hover:bg-muted/50">
+                          <span className="whitespace-nowrap font-mono font-medium text-primary">{d.numero}</span>
+                          <span className="min-w-0 truncate text-muted-foreground">{TIPO_TRANSF[d.tipo] ?? d.tipo} · {d.ubicacion_origen}</span>
+                          <span className="whitespace-nowrap text-xs text-muted-foreground">{d.estado === "hecha" ? `Realizada ${fmtFechaHora(d.fecha_realizada)}` : `Programada ${fmtFechaHora(d.fecha_programada)}`}</span>
+                          <span className="ml-auto"><EstadoTransferencia estado={d.estado} /></span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Cambiar estado (las órdenes de Odoo cambian de estado en Odoo) */}
+              {selectedOrder.odoo_id ? (
+                <p className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[13px] text-muted-foreground">
+                  <OdooBadge /> El estado y la facturación de esta orden se manejan en Odoo.
+                </p>
+              ) : (
               <div>
-                <h3 className="mb-2 font-semibold">Cambiar estado</h3>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <h3 className="mb-1.5 text-[13px] font-semibold">Cambiar estado</h3>
+                <div className="flex flex-wrap gap-1.5">
                   {['pendiente', 'confirmado', 'procesando', 'enviado', 'completado', 'cancelado'].map((status) => (
                     <Button
                       key={status}
                       variant={selectedOrder.estado === status ? "default" : "outline"}
                       size="sm"
+                      className="h-7 px-2.5 text-xs"
                       disabled={updatingStatus || selectedOrder.estado === status}
                       onClick={() => updateOrderStatus(selectedOrder.id, status)}
                     >
-                      {updatingStatus ? <Loader2 className="h-4 w-4 animate-spin" /> : statusConfig[status]?.label}
+                      {updatingStatus ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : statusConfig[status]?.label}
                     </Button>
                   ))}
                 </div>
               </div>
+              )}
 
               {/* Notas */}
               {selectedOrder.notas && (
                 <div>
-                  <h3 className="mb-2 font-semibold">Notas</h3>
-                  <p className="rounded-lg border bg-card p-3 text-sm text-muted-foreground">
+                  <h3 className="mb-1.5 text-[13px] font-semibold">Notas</h3>
+                  <p className="rounded-lg border bg-card px-3 py-2 text-[13px] text-muted-foreground">
                     {selectedOrder.notas}
                   </p>
                 </div>
@@ -655,6 +707,7 @@ const Ordenes = () => {
                     {productos.map((producto) => (
                       <SelectItem key={producto.id} value={producto.id}>
                         {producto.nombre} - {formatPrice(producto.en_oferta && producto.precio_oferta ? producto.precio_oferta : producto.precio_base)}
+                        {producto.controla_stock !== false ? ` · ${Math.floor(Number(producto.stock_disponible ?? producto.stock_actual ?? 0)).toLocaleString("es-VE")} disp.` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>

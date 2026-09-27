@@ -172,7 +172,7 @@ const PortalFavoritos = () => {
                 ? product.precio_oferta 
                 : product.precio_base;
               const quantity = getCartQuantity(product.id);
-              const inStock = product.stock_actual > 0;
+              const inStock = product.controla_stock === false || Number(product.stock_disponible ?? product.stock_actual) > 0;
 
               return (
                 <div

@@ -18,12 +18,14 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Search, Ticket, Percent, DollarSign, Loader2, Pencil, Trash2 } from "lucide-react";
+import { Plus, Loader2, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
 
 interface Cupon {
   id: string;
@@ -134,7 +136,7 @@ const Cupones = () => {
   const filtrados = cupones.filter((c) =>
     c.codigo.toLowerCase().includes(search.toLowerCase()) || (c.descripcion || "").toLowerCase().includes(search.toLowerCase()));
 
-  const pagination = usePagination(filtrados, 25);
+  const pagination = usePagination(filtrados, 50);
 
   const estadoBadge = (c: Cupon) => {
     if (vencido(c)) return <Badge variant="secondary">Vencido</Badge>;
@@ -145,40 +147,25 @@ const Cupones = () => {
 
   return (
     <MainLayout title="Cupones y Descuentos">
-      <div className="mb-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2"><Ticket className="h-5 w-5 text-primary" /></div>
-            <div><p className="text-2xl font-bold">{activos}</p><p className="text-sm text-muted-foreground">Cupones activos</p></div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-success/10 p-2"><Percent className="h-5 w-5 text-success" /></div>
-            <div><p className="text-2xl font-bold">{totalUsos}</p><p className="text-sm text-muted-foreground">Usos totales</p></div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-warning/10 p-2"><DollarSign className="h-5 w-5 text-warning" /></div>
-            <div><p className="text-2xl font-bold">{vencidos}</p><p className="text-sm text-muted-foreground">Cupones vencidos</p></div>
-          </div>
-        </div>
-      </div>
+      <KpiStrip items={[
+        { label: "Cupones activos", valor: activos, tono: "positivo" },
+        { label: "Usos totales", valor: totalUsos, tono: "primario" },
+        { label: "Cupones vencidos", valor: vencidos, tono: vencidos ? "alerta" : "normal" },
+      ]} />
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Buscar cupón..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <Button className="gap-2" onClick={openNew}><Plus className="h-4 w-4" /> Nuevo Cupón</Button>
-      </div>
+      <BarraLista
+        busqueda={search}
+        onBusqueda={setSearch}
+        placeholder="Buscar cupón..."
+        contador={`${filtrados.length} registros`}
+        acciones={<Button size="sm" className="gap-1.5" onClick={openNew}><Plus className="h-3.5 w-3.5" /> Nuevo Cupón</Button>}
+      />
 
-      <div className="rounded-xl border border-border bg-card shadow-sm">
+      <div className="rounded-lg border border-border bg-card">
         {loading ? (
-          <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+          <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
         ) : filtrados.length === 0 ? (
-          <div className="py-16 text-center text-muted-foreground">No hay cupones. Crea el primero con "Nuevo Cupón".</div>
+          <div className="py-8 text-center text-sm text-muted-foreground">No hay cupones. Crea el primero con "Nuevo Cupón".</div>
         ) : (
           <Table>
             <TableHeader>
@@ -197,18 +184,18 @@ const Cupones = () => {
             <TableBody>
               {pagination.pageItems.map((c) => (
                 <TableRow key={c.id} className="hover:bg-muted/50">
-                  <TableCell className="font-mono font-medium text-primary">{c.codigo}</TableCell>
-                  <TableCell className="text-muted-foreground max-w-[200px] truncate">{c.descripcion || "—"}</TableCell>
-                  <TableCell className="capitalize">{c.tipo}</TableCell>
-                  <TableCell className="text-right font-semibold">{c.tipo === "porcentaje" ? `${c.valor}%` : formatPrice(Number(c.valor))}</TableCell>
-                  <TableCell className="text-right text-muted-foreground">{Number(c.minimo_compra) > 0 ? formatPrice(Number(c.minimo_compra)) : "—"}</TableCell>
-                  <TableCell className="text-center tabular-nums">{c.usos_actuales}{c.usos_maximos != null ? ` / ${c.usos_maximos}` : ""}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">{c.fecha_fin ? `hasta ${c.fecha_fin}` : "sin vencimiento"}</TableCell>
-                  <TableCell>{estadoBadge(c)}</TableCell>
+                  <TableCell className="whitespace-nowrap font-mono text-xs font-medium text-primary">{c.codigo}</TableCell>
+                  <TableCell className="max-w-[260px] truncate text-muted-foreground" title={c.descripcion || undefined}>{c.descripcion || "—"}</TableCell>
+                  <TableCell className="whitespace-nowrap capitalize">{c.tipo}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-semibold">{c.tipo === "porcentaje" ? `${c.valor}%` : formatPrice(Number(c.valor))}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right text-muted-foreground">{Number(c.minimo_compra) > 0 ? formatPrice(Number(c.minimo_compra)) : "—"}</TableCell>
+                  <TableCell className="whitespace-nowrap text-center tabular-nums">{c.usos_actuales}{c.usos_maximos != null ? ` / ${c.usos_maximos}` : ""}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{c.fecha_fin ? `hasta ${c.fecha_fin}` : "sin vencimiento"}</TableCell>
+                  <TableCell className="whitespace-nowrap">{estadoBadge(c)}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(c)}><Pencil className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => setToDelete(c)}><Trash2 className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" aria-label="Editar" onClick={() => openEdit(c)}><Pencil className="h-3.5 w-3.5" /></Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" title="Eliminar" aria-label="Eliminar" onClick={() => setToDelete(c)}><Trash2 className="h-3.5 w-3.5" /></Button>
                     </div>
                   </TableCell>
                 </TableRow>

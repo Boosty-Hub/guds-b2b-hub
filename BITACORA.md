@@ -4,9 +4,67 @@ Registro de trabajo por sesión. La entrada más reciente va arriba. Cada entrad
 resume qué se ejecutó, qué cambió en base de datos (producción) y qué queda pendiente.
 
 - **Proyecto Supabase (prod):** `oyyxkbwtyxdpzsgarmim`
-- **Dev server local:** este repo corre en `http://localhost:8081` (el `:8080` lo ocupa otra app que apunta a otro proyecto Supabase).
-- **Regla Odoo:** solo lectura, nunca escribir. Los `scripts/sync-odoo-*.mjs` leen credenciales desde variables de entorno (`.env.local` + `ODOO_PG_*`, ambos fuera de git).
-- **Admin de prueba (QA):** `qa.admin@guds.test` / `GudsQA-2026!circuito` (cliente/vendedor QA: `qa.cliente@guds.test` / `qa.vendedor@guds.test`, misma password).
+- **Dev server local:** `http://localhost:8080` (`npm run dev`).
+- **Regla Odoo:** GUDS es espejo de Odoo (Odoo manda). Lectura por API (JSON-RPC) con el importador `supabase/functions/_shared/odoo-sync/`; la escritura (Fase 9b) solo crea registros marcados "(GUDS)" y **está prohibido borrar nada en Odoo**. Credenciales en `.env.local` (fuera de git) y en los secretos de la función edge `sync-odoo`.
+- **Cuentas de prueba (QA):** `qa.admin@guds.test`, `qa.cliente@guds.test`, `qa.vendedor@guds.test`. La clave se rotó el 2026-09-27 y vive solo en `.env.local` (`QA_PASSWORD`); **nunca escribir claves en este archivo: el repositorio es público**.
+
+---
+
+## 2026-09-27 · GUDS espejo de Odoo multiempresa (Fases 0–9a) · rediseño denso · buscador global · reportes · sincronización automática
+
+Trabajo de varios días en una misma línea. Detalle completo por fase en `docs/PLAN-ESPEJO-ODOO.md` y `docs/PLAN-REDISENO-DENSO.md`.
+
+### Espejo de Odoo multiempresa (Fases 0–8)
+- **Multiempresa** (GUDS SUPPLY = Odoo 1, QUIRUTEC = Odoo 3): `empresa_id` en todas las tablas de negocio, selector de empresa en el
+  header (GUDS / Quirutec / Ambas = solo consulta), header `x-empresa-id`, políticas RLS restrictivas por empresa, numeración por empresa,
+  marca Odoo (`OdooBadge`) en los campos que vienen de Odoo y no se editan en GUDS. Migraciones `20260927_fase17a…17c`.
+- **Importador nuevo por API** (`supabase/functions/_shared/odoo-sync/`, corre en Node y en Deno; CLI `scripts/importar-odoo.mjs`),
+  idempotente por `odoo_id`, con cuadre `scripts/cuadre-odoo.mjs` (68 controles). Reimportación limpia separada por empresa.
+- **Maestros, ventas/CxC, compras/CxP, inventario, tesorería** (Fases 3–7): clientes sin duplicados por RIF/nombre, productos con precio
+  base desde órdenes, facturas/NC/ND con aplicaciones, retenciones (IVA recibidas y emitidas, ISLR, municipal, IGTF), proveedores,
+  órdenes de compra, facturas y pagos de proveedor, antigüedad CxC/CxP, stock por almacén, lotes y vencimientos, transferencias,
+  consignación ligada a su cliente, bancos con saldo contable y extractos de Odoo. Migraciones `18a…18k`.
+- **Capa GUDS** (Fase 8): crédito abierto/límite (editable en GUDS, pendiente de enviar a Odoo), **stock comprometido** como Odoo
+  (disponible = existencia − entregas pendientes − pedidos GUDS), portal del cliente por empresa, contactos del cliente con acceso al
+  portal por clave temporal y cambio obligatorio, registro público por empresa. Migraciones `18l…18p`.
+
+### Rediseño denso tipo SAP + buscador global
+- Tablas compactas (fila 33 px, ≥ 20 filas visibles a 1440×900), franja de KPIs, barra única (pestañas + búsqueda + filtros + acciones),
+  fichas de detalle compactas, marco de 48 px, vista "cómoda" opcional. Ordenar por columna, exportar CSV y **columnas visibles** en
+  las listas principales. Portal del vendedor compacto.
+- **Buscador global** (Ctrl/⌘+K) en el header de administración y del vendedor: clientes, contactos, proveedores, productos, órdenes,
+  facturas/NC/ND, cobros, compras, retenciones, lotes, transferencias, almacenes, bancos, vendedores (`buscar_global`, 18q/18s).
+- **Rendimiento de RLS** (18r): las políticas llamaban `puede()`/`auth.uid()` fila por fila; envueltas en `(select …)` el buscador pasó
+  de 2,2 s a ~90 ms y todas las listas se aceleraron. Una prueba vigila que ninguna política nueva vuelva a hacerlo.
+
+### Reportes (`/admin/reportes`, 18t–18u)
+- Ventas (vendedor, categoría, cliente, producto, empresa, mes), cobranza (banco/caja, vendedor, cliente) e inventario/rotación con
+  días de cobertura. Cifras verificadas contra la suma directa de documentos (agosto: GUDS $213.715,83; Quirutec $180.832,37).
+- Hallazgo: en Odoo hay documentos que **no son venta** — saldos de apertura (diarios "Saldo Inicial", ~1.450) y notas de débito por
+  diferencia cambiaria en Bs con 0 en USD (493). El importador ahora guarda el diario (`facturas.diario_odoo`, `es_saldo_inicial`) y
+  marca como nota de débito lo emitido en diarios de ND.
+
+### Sincronización automática Odoo → GUDS (Fase 9a, 19a–19d)
+- Función edge **`sync-odoo`** con el mismo motor del importador, escribiendo por conexión directa a Postgres: ~60 s por corrida
+  (límite del plan gratuito: 150 s). **pg_cron**: cada 15 min de 07:00 a 19:45 (Caracas) de lunes a sábado + nocturna a las 02:00;
+  el secreto del job vive en Vault. **Guardia de lectura**: si Odoo devolviera datos incompletos, aborta antes de escribir.
+- Indicador "Odoo · hace X min" en el header con "Sincronizar ahora" (solo administración). La API key de Odoo vence a los 90 días.
+
+### Seguridad
+- Políticas RLS "todo permitido" cerradas (18g); funciones nuevas sin `EXECUTE` para `PUBLIC`/anónimo (19d).
+- Repositorio público: se quitaron del código el host/IP del Postgres de Odoo y la clave de QA de esta bitácora; la clave de las cuentas
+  QA se rotó.
+
+### Verificación
+- Pruebas de base `scripts/probar-multiempresa.mjs`: **74/74** (empresa, permisos, crédito, stock, portal, buscador, reportes, sync, RLS).
+- Cuadre con Odoo **68/68**. Playwright: recorrido de **76 pantallas** de administración en ambas empresas sin errores de consola/red,
+  portal del cliente 53/53, portal del vendedor 16/16, reportes 24/24, móvil 390 px sin desbordes.
+
+### Pendiente
+- **Fase 9b**: enviar a Odoo pedidos, clientes, contactos y límites de crédito creados en GUDS (marcados "(GUDS)"); se empieza con un
+  solo pedido de prueba revisado por el cliente. Prohibido borrar en Odoo.
+- Correo de autenticación (SMTP propio y `site_url`), correos reales de 16 vendedores, calidad de datos en Odoo (montos anómalos,
+  diarios que comparten cuenta contable) — ver tabla de flancos en `docs/PLAN-ESPEJO-ODOO.md`.
 
 ---
 

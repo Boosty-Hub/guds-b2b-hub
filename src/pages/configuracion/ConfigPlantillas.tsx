@@ -107,8 +107,8 @@ const ConfigPlantillas = () => {
     >
       <div className="space-y-6">
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Plantillas de Email</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Plantillas de Email</CardTitle>
             <CardDescription>Personaliza los emails que se envían a los clientes</CardDescription>
           </CardHeader>
           <CardContent>
@@ -149,8 +149,8 @@ const ConfigPlantillas = () => {
         </Card>
 
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Plantillas de Documentos</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Plantillas de Documentos</CardTitle>
             <CardDescription>Formatos para cotizaciones, facturas y otros documentos</CardDescription>
           </CardHeader>
           <CardContent>
@@ -191,8 +191,8 @@ const ConfigPlantillas = () => {
         </Card>
 
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Variables Disponibles</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Variables Disponibles</CardTitle>
             <CardDescription>Usa estas variables en tus plantillas para personalizar el contenido</CardDescription>
           </CardHeader>
           <CardContent>

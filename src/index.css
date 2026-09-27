@@ -24,6 +24,22 @@
   background-color: hsl(var(--muted-foreground) / 0.5);
 }
 
+/* Densidad de datos (Fase A del rediseño denso). Compacta por defecto; "cómoda" es opcional por usuario. */
+:root {
+  --celda-px: 0.5rem;
+  --celda-py: 0.3rem;
+  --celda-py-ctl: 0.125rem; /* celdas con botones o interruptores */
+  --encabezado-h: 2rem;
+  --tabla-fs: 0.8125rem;
+}
+html.densidad-comoda {
+  --celda-px: 1rem;
+  --celda-py: 0.75rem;
+  --celda-py-ctl: 0.5rem;
+  --encabezado-h: 2.75rem;
+  --tabla-fs: 0.875rem;
+}
+
 @layer base {
   :root {
     --background: 0 0% 98%;

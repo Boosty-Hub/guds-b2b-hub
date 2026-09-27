@@ -19,12 +19,17 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { useSearchParams } from "react-router-dom";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
+import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
 
-interface Orden { id: string; numero: string; total: number; estado: string; created_at: string; cliente?: { nombre_negocio: string } | null; }
+interface Orden { id: string; numero: string; total: number; estado: string; created_at: string; fecha_pedido: string | null; odoo_id: number | null; cliente?: { nombre_negocio: string } | null; }
 interface Cli { id: string; nombre_negocio: string; }
 interface TipoEmpaque { id: string; nombre: string; unidades: number; }
 interface ProductoEmp { id: string; tipo_empaque_id: string; precio_empaque: number; activo: boolean; tipo_empaque: TipoEmpaque | null; }
-interface Prod { id: string; nombre: string; precio_base: number; en_oferta: boolean | null; precio_oferta: number | null; producto_empaques?: ProductoEmp[]; }
+interface Prod { id: string; nombre: string; precio_base: number; en_oferta: boolean | null; precio_oferta: number | null; producto_empaques?: ProductoEmp[];
+  stock_disponible: number | null; controla_stock: boolean | null; }
 interface Linea { producto_id: string; tipo_empaque_id: string | null; nombre: string; empaque: string | null; precio: number; cantidad: number; }
 
 const estadoConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -48,15 +53,20 @@ const VendedorPedidos = () => {
   const [addProd, setAddProd] = useState("");
   const [pendingEmpaque, setPendingEmpaque] = useState<Prod | null>(null);
   const [saving, setSaving] = useState(false);
+  const [params] = useSearchParams();
+  const [q, setQ] = useState(params.get("q") || "");
+  const [estadoFiltro, setEstadoFiltro] = useState<"todos" | "abiertos">("todos");
+  // El buscador global abre esta página con ?q=
+  useEffect(() => { const v = params.get("q"); if (v !== null) setQ(v); }, [params]);
 
   const fetchData = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
     const [oRes, cRes, pRes] = await Promise.all([
-      supabase.from("ordenes").select("id, numero, total, estado, created_at, cliente:clientes(nombre_negocio)").order("created_at", { ascending: false }),
+      supabase.from("ordenes").select("id, numero, total, estado, created_at, fecha_pedido, odoo_id, cliente:clientes(nombre_negocio)").order("created_at", { ascending: false }),
       // Solo los clientes asignados a este vendedor
       supabase.from("clientes").select("id, nombre_negocio").eq("activo", true).eq("vendedor_asignado_id", user.id).order("nombre_negocio"),
-      supabase.from("productos").select("id, nombre, precio_base, en_oferta, precio_oferta, producto_empaques(id, tipo_empaque_id, precio_empaque, activo, tipo_empaque:tipos_empaque(id, nombre, unidades))").eq("activo", true).order("nombre"),
+      supabase.from("productos").select("id, nombre, precio_base, en_oferta, precio_oferta, stock_disponible, controla_stock, producto_empaques(id, tipo_empaque_id, precio_empaque, activo, tipo_empaque:tipos_empaque(id, nombre, unidades))").eq("activo", true).order("nombre"),
     ]);
     if (oRes.data) setOrdenes(oRes.data as unknown as Orden[]);
     if (cRes.data) setClientes(cRes.data as Cli[]);
@@ -104,7 +114,19 @@ const VendedorPedidos = () => {
     return [...prev, l];
   });
 
+  // No se vende por encima del disponible (existencia − comprometido en pedidos y entregas)
+  const unidadesDe = (p: Prod, tipoId: string | null) => Math.max(1, Number(p.producto_empaques?.find((e) => e.tipo_empaque_id === tipoId)?.tipo_empaque?.unidades ?? 1));
+  const cabe = (p: Prod, tipoId: string | null, extra: number) => {
+    if (p.controla_stock === false) return true;
+    const enPedido = lineas.filter((l) => l.producto_id === p.id).reduce((s, l) => s + l.cantidad * unidadesDe(p, l.tipo_empaque_id), 0);
+    const disp = Number(p.stock_disponible ?? 0);
+    if (enPedido + extra * unidadesDe(p, tipoId) <= disp) return true;
+    toast({ title: "Sin disponible suficiente", description: `De ${p.nombre} quedan ${Math.floor(disp)} unidades disponibles.`, variant: "destructive" });
+    return false;
+  };
+
   const agregarConEmpaque = async (p: Prod, emp: ProductoEmp | null) => {
+    if (!cabe(p, emp?.tipo_empaque_id || null, 1)) { setPendingEmpaque(null); setAddProd(""); return; }
     const baseFallback = p.en_oferta && p.precio_oferta ? Number(p.precio_oferta) : Number(p.precio_base);
     const precio = await precioEfectivo(p.id, emp?.tipo_empaque_id || null, emp ? Number(emp.precio_empaque) : baseFallback);
     pushLinea({
@@ -136,6 +158,8 @@ const VendedorPedidos = () => {
   const cambiarCant = (key: string, d: number) => setLineas((prev) => prev.flatMap((l) => {
     const k = l.producto_id + "|" + (l.tipo_empaque_id || "");
     if (k !== key) return [l];
+    const p = productos.find((x) => x.id === l.producto_id);
+    if (d > 0 && p && !cabe(p, l.tipo_empaque_id, d)) return [l];
     const n = l.cantidad + d; return n <= 0 ? [] : [{ ...l, cantidad: n }];
   }));
   const subtotal = lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
@@ -159,38 +183,58 @@ const VendedorPedidos = () => {
 
   const fmt = (s: string) => new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
-  const pagination = usePagination(ordenes, 25);
+  const ABIERTOS = ["pendiente", "confirmado", "procesando", "enviado", "en_camino"];
+  const texto = q.trim().toLowerCase();
+  const filtradas = ordenes.filter((o) => (estadoFiltro === "todos" || ABIERTOS.includes(o.estado)) &&
+    (!texto || o.numero.toLowerCase().includes(texto) || (o.cliente?.nombre_negocio || "").toLowerCase().includes(texto)));
+  const fechaDe = (o: Orden) => o.fecha_pedido || o.created_at;
+  const { ordenadas, orden, alternar } = useOrdenTabla(filtradas, {
+    numero: (o) => o.numero, cliente: (o) => o.cliente?.nombre_negocio, fecha: (o) => fechaDe(o), total: (o) => Number(o.total || 0), estado: (o) => o.estado,
+  });
+  const pagination = usePagination(ordenadas, 50);
+  const inicioMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+  const delMes = ordenes.filter((o) => fechaDe(o) >= inicioMes && o.estado !== "cancelado");
+  const abiertos = ordenes.filter((o) => ABIERTOS.includes(o.estado));
 
   return (
     <VendedorLayout title="Pedidos">
-      <div className="flex items-center justify-between mb-4">
-        <div><h2 className="text-lg font-semibold">Pedidos de mis clientes</h2><p className="text-sm text-muted-foreground">{ordenes.length} pedidos</p></div>
-        <Button className="bg-emerald-500 hover:bg-emerald-600" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1" />Nuevo Pedido</Button>
-      </div>
+      <KpiStrip items={[
+        { label: "Pedidos de mis clientes", valor: ordenes.length, tono: "primario", onClick: () => setEstadoFiltro("todos"), activo: estadoFiltro === "todos" },
+        { label: "En curso", valor: abiertos.length, tono: abiertos.length ? "alerta" : "normal", onClick: () => setEstadoFiltro("abiertos"), activo: estadoFiltro === "abiertos" },
+        { label: "Vendido este mes", valor: formatPrice(delMes.reduce((s, o) => s + Number(o.total || 0), 0)), detalle: `${delMes.length} pedidos`, tono: "positivo" },
+      ]} />
 
-      <div className="rounded-xl border border-border bg-card">
-        {loading ? <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-emerald-500" /></div>
-        : ordenes.length === 0 ? <div className="py-16 text-center text-muted-foreground">Aún no hay pedidos. Crea el primero con "Nuevo Pedido".</div>
+      <BarraLista busqueda={q} onBusqueda={setQ} placeholder="Buscar pedido o cliente..."
+        contador={loading ? undefined : `${filtradas.length} registros`}
+        acciones={<Button size="sm" className="gap-1.5 bg-emerald-500 hover:bg-emerald-600" onClick={() => setOpen(true)}><Plus className="h-3.5 w-3.5" />Nuevo Pedido</Button>} />
+
+      <div className="rounded-lg border border-border bg-card">
+        {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
+        : ordenes.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay pedidos. Crea el primero con "Nuevo Pedido".</div>
+        : filtradas.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Sin resultados{texto ? ` para "${q.trim()}"` : ""}</div>
         : (
           <Table>
             <TableHeader><TableRow>
-              <TableHead>Pedido</TableHead><TableHead>Cliente</TableHead><TableHead>Fecha</TableHead>
-              <TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead>
+              <EncabezadoOrdenable clave="numero" orden={orden} onOrdenar={alternar}>Pedido</EncabezadoOrdenable>
+              <EncabezadoOrdenable clave="cliente" orden={orden} onOrdenar={alternar}>Cliente</EncabezadoOrdenable>
+              <EncabezadoOrdenable clave="fecha" orden={orden} onOrdenar={alternar} className="hidden sm:table-cell">Fecha</EncabezadoOrdenable>
+              <EncabezadoOrdenable clave="total" orden={orden} onOrdenar={alternar} alinear="derecha">Total</EncabezadoOrdenable>
+              <EncabezadoOrdenable clave="estado" orden={orden} onOrdenar={alternar}>Estado</EncabezadoOrdenable>
             </TableRow></TableHeader>
             <TableBody>
               {pagination.pageItems.map((o) => (
-                <TableRow key={o.id} className="hover:bg-muted/50">
-                  <TableCell className="font-medium text-emerald-600">{o.numero}</TableCell>
-                  <TableCell>{o.cliente?.nombre_negocio || "—"}</TableCell>
-                  <TableCell className="text-muted-foreground">{fmt(o.created_at)}</TableCell>
-                  <TableCell className="text-right font-semibold">{formatPrice(Number(o.total))}</TableCell>
-                  <TableCell><Badge variant={estadoConfig[o.estado]?.variant || "outline"}>{estadoConfig[o.estado]?.label || o.estado}</Badge></TableCell>
+                <TableRow key={o.id}>
+                  <TableCell className="whitespace-nowrap font-medium text-emerald-600">{o.numero}</TableCell>
+                  <TableCell><span className="block max-w-[280px] truncate" title={o.cliente?.nombre_negocio || undefined}>{o.cliente?.nombre_negocio || "—"}</span></TableCell>
+                  <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">{fmt(fechaDe(o))}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(Number(o.total))}</TableCell>
+                  <TableCell className="whitespace-nowrap"><Badge variant={estadoConfig[o.estado]?.variant || "outline"}>{estadoConfig[o.estado]?.label || o.estado}</Badge></TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         )}
-        {!loading && ordenes.length > 0 && <DataTablePagination pagination={pagination} />}
+        {!loading && filtradas.length > 0 && <DataTablePagination pagination={pagination} />}
       </div>
 
       {/* Nuevo pedido */}
@@ -217,6 +261,7 @@ const VendedorPedidos = () => {
                     return (
                       <SelectItem key={p.id} value={p.id}>
                         {p.nombre} · {formatPrice(Number(p.precio_base))}{n > 1 ? ` · ${n} presentaciones` : ""}
+                        {p.controla_stock !== false ? ` · ${Math.floor(Number(p.stock_disponible ?? 0)).toLocaleString("es-VE")} disp.` : ""}
                       </SelectItem>
                     );
                   })}

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { useEmpresa } from "@/contexts/EmpresaContext";
 
 export interface Notification {
   id: string;
@@ -30,6 +31,8 @@ const NotificationsContext = createContext<NotificationsContextType | undefined>
  */
 export const NotificationsProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useAuth();
+  // Las notificaciones se filtran por empresa en la base: se recargan al cambiar de empresa.
+  const { version: versionEmpresa } = useEmpresa();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -50,7 +53,7 @@ export const NotificationsProvider = ({ children }: { children: ReactNode }) => 
       setNotifications(data as Notification[]);
       setUnreadCount(data.filter((n) => !n.leida).length);
     }
-  }, [user?.id]);
+  }, [user?.id, versionEmpresa]);
 
   useEffect(() => {
     if (!user?.id) {

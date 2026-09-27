@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { useEmpresa } from "@/contexts/EmpresaContext";
 import { supabase } from "@/lib/supabase";
 import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
 
@@ -24,6 +25,7 @@ export interface Categoria {
   activo: boolean;
   orden: number;
   productosCount: number;
+  odooId?: number | null;   // categoría de Odoo: el nombre se edita en Odoo
 }
 
 interface StoreConfigContextType {
@@ -50,10 +52,11 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Cargar datos desde Supabase al iniciar
+  // Banners son por empresa: se recargan al cambiar de empresa.
+  const { version: versionEmpresa } = useEmpresa();
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [versionEmpresa]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -95,6 +98,7 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
         activo: c.activo,
         orden: c.orden,
         productosCount: c.productos?.[0]?.count || 0,
+        odooId: c.odoo_id ?? null,
       })));
     }
     

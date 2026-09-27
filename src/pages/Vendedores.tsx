@@ -10,12 +10,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Loader2, UserPlus, Users, Wallet, UserX, Eye, EyeOff } from "lucide-react";
+import { Loader2, UserPlus, Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
 
 interface Vendedor {
   id: string; nombre: string; apellido: string | null; email: string; telefono: string | null; activo: boolean;
@@ -76,8 +78,8 @@ const Vendedores = () => {
 
   const filtrados = vendedores.filter((v) =>
     `${v.nombre} ${v.apellido || ""}`.toLowerCase().includes(search.toLowerCase()) || v.email.toLowerCase().includes(search.toLowerCase()));
-  const pagination = usePagination(filtrados, 25);
-  const pgSinAsignar = usePagination(sinAsignar, 25);
+  const pagination = usePagination(filtrados, 50);
+  const pgSinAsignar = usePagination(sinAsignar, 50);
 
   const toggleActivo = async (v: Vendedor) => {
     const { error } = await supabase.from("usuarios").update({ activo: !v.activo }).eq("id", v.id);
@@ -118,56 +120,72 @@ const Vendedores = () => {
   const toggleSeleccion = (id: string) => {
     setSeleccionSinAsignar((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
 
+  const [tab, setTab] = useState<string>("vendedores");
+  const pestanas = (
+    <TabsList>
+      <TabsTrigger value="vendedores">Vendedores ({vendedores.length})</TabsTrigger>
+      <TabsTrigger value="sin-asignar">Sin asignar ({sinAsignar.length})</TabsTrigger>
+    </TabsList>
+  );
+
   return (
     <MainLayout title="Vendedores">
-      <div className="mb-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2"><Users className="h-5 w-5 text-primary" /></div>
-            <div><p className="text-2xl font-bold">{vendedores.length}</p><p className="text-sm text-muted-foreground">Vendedores</p></div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-destructive/10 p-2"><Wallet className="h-5 w-5 text-destructive" /></div>
-            <div><p className="text-2xl font-bold">{formatPrice([...statsPorVendedor.values()].reduce((s, v) => s + v.saldo, 0))}</p><p className="text-sm text-muted-foreground">Cartera total gestionada</p></div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-warning/10 p-2"><UserX className="h-5 w-5 text-warning" /></div>
-            <div><p className="text-2xl font-bold">{sinAsignar.length}</p><p className="text-sm text-muted-foreground">Clientes sin vendedor</p></div>
-          </div>
-        </div>
-      </div>
+      <KpiStrip
+        items={[
+          { label: "Vendedores", valor: vendedores.length, tono: "primario" },
+          { label: "Cartera total gestionada", valor: formatPrice([...statsPorVendedor.values()].reduce((s, v) => s + v.saldo, 0)), tono: "negativo" },
+          { label: "Clientes sin vendedor", valor: sinAsignar.length, tono: "alerta" },
+        ]}
+      />
 
       {loading ? (
-        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
       ) : (
-        <Tabs defaultValue="vendedores">
-          <TabsList>
-            <TabsTrigger value="vendedores">Vendedores ({vendedores.length})</TabsTrigger>
-            <TabsTrigger value="sin-asignar">Sin asignar ({sinAsignar.length})</TabsTrigger>
-          </TabsList>
+        <Tabs value={tab} onValueChange={setTab}>
+          {/* Pestañas, búsqueda, filtros y acciones de la pestaña activa en una sola fila */}
+          {tab === "vendedores" ? (
+            <BarraLista
+              pestanas={pestanas}
+              busqueda={search}
+              onBusqueda={setSearch}
+              placeholder="Buscar vendedor..."
+              contador={`${filtrados.length} registros`}
+              acciones={
+                <Button size="sm" className="gap-1.5" onClick={() => setOpenNuevo(true)}><UserPlus className="h-3.5 w-3.5" /> Nuevo vendedor</Button>
+              }
+            />
+          ) : (
+            <BarraLista
+              pestanas={pestanas}
+              filtros={<p className="text-xs text-muted-foreground">Elegí clientes y asignalos a un vendedor.</p>}
+              contador={`${sinAsignar.length} registros`}
+              acciones={
+                <>
+                  <Select value={asignarMasivo} onValueChange={setAsignarMasivo}>
+                    <SelectTrigger className="h-8 w-56 text-[13px]"><SelectValue placeholder="Elegir vendedor" /></SelectTrigger>
+                    <SelectContent>
+                      {vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.nombre} {v.apellido || ""}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button size="sm" disabled={!asignarMasivo || seleccionSinAsignar.size === 0} onClick={asignarSeleccion}>
+                    Asignar ({seleccionSinAsignar.size})
+                  </Button>
+                </>
+              }
+            />
+          )}
 
-          <TabsContent value="vendedores" className="mt-4 space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="relative max-w-md flex-1">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Buscar vendedor..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
-              </div>
-              <Button className="gap-2" onClick={() => setOpenNuevo(true)}><UserPlus className="h-4 w-4" /> Nuevo vendedor</Button>
-            </div>
-            <div className="rounded-xl border border-border bg-card shadow-sm">
+          <TabsContent value="vendedores" className="mt-2">
+            <div className="rounded-lg border border-border bg-card">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Vendedor</TableHead><TableHead>Contacto</TableHead>
+                    <TableHead>Vendedor</TableHead><TableHead>Email</TableHead><TableHead>Teléfono</TableHead>
                     <TableHead className="text-center">Clientes</TableHead>
                     <TableHead className="text-right">Cartera</TableHead>
                     <TableHead className="text-center">Activo</TableHead>
@@ -176,15 +194,19 @@ const Vendedores = () => {
                 <TableBody>
                   {pagination.pageItems.map((v) => {
                     const st = statsPorVendedor.get(v.id) || { clientes: 0, saldo: 0 };
+                    const nombreCompleto = `${v.nombre} ${v.apellido || ""}`.trim();
                     return (
                       <TableRow key={v.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/vendedores/${v.id}`)}>
                         <TableCell>
-                          <p className="font-medium">{v.nombre} {v.apellido || ""}</p>
-                          <Badge variant="secondary" className="mt-1">Vendedor</Badge>
+                          <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+                            <span className="max-w-[260px] truncate font-medium" title={nombreCompleto}>{nombreCompleto}</span>
+                            <Badge variant="secondary">Vendedor</Badge>
+                          </div>
                         </TableCell>
-                        <TableCell className="text-muted-foreground">{v.email}{v.telefono ? ` · ${v.telefono}` : ""}</TableCell>
+                        <TableCell className="max-w-[260px] truncate whitespace-nowrap text-muted-foreground" title={v.email}>{v.email}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{v.telefono || "—"}</TableCell>
                         <TableCell className="text-center">{st.clientes}</TableCell>
-                        <TableCell className={`text-right font-semibold ${st.saldo > 0.009 ? "text-destructive" : ""}`}>{formatPrice(st.saldo)}</TableCell>
+                        <TableCell className={`whitespace-nowrap text-right font-semibold ${st.saldo > 0.009 ? "text-destructive" : ""}`}>{formatPrice(st.saldo)}</TableCell>
                         <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
                           <Switch checked={v.activo} onCheckedChange={() => toggleActivo(v)} />
                         </TableCell>
@@ -197,34 +219,25 @@ const Vendedores = () => {
             </div>
           </TabsContent>
 
-          <TabsContent value="sin-asignar" className="mt-4 space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-muted-foreground">Elegí clientes y asignalos a un vendedor.</p>
-              <div className="flex gap-2">
-                <Select value={asignarMasivo} onValueChange={setAsignarMasivo}>
-                  <SelectTrigger className="w-56"><SelectValue placeholder="Elegir vendedor" /></SelectTrigger>
-                  <SelectContent>
-                    {vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.nombre} {v.apellido || ""}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Button disabled={!asignarMasivo || seleccionSinAsignar.size === 0} onClick={asignarSeleccion}>
-                  Asignar ({seleccionSinAsignar.size})
-                </Button>
-              </div>
-            </div>
-            <div className="rounded-xl border border-border bg-card shadow-sm">
+          <TabsContent value="sin-asignar" className="mt-2">
+            <div className="rounded-lg border border-border bg-card">
               {sinAsignar.length === 0 ? (
-                <p className="p-8 text-center text-muted-foreground">Todos los clientes activos tienen vendedor asignado.</p>
+                <p className="p-6 text-center text-sm text-muted-foreground">Todos los clientes activos tienen vendedor asignado.</p>
               ) : (
                 <>
                   <Table>
-                    <TableHeader><TableRow><TableHead className="w-10"></TableHead><TableHead>Cliente</TableHead><TableHead className="text-right">Saldo</TableHead></TableRow></TableHeader>
+                    <TableHeader><TableRow><TableHead className="w-8"></TableHead><TableHead>Cliente</TableHead><TableHead className="text-right">Saldo</TableHead></TableRow></TableHeader>
                     <TableBody>
                       {pgSinAsignar.pageItems.map((c) => (
                         <TableRow key={c.id}>
                           <TableCell><input type="checkbox" checked={seleccionSinAsignar.has(c.id)} onChange={() => toggleSeleccion(c.id)} /></TableCell>
-                          <TableCell><p className="font-medium">{c.nombre_negocio}</p><p className="text-xs text-muted-foreground">{c.codigo}</p></TableCell>
-                          <TableCell className="text-right font-semibold">{formatPrice(saldoPorCliente[c.id] || 0)}</TableCell>
+                          <TableCell>
+                            <div className="flex min-w-0 items-center whitespace-nowrap">
+                              <span className="max-w-[260px] truncate font-medium" title={c.nombre_negocio}>{c.nombre_negocio}</span>
+                              {c.codigo && <span className="ml-1.5 text-xs text-muted-foreground">{c.codigo}</span>}
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(saldoPorCliente[c.id] || 0)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

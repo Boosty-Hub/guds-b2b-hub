@@ -2,32 +2,11 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard,
-  ShoppingCart,
-  Users,
-  Package,
-  Warehouse,
-  Boxes,
-  Tags,
-  CreditCard,
   Settings,
   LogOut,
-  Truck,
-  Ticket,
-  Image,
-  FolderOpen,
-  UserPlus,
-  HandCoins,
-  Landmark,
   ChevronDown,
   PanelLeftClose,
   PanelLeftOpen,
-  FileText,
-  FileMinus,
-  PackageCheck,
-  Receipt,
-  UserCog,
-  ListChecks,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
@@ -39,58 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-type NavItem = { icon: React.ComponentType<{ className?: string }>; label: string; path: string; modulo: string };
-type NavSection = { title: string; items: NavItem[] };
-
-const navSections: NavSection[] = [
-  {
-    title: "Principal",
-    items: [{ icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard", modulo: "dashboard" }],
-  },
-  {
-    title: "Ventas",
-    items: [
-      { icon: ShoppingCart, label: "Órdenes", path: "/admin/ordenes", modulo: "ordenes" },
-      { icon: Users, label: "Clientes", path: "/admin/clientes", modulo: "clientes" },
-      { icon: UserCog, label: "Vendedores", path: "/admin/vendedores", modulo: "usuarios" },
-      { icon: UserPlus, label: "Registros", path: "/admin/registros", modulo: "registros" },
-    ],
-  },
-  {
-    title: "Catálogo",
-    items: [
-      { icon: Package, label: "Productos", path: "/admin/productos", modulo: "productos" },
-      { icon: FolderOpen, label: "Categorías", path: "/admin/categorias", modulo: "categorias" },
-      { icon: Tags, label: "Precios", path: "/admin/precios", modulo: "precios" },
-      { icon: Ticket, label: "Cupones", path: "/admin/cupones", modulo: "cupones" },
-      { icon: Image, label: "Banners", path: "/admin/banners", modulo: "banners" },
-    ],
-  },
-  {
-    title: "Inventario",
-    items: [
-      { icon: Warehouse, label: "Inventario", path: "/admin/inventario", modulo: "inventario" },
-      { icon: Boxes, label: "Almacenes", path: "/admin/almacenes", modulo: "inventario" },
-      { icon: PackageCheck, label: "Consignación", path: "/admin/consignacion", modulo: "inventario" },
-    ],
-  },
-  {
-    title: "Finanzas",
-    items: [
-      { icon: CreditCard, label: "Cuentas", path: "/admin/cuentas", modulo: "cuentas" },
-      { icon: HandCoins, label: "Cuentas por Cobrar", path: "/admin/cuentas-por-cobrar", modulo: "cuentas" },
-      { icon: FileText, label: "Facturas", path: "/admin/facturas", modulo: "cuentas" },
-      { icon: FileMinus, label: "Notas de Crédito", path: "/admin/notas-credito", modulo: "cuentas" },
-      { icon: Receipt, label: "Retenciones", path: "/admin/retenciones", modulo: "cuentas" },
-      { icon: Landmark, label: "Bancos", path: "/admin/bancos", modulo: "bancos" },
-      { icon: ListChecks, label: "Conciliación", path: "/admin/conciliacion", modulo: "bancos" },
-    ],
-  },
-  {
-    title: "Logística",
-    items: [{ icon: Truck, label: "Delivery", path: "/admin/delivery", modulo: "delivery" }],
-  },
-];
+import { navSections, type NavItem } from "./navegacion";
 
 const SECTIONS_KEY = "guds-sb-sections";
 
@@ -127,8 +55,8 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
 
   const linkClass = (isActive: boolean) =>
     cn(
-      "flex items-center rounded-lg text-sm font-medium transition-all duration-200",
-      collapsed ? "justify-center h-10 w-10 mx-auto" : "gap-3 px-3 py-2.5",
+      "flex items-center rounded-md text-[13px] font-medium transition-all duration-200",
+      collapsed ? "justify-center h-8 w-8 mx-auto" : "gap-2.5 px-2.5 py-1.5",
       isActive
         ? "bg-primary text-primary-foreground shadow-sm"
         : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -137,7 +65,7 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
   const renderItem = (item: NavItem) => {
     const link = (
       <NavLink key={item.path} to={item.path} className={({ isActive }) => linkClass(isActive)}>
-        <item.icon className="h-5 w-5 shrink-0" />
+        <item.icon className="h-4 w-4 shrink-0" />
         {!collapsed && <span className="truncate">{item.label}</span>}
       </NavLink>
     );
@@ -155,43 +83,43 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
       <aside
         className={cn(
           "fixed left-0 top-0 z-40 h-screen border-r border-sidebar-border bg-sidebar transition-[width] duration-200",
-          collapsed ? "w-16" : "w-64"
+          collapsed ? "w-14" : "w-56"
         )}
       >
         <div className="flex h-full flex-col">
           {/* Logo + toggle */}
           <div
             className={cn(
-              "flex h-20 items-center border-b border-sidebar-border",
+              "flex h-12 items-center border-b border-sidebar-border",
               collapsed ? "justify-center px-2" : "justify-between px-4"
             )}
           >
-            {!collapsed && <Logo className="h-12 text-primary" />}
+            {!collapsed && <Logo className="h-8 text-primary" />}
             <button
               onClick={onToggleCollapse}
-              className="rounded-lg p-2 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              className="rounded-md p-1.5 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               title={collapsed ? "Expandir menú" : "Colapsar menú"}
             >
-              {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+              {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
             </button>
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto px-3 py-4">
+          <nav className="flex-1 overflow-y-auto px-2 py-2">
             {sections.map((section, idx) => (
-              <div key={section.title} className={cn(idx > 0 && (collapsed ? "mt-2 border-t border-sidebar-border pt-2" : "mt-4"))}>
+              <div key={section.title} className={cn(idx > 0 && (collapsed ? "mt-1.5 border-t border-sidebar-border pt-1.5" : "mt-2"))}>
                 {collapsed ? (
-                  <div className="space-y-1">{section.items.map(renderItem)}</div>
+                  <div className="space-y-0.5">{section.items.map(renderItem)}</div>
                 ) : (
                   <>
                     <button
                       onClick={() => toggleSection(section.title)}
-                      className="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-sidebar-foreground/60 transition-colors hover:text-sidebar-foreground"
+                      className="flex w-full items-center justify-between rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/60 transition-colors hover:text-sidebar-foreground"
                     >
                       {section.title}
                       <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !isSectionOpen(section.title) && "-rotate-90")} />
                     </button>
-                    {isSectionOpen(section.title) && <div className="mt-1 space-y-1">{section.items.map(renderItem)}</div>}
+                    {isSectionOpen(section.title) && <div className="mt-0.5 space-y-0.5">{section.items.map(renderItem)}</div>}
                   </>
                 )}
               </div>
@@ -199,14 +127,14 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
           </nav>
 
           {/* Bottom section */}
-          <div className="border-t border-sidebar-border p-3">
+          <div className="border-t border-sidebar-border p-2">
             {(() => {
               const cfg = (
                 <NavLink
                   to="/admin/configuracion"
                   className={({ isActive }) => linkClass(isActive)}
                 >
-                  <Settings className="h-5 w-5 shrink-0" />
+                  <Settings className="h-4 w-4 shrink-0" />
                   {!collapsed && "Configuración"}
                 </NavLink>
               );
@@ -214,11 +142,11 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
                 <button
                   onClick={handleLogout}
                   className={cn(
-                    "mt-1 flex items-center rounded-lg text-sm font-medium text-sidebar-foreground transition-all duration-200 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                    collapsed ? "justify-center h-10 w-10 mx-auto" : "w-full gap-3 px-3 py-2.5"
+                    "mt-0.5 flex items-center rounded-md text-[13px] font-medium text-sidebar-foreground transition-all duration-200 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    collapsed ? "justify-center h-8 w-8 mx-auto" : "w-full gap-2.5 px-2.5 py-1.5"
                   )}
                 >
-                  <LogOut className="h-5 w-5 shrink-0" />
+                  <LogOut className="h-4 w-4 shrink-0" />
                   {!collapsed && "Cerrar Sesión"}
                 </button>
               );

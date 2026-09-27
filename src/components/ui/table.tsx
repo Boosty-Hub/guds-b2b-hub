@@ -11,11 +11,11 @@ const Table = React.forwardRef<
   // accesible al pie cuando la tabla es muy grande. Se puede sobreescribir con containerClassName.
   <div
     className={cn(
-      "relative w-full overflow-auto table-scroll max-h-[calc(100vh-20rem)] rounded-[inherit]",
+      "relative w-full overflow-auto table-scroll max-h-[calc(100vh-13rem)] rounded-[inherit]",
       containerClassName,
     )}
   >
-    <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
+    <table ref={ref} className={cn("w-full caption-bottom text-[length:var(--tabla-fs)] tabular-nums", className)} {...props} />
   </div>
 ));
 Table.displayName = "Table";
@@ -23,7 +23,7 @@ Table.displayName = "Table";
 const TableHeader = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(
   ({ className, ...props }, ref) => (
     // Header sticky global: queda fijo arriba al hacer scroll vertical de la tabla.
-    <thead ref={ref} className={cn("[&_tr]:border-b sticky top-0 z-10 bg-card", className)} {...props} />
+    <thead ref={ref} className={cn("[&_tr]:border-b sticky top-0 z-10 bg-muted/60 backdrop-blur supports-[backdrop-filter]:bg-muted/80", className)} {...props} />
   ),
 );
 TableHeader.displayName = "TableHeader";
@@ -46,7 +46,7 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTML
   ({ className, ...props }, ref) => (
     <tr
       ref={ref}
-      className={cn("border-b transition-colors data-[state=selected]:bg-muted hover:bg-muted/50", className)}
+      className={cn("border-b transition-colors even:bg-muted/20 data-[state=selected]:bg-muted hover:bg-muted/50", className)}
       {...props}
     />
   ),
@@ -58,7 +58,7 @@ const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<
     <th
       ref={ref}
       className={cn(
-        "h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0",
+        "h-[var(--encabezado-h)] whitespace-nowrap px-[var(--celda-px)] text-left align-middle text-xs font-semibold text-muted-foreground [&:has([role=checkbox])]:pr-0",
         className,
       )}
       {...props}
@@ -69,7 +69,7 @@ TableHead.displayName = "TableHead";
 
 const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<HTMLTableCellElement>>(
   ({ className, ...props }, ref) => (
-    <td ref={ref} className={cn("p-4 align-middle [&:has([role=checkbox])]:pr-0", className)} {...props} />
+    <td ref={ref} className={cn("px-[var(--celda-px)] py-[var(--celda-py)] align-middle has-[button]:py-[var(--celda-py-ctl)] has-[[role=switch]]:py-[var(--celda-py-ctl)] [&:has([role=checkbox])]:pr-0", className)} {...props} />
   ),
 );
 TableCell.displayName = "TableCell";

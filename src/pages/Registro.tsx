@@ -33,7 +33,7 @@ import {
   Paperclip,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Logo } from "@/components/Logo";
@@ -93,6 +93,16 @@ const Registro = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [rifDocumento, setRifDocumento] = useState<File | null>(null);
+  // Empresa con la que quiere comprar (GUDS SUPPLY o QUIRUTEC)
+  const [empresas, setEmpresas] = useState<{ id: string; nombre: string; nombre_corto: string }[]>([]);
+  const [empresaId, setEmpresaId] = useState<string>("");
+  useEffect(() => {
+    supabase.from("empresas").select("id, nombre, nombre_corto").eq("activo", true).order("orden").then(({ data }) => {
+      const lista = (data as { id: string; nombre: string; nombre_corto: string }[] | null) ?? [];
+      setEmpresas(lista);
+      if (lista.length === 1) setEmpresaId(lista[0].id);
+    });
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { addRegistro } = useAuth();
   const { toast } = useToast();
@@ -169,12 +179,18 @@ const Registro = () => {
       return;
     }
 
+    if (empresas.length > 1 && !empresaId) {
+      toast({ title: "Elige la empresa", description: "Indica con qué empresa quieres comprar.", variant: "destructive" });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const rifDocumentoPath = await uploadRifDocumento(rifDocumento);
       const ok = await addRegistro({
         nombreNegocio: data.nombreNegocio,
         tipoNegocio: data.tipoNegocio,
+        empresaId: empresaId || null,
         rif: data.rif,
         contribuyenteEspecial: data.contribuyenteEspecial,
         rifDocumentoPath,
@@ -303,6 +319,18 @@ const Registro = () => {
                         </FormItem>
                       )}
                     />
+
+                    {empresas.length > 1 && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">¿Con qué empresa quieres comprar? *</label>
+                        <Select value={empresaId} onValueChange={setEmpresaId}>
+                          <SelectTrigger aria-label="Empresa"><SelectValue placeholder="Selecciona la empresa" /></SelectTrigger>
+                          <SelectContent>
+                            {empresas.map((e) => <SelectItem key={e.id} value={e.id}>{e.nombre}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
 
                     <FormField
                       control={form.control}

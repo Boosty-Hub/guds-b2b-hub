@@ -7,3 +7,5 @@ verify_jwt = false
 
 [functions.conciliar-ia-sugerir]
 verify_jwt = false
+[functions.sync-odoo]
+verify_jwt = false

@@ -15,9 +15,11 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { OdooBadge } from "@/components/OdooBadge";
 
 interface Vendedor { id: string; nombre: string; apellido: string | null; email: string; telefono: string | null; activo: boolean; }
-interface ClienteRow { id: string; nombre_negocio: string; codigo: string | null; saldo: number; }
+// vendedor_odoo: el vendedor viene de Odoo y se cambia allá
+interface ClienteRow { id: string; nombre_negocio: string; codigo: string | null; saldo: number; vendedor_odoo: string | null; odoo_id: number | null; }
 
 const VendedorDetalle = () => {
   const { vendedorId } = useParams();
@@ -41,7 +43,7 @@ const VendedorDetalle = () => {
     setOtrosVendedores(((vends as Vendedor[]) ?? []).filter((x) => x.id !== vendedorId));
     if (v) setForm({ nombre: v.nombre, apellido: v.apellido || "", telefono: v.telefono || "" });
 
-    const { data: clis } = await supabase.from("clientes").select("id, nombre_negocio, codigo").eq("vendedor_asignado_id", vendedorId).eq("activo", true).order("nombre_negocio");
+    const { data: clis } = await supabase.from("clientes").select("id, nombre_negocio, codigo, vendedor_odoo, odoo_id").eq("vendedor_asignado_id", vendedorId).eq("activo", true).order("nombre_negocio");
     const ids = (clis ?? []).map((c: { id: string }) => c.id);
     const saldoMap: Record<string, number> = {};
     if (ids.length) {
@@ -50,12 +52,12 @@ const VendedorDetalle = () => {
         saldoMap[f.cliente_id] = (saldoMap[f.cliente_id] || 0) + Number(f.saldo_usd);
       }
     }
-    setClientes(((clis as { id: string; nombre_negocio: string; codigo: string | null }[]) ?? []).map((c) => ({ ...c, saldo: saldoMap[c.id] || 0 })));
+    setClientes(((clis as Omit<ClienteRow, "saldo">[]) ?? []).map((c) => ({ ...c, saldo: saldoMap[c.id] || 0 })));
     setLoading(false);
   };
   useEffect(() => { cargar(); }, [vendedorId]);
 
-  const pagination = usePagination(clientes, 25);
+  const pagination = usePagination(clientes, 50);
   const totalSaldo = clientes.reduce((s, c) => s + c.saldo, 0);
 
   const reasignar = async (clienteId: string, nuevoVendedorId: string | null) => {
@@ -82,8 +84,8 @@ const VendedorDetalle = () => {
   };
 
   const volver = (
-    <Button variant="ghost" className="mb-4 gap-2" onClick={() => navigate("/admin/vendedores")}>
-      <ArrowLeft className="h-4 w-4" /> Volver a vendedores
+    <Button variant="ghost" size="sm" className="mb-2 h-7 gap-1.5 px-2 text-xs" onClick={() => navigate("/admin/vendedores")}>
+      <ArrowLeft className="h-3.5 w-3.5" /> Volver a vendedores
     </Button>
   );
 
@@ -96,11 +98,11 @@ const VendedorDetalle = () => {
     <MainLayout title={vendedor.nombre}>
       {volver}
 
-      <div className="mb-6 flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-3 flex flex-col gap-4 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Avatar className="h-14 w-14"><AvatarFallback className="bg-primary/10 text-lg text-primary">{iniciales}</AvatarFallback></Avatar>
           <div>
-            <h1 className="text-xl font-bold">{vendedor.nombre} {vendedor.apellido || ""}</h1>
+            <h1 className="text-base font-semibold">{vendedor.nombre} {vendedor.apellido || ""}</h1>
             <p className="text-sm text-muted-foreground">{vendedor.email}{vendedor.telefono ? ` · ${vendedor.telefono}` : ""}</p>
           </div>
         </div>
@@ -110,13 +112,13 @@ const VendedorDetalle = () => {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5">
-          <h2 className="font-semibold">Clientes asignados ({clientes.length})</h2>
+      <div className="rounded-lg border border-border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/30 px-3 py-1.5">
+          <h2 className="text-[13px] font-semibold">Clientes asignados ({clientes.length})</h2>
           <p className="text-sm text-muted-foreground">Saldo total: <span className="font-semibold text-foreground">{formatPrice(totalSaldo)}</span></p>
         </div>
         {clientes.length === 0 ? (
-          <p className="p-8 text-center text-muted-foreground">Sin clientes asignados.</p>
+          <p className="p-5 text-center text-sm text-muted-foreground">Sin clientes asignados.</p>
         ) : (
           <>
             <Table>
@@ -124,9 +126,14 @@ const VendedorDetalle = () => {
               <TableBody>
                 {pagination.pageItems.map((c) => (
                   <TableRow key={c.id}>
-                    <TableCell><p className="font-medium">{c.nombre_negocio}</p><p className="text-xs text-muted-foreground">{c.codigo}</p></TableCell>
+                    <TableCell><p className="flex items-center gap-1.5 font-medium">{c.nombre_negocio}{c.odoo_id && <OdooBadge />}</p><p className="text-xs text-muted-foreground">{c.codigo}</p></TableCell>
                     <TableCell className={`text-right font-semibold ${c.saldo > 0.009 ? "text-destructive" : ""}`}>{formatPrice(c.saldo)}</TableCell>
                     <TableCell>
+                      {c.odoo_id && c.vendedor_odoo ? (
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          Asignado en Odoo <OdooBadge titulo="El vendedor de este cliente viene de Odoo · se cambia en Odoo" />
+                        </span>
+                      ) : (
                       <Select onValueChange={(v) => reasignar(c.id, v === "sin-asignar" ? null : v)}>
                         <SelectTrigger><SelectValue placeholder="Elegir vendedor..." /></SelectTrigger>
                         <SelectContent>
@@ -134,6 +141,7 @@ const VendedorDetalle = () => {
                           {otrosVendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.nombre} {v.apellido || ""}</SelectItem>)}
                         </SelectContent>
                       </Select>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -79,15 +79,15 @@ const VendedorRetenciones = () => {
 
           {clienteSel && (
             <>
-              <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-                <h2 className="mb-3 font-semibold">Declarar retención — {clienteSel.nombre_negocio}</h2>
+              <div className="rounded-lg border border-border bg-card p-3">
+                <h2 className="mb-2 text-[13px] font-semibold">Declarar retención — {clienteSel.nombre_negocio}</h2>
                 <DeclararRetencionForm clienteId={clienteSel.id} facturas={facturas} onDeclarado={() => cargarDetalle(clienteId)} />
               </div>
 
-              <div className="rounded-xl border border-border bg-card shadow-sm">
-                <div className="border-b border-border p-5"><h2 className="font-semibold">Retenciones de {clienteSel.nombre_negocio} ({retenciones.length})</h2></div>
+              <div className="rounded-lg border border-border bg-card">
+                <div className="border-b border-border bg-muted/30 px-3 py-1.5"><h2 className="text-[13px] font-semibold">Retenciones de {clienteSel.nombre_negocio} ({retenciones.length})</h2></div>
                 {retenciones.length === 0 ? (
-                  <p className="p-8 text-center text-muted-foreground">Sin retenciones todavía.</p>
+                  <p className="p-5 text-center text-sm text-muted-foreground">Sin retenciones todavía.</p>
                 ) : (
                   <Table>
                     <TableHeader>

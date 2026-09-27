@@ -168,7 +168,7 @@ const ConfigEmpaques = () => {
     setIsEditOpen(true);
   };
 
-  const pagination = usePagination(empaques, 25);
+  const pagination = usePagination(empaques, 50);
 
   return (
     <ConfiguracionLayout 
@@ -176,7 +176,7 @@ const ConfigEmpaques = () => {
       description="Define los tipos de empaque disponibles para los productos"
     >
       <Card className="border-border">
-        <CardHeader>
+        <CardHeader className="p-3 pb-2">
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="flex items-center gap-2">

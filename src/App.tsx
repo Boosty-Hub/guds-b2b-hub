@@ -1,4 +1,5 @@
 import { Toaster } from "@/components/ui/toaster";
+import { CambioClaveObligatorio } from "@/components/CambioClaveObligatorio";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -9,6 +10,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { PermissionsProvider } from "@/contexts/PermissionsContext";
 import { NotificationsProvider } from "@/contexts/NotificationsContext";
 import { ControlTowerProvider } from "@/contexts/ControlTowerContext";
+import { EmpresaProvider, RemontarPorEmpresa } from "@/contexts/EmpresaContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { BoostySupport } from "@/components/support/BoostySupport";
@@ -23,6 +25,7 @@ import PoliticasPrivacidad from "./pages/PoliticasPrivacidad";
 
 // Admin Pages
 import Index from "./pages/Index";
+import Reportes from "./pages/Reportes";
 import Ordenes from "./pages/Ordenes";
 import Clientes from "./pages/Clientes";
 import Productos from "./pages/Productos";
@@ -40,6 +43,14 @@ import FacturaDetalle from "./pages/FacturaDetalle";
 import NotasCredito from "./pages/NotasCredito";
 import Retenciones from "./pages/Retenciones";
 import Bancos from "./pages/Bancos";
+import Proveedores from "./pages/Proveedores";
+import ProveedorDetalle from "./pages/ProveedorDetalle";
+import CuentasPorPagar from "./pages/CuentasPorPagar";
+import FacturaProveedorDetalle from "./pages/FacturaProveedorDetalle";
+import Transferencias from "./pages/Transferencias";
+import TransferenciaDetalle from "./pages/TransferenciaDetalle";
+import LoteDetalle from "./pages/LoteDetalle";
+import BancoDetalle from "./pages/BancoDetalle";
 import Conciliacion from "./pages/Conciliacion";
 import Perfil from "./pages/Perfil";
 import NotFound from "./pages/NotFound";
@@ -119,6 +130,7 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
+      <EmpresaProvider>
       <PermissionsProvider>
       <NotificationsProvider>
       <ControlTowerProvider>
@@ -126,10 +138,12 @@ const App = () => (
         <StoreConfigProvider>
           <TooltipProvider>
             <Toaster />
+            <CambioClaveObligatorio />
             <Sonner />
             <BoostySupport />
             <BrowserRouter>
               <ErrorBoundary>
+              <RemontarPorEmpresa>
               <Routes>
                 {/* Public Pages */}
                 <Route path="/" element={<Landing />} />
@@ -141,6 +155,7 @@ const App = () => (
                 
                 {/* Admin Dashboard - Solo admin */}
                 <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><Index /></ProtectedRoute>} />
+                <Route path="/admin/reportes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="reportes"><Reportes /></ProtectedRoute>} />
                 <Route path="/admin/ordenes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="ordenes"><Ordenes /></ProtectedRoute>} />
                 <Route path="/admin/clientes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="clientes"><Clientes /></ProtectedRoute>} />
                 <Route path="/admin/clientes/:clienteId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="clientes"><ClienteDetalle /></ProtectedRoute>} />
@@ -151,6 +166,9 @@ const App = () => (
                 <Route path="/admin/inventario" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><Inventario /></ProtectedRoute>} />
                 <Route path="/admin/almacenes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><Almacenes /></ProtectedRoute>} />
                 <Route path="/admin/almacenes/:almacenId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><AlmacenDetalle /></ProtectedRoute>} />
+                <Route path="/admin/transferencias" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><Transferencias /></ProtectedRoute>} />
+                <Route path="/admin/transferencias/:transferenciaId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><TransferenciaDetalle /></ProtectedRoute>} />
+                <Route path="/admin/lotes/:loteId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><LoteDetalle /></ProtectedRoute>} />
                 <Route path="/admin/consignacion" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><Consignacion /></ProtectedRoute>} />
                 <Route path="/admin/precios" element={<ProtectedRoute allowedRoles={["admin"]} modulo="precios"><Precios /></ProtectedRoute>} />
                 <Route path="/admin/cuentas" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Cuentas /></ProtectedRoute>} />
@@ -162,6 +180,11 @@ const App = () => (
                 <Route path="/admin/notas-credito" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><NotasCredito /></ProtectedRoute>} />
                 <Route path="/admin/retenciones" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Retenciones /></ProtectedRoute>} />
                 <Route path="/admin/bancos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="bancos"><Bancos /></ProtectedRoute>} />
+                <Route path="/admin/bancos/:bancoId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="bancos"><BancoDetalle /></ProtectedRoute>} />
+                <Route path="/admin/proveedores" element={<ProtectedRoute allowedRoles={["admin"]} modulo="compras"><Proveedores /></ProtectedRoute>} />
+                <Route path="/admin/proveedores/:proveedorId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="compras"><ProveedorDetalle /></ProtectedRoute>} />
+                <Route path="/admin/cuentas-por-pagar" element={<ProtectedRoute allowedRoles={["admin"]} modulo="compras"><CuentasPorPagar /></ProtectedRoute>} />
+                <Route path="/admin/facturas-proveedor/:facturaId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="compras"><FacturaProveedorDetalle /></ProtectedRoute>} />
                 <Route path="/admin/conciliacion" element={<ProtectedRoute allowedRoles={["admin"]} modulo="bancos"><Conciliacion /></ProtectedRoute>} />
                 <Route path="/admin/cupones" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cupones"><Cupones /></ProtectedRoute>} />
                 <Route path="/admin/banners" element={<ProtectedRoute allowedRoles={["admin"]} modulo="banners"><Banners /></ProtectedRoute>} />
@@ -222,6 +245,7 @@ const App = () => (
           
           <Route path="*" element={<NotFound />} />
               </Routes>
+              </RemontarPorEmpresa>
               </ErrorBoundary>
             </BrowserRouter>
           </TooltipProvider>
@@ -230,6 +254,7 @@ const App = () => (
       </ControlTowerProvider>
       </NotificationsProvider>
       </PermissionsProvider>
+      </EmpresaProvider>
     </AuthProvider>
   </QueryClientProvider>
 );

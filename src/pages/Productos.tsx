@@ -1,3 +1,4 @@
+import { useSearchParams } from "react-router-dom";
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import * as XLSX from 'xlsx';
 import { cn } from "@/lib/utils";
@@ -47,7 +48,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Search, Package, Edit, Trash2, Loader2, MoreHorizontal, CheckSquare, XSquare, Tag, FolderOpen, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, ChevronRight } from "lucide-react";
+import { Plus, Package, Edit, Trash2, Loader2, MoreHorizontal, CheckSquare, XSquare, Tag, FolderOpen, Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, ChevronRight } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownMenu,
@@ -62,6 +63,11 @@ import { useToast } from "@/hooks/use-toast";
 import { ProductImagesInput } from "@/components/products/ProductImagesInput";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { OdooBadge } from "@/components/OdooBadge";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
+import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
+import { useColumnas } from "@/components/datos/columnas";
 
 interface ProductoConRelaciones extends Producto {
   categoria: Categoria | null;
@@ -90,11 +96,12 @@ const Productos = () => {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [empaques, setEmpaques] = useState<TipoEmpaque[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [params] = useSearchParams();
+  const [searchTerm, setSearchTerm] = useState(params.get("q") ?? "");
   const [categoriaFilter, setCategoriaFilter] = useState("all");
   const [grouped, setGrouped] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
-  const toggleGroup = (k: string) => setOpenGroups((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggleGroup = (k: string) => setOpenGroups((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -221,27 +228,33 @@ const Productos = () => {
 
   const handleEdit = async () => {
     if (!selectedProducto || !formData.nombre) return;
-    if (formData.empaques_ids.length === 0) {
+    // Los productos de Odoo no traen empaques: en ellos el empaque es opcional (se vende por su unidad)
+    if (formData.empaques_ids.length === 0 && !selectedProducto.odoo_id) {
       toast({ title: "Error", description: "Selecciona al menos un tipo de empaque", variant: "destructive" });
       return;
     }
 
+    // Producto de Odoo: SKU, nombre, categoría, unidad y stock vienen de Odoo; el precio también si tuvo ventas.
+    const esOdoo = !!selectedProducto.odoo_id;
+    const propios = {
+      descripcion: formData.descripcion || null,
+      costo: formData.costo || null,
+      stock_minimo: formData.stock_minimo,
+      imagen_url: imagenes[0] || null,
+      imagenes,
+      activo: formData.activo,
+      destacado: formData.destacado,
+      ...(!esOdoo || selectedProducto.precio_origen !== 'odoo' ? { precio_base: formData.precio_base } : {}),
+    };
     const { error } = await supabase
       .from('productos')
-      .update({
+      .update(esOdoo ? propios : {
+        ...propios,
         sku: formData.sku,
         nombre: formData.nombre,
-        descripcion: formData.descripcion || null,
         categoria_id: formData.categoria_id || null,
         unidad: empaques.find(e => e.id === formData.empaques_ids[0])?.nombre || 'Unidad',
-        precio_base: formData.precio_base,
-        costo: formData.costo || null,
         stock_actual: formData.stock_actual,
-        stock_minimo: formData.stock_minimo,
-        imagen_url: imagenes[0] || null,
-        imagenes,
-        activo: formData.activo,
-        destacado: formData.destacado,
       })
       .eq('id', selectedProducto.id);
 
@@ -275,7 +288,7 @@ const Productos = () => {
       .eq('id', selectedProducto.id);
 
     if (error) {
-      toast({ title: "Error", description: "No se puede eliminar el producto", variant: "destructive" });
+      toast({ title: "No se puede eliminar", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Producto Eliminado", description: `"${selectedProducto.nombre}" ha sido eliminado`, variant: "destructive" });
     }
@@ -301,10 +314,10 @@ const Productos = () => {
       .eq('id', productoId);
 
     if (error) {
-      toast({ title: "Error", description: "No se pudo actualizar el estado", variant: "destructive" });
+      toast({ title: "No se pudo actualizar", description: error.message, variant: "destructive" });
     } else {
-      // Actualizar localmente para evitar refetch
-      setProductos(prev => prev.map(p => p.id === productoId ? { ...p, activo } : p));
+      // Actualizar localmente para evitar refetch (en productos de Odoo "desactivar" = ocultar de la tienda)
+      setProductos(prev => prev.map(p => p.id === productoId ? { ...p, activo, oculto_tienda: p.odoo_id ? !activo : p.oculto_tienda } : p));
       toast({ title: activo ? "Producto Activado" : "Producto Desactivado" });
     }
   };
@@ -332,7 +345,7 @@ const Productos = () => {
       .in('id', selectedIds);
 
     if (error) {
-      toast({ title: "Error", description: "No se pudieron activar los productos", variant: "destructive" });
+      toast({ title: "No se pudieron activar", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Productos Activados", description: `${selectedIds.length} productos han sido activados` });
       setSelectedIds([]);
@@ -347,7 +360,7 @@ const Productos = () => {
       .in('id', selectedIds);
 
     if (error) {
-      toast({ title: "Error", description: "No se pudieron desactivar los productos", variant: "destructive" });
+      toast({ title: "No se pudieron desactivar", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Productos Desactivados", description: `${selectedIds.length} productos han sido desactivados` });
       setSelectedIds([]);
@@ -362,7 +375,7 @@ const Productos = () => {
       .in('id', selectedIds);
 
     if (error) {
-      toast({ title: "Error", description: "No se pudieron eliminar los productos", variant: "destructive" });
+      toast({ title: "No se pudieron eliminar", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Productos Eliminados", description: `${selectedIds.length} productos han sido eliminados`, variant: "destructive" });
       setSelectedIds([]);
@@ -378,7 +391,7 @@ const Productos = () => {
       .in('id', selectedIds);
 
     if (error) {
-      toast({ title: "Error", description: "No se pudo cambiar la categoría", variant: "destructive" });
+      toast({ title: "No se pudo cambiar la categoría", description: error.message, variant: "destructive" });
     } else {
       const catName = categorias.find(c => c.id === bulkCategoryId)?.nombre || "Sin categoría";
       toast({ title: "Categoría Actualizada", description: `${selectedIds.length} productos movidos a "${catName}"` });
@@ -396,7 +409,7 @@ const Productos = () => {
       .in('id', selectedIds);
 
     if (error) {
-      toast({ title: "Error", description: "No se pudieron actualizar los productos", variant: "destructive" });
+      toast({ title: "No se pudieron actualizar", description: error.message, variant: "destructive" });
     } else {
       toast({ title: featured ? "Productos Destacados" : "Destacados Removidos", description: `${selectedIds.length} productos actualizados` });
       setSelectedIds([]);
@@ -849,17 +862,27 @@ const Productos = () => {
     return matchSearch && matchCategoria;
   });
 
-  const pagination = usePagination(filteredProductos, 25);
+  const { ordenadas: productosOrdenados, orden, alternar } = useOrdenTabla(filteredProductos, {
+    sku: (p) => p.sku, nombre: (p) => p.nombre, categoria: (p) => p.categoria?.nombre, precio: (p) => Number(p.precio_base || 0),
+    stock: (p) => Number(p.stock_disponible ?? p.stock_actual ?? 0),
+  });
+  const pagination = usePagination(productosOrdenados, 50);
+  const exportarProductos = () => exportarCSV("productos", productosOrdenados, [
+    { titulo: "SKU", valor: (p) => p.sku }, { titulo: "Producto", valor: (p) => p.nombre }, { titulo: "Categoría", valor: (p) => p.categoria?.nombre },
+    { titulo: "Precio base", valor: (p) => Number(p.precio_base || 0) }, { titulo: "Existencia", valor: (p) => p.stock_actual },
+    { titulo: "Disponible", valor: (p) => p.stock_disponible ?? p.stock_actual }, { titulo: "Activo", valor: (p) => (p.activo ? "Sí" : "No") },
+  ]);
 
   const stats = {
     total: productos.length,
-    disponibles: productos.filter(p => p.stock_actual > p.stock_minimo).length,
-    bajoStock: productos.filter(p => p.stock_actual > 0 && p.stock_actual <= p.stock_minimo).length,
-    agotados: productos.filter(p => p.stock_actual === 0).length,
+    disponibles: productos.filter(p => p.controla_stock !== false && p.stock_actual > p.stock_minimo).length,
+    bajoStock: productos.filter(p => p.activo && p.controla_stock !== false && p.stock_actual > 0 && p.stock_actual <= p.stock_minimo).length,
+    agotados: productos.filter(p => p.activo && p.controla_stock !== false && p.stock_actual <= 0).length,
   };
 
   const getStatus = (p: Producto) => {
-    if (p.stock_actual === 0) return { label: "Agotado", variant: "destructive" as const };
+    if (p.controla_stock === false) return { label: "Servicio", variant: "outline" as const };
+    if (p.stock_actual <= 0) return { label: "Agotado", variant: "destructive" as const };
     if (p.stock_actual <= p.stock_minimo) return { label: "Bajo Stock", variant: "secondary" as const };
     return { label: "Disponible", variant: "default" as const };
   };
@@ -887,20 +910,21 @@ const Productos = () => {
         <TableCell onClick={(e) => e.stopPropagation()}>
           <Checkbox checked={isSelected} onCheckedChange={() => toggleSelect(producto.id)} />
         </TableCell>
-        <TableCell className="font-mono text-sm text-primary">{producto.sku}</TableCell>
+        <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{producto.sku}</TableCell>
         <TableCell className="font-medium">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
             {producto.imagen_url ? (
-              <img src={producto.imagen_url} alt={producto.nombre} className="h-8 w-8 rounded object-cover" />
+              <img src={producto.imagen_url} alt={producto.nombre} className="h-5 w-5 shrink-0 rounded object-cover" />
             ) : (
-              <Package className="h-5 w-5 text-muted-foreground" />
+              <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
             )}
-            {producto.nombre}
+            <span className="max-w-[260px] truncate" title={producto.nombre}>{producto.nombre}</span>
+            {producto.odoo_id && <OdooBadge />}
           </div>
         </TableCell>
-        <TableCell className="text-muted-foreground">{producto.categoria?.nombre || 'Sin Categoría'}</TableCell>
+        <TableCell className="max-w-[180px] truncate whitespace-nowrap text-muted-foreground" title={producto.categoria?.nombre || 'Sin Categoría'}>{producto.categoria?.nombre || 'Sin Categoría'}</TableCell>
         <TableCell>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex gap-1 whitespace-nowrap">
             {producto.producto_empaques && producto.producto_empaques.length > 0 ? (
               producto.producto_empaques.map(pe => (
                 <Badge key={pe.id} variant="outline" className="text-xs">
@@ -915,97 +939,59 @@ const Productos = () => {
             )}
           </div>
         </TableCell>
-        <TableCell className="text-right font-semibold">{formatPrice(producto.precio_base)}</TableCell>
+        <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(producto.precio_base)}</TableCell>
         <TableCell className="text-center">{producto.stock_actual}</TableCell>
-        <TableCell>
+        <TableCell className="whitespace-nowrap">
           <Badge variant={status.variant}>{status.label}</Badge>
         </TableCell>
         <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
           <Switch checked={producto.activo} onCheckedChange={(checked) => handleToggleActivo(producto.id, checked)} />
         </TableCell>
         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-          <div className="flex justify-end gap-1">
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditSheet(producto)}>
-              <Edit className="h-4 w-4" />
+          <div className="flex justify-end gap-0.5">
+            <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" onClick={() => openEditSheet(producto)}>
+              <Edit className="h-3.5 w-3.5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-destructive hover:text-destructive"
-              onClick={() => { setSelectedProducto(producto); setIsDeleteOpen(true); }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+            {!producto.odoo_id && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-destructive hover:text-destructive"
+                title="Eliminar"
+                onClick={() => { setSelectedProducto(producto); setIsDeleteOpen(true); }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
           </div>
         </TableCell>
       </TableRow>
     );
   };
 
+  const cols = useColumnas("productos", [{ etiqueta: "", fija: true }, { etiqueta: "SKU" }, { etiqueta: "Producto", fija: true }, { etiqueta: "Categoría" }, { etiqueta: "Empaque" }, { etiqueta: "Precio Base" }, { etiqueta: "Stock" }, { etiqueta: "Estado" }, { etiqueta: "Activo" }, { etiqueta: "Acciones", fija: true }]);
   return (
     <MainLayout title="Productos">
+      {cols.estilo}
       {/* Stats */}
-      <div className="mb-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2">
-              <Package className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.total}</p>
-              <p className="text-sm text-muted-foreground">Total Productos</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-success/10 p-2">
-              <Package className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.disponibles}</p>
-              <p className="text-sm text-muted-foreground">Disponibles</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-warning/10 p-2">
-              <Package className="h-5 w-5 text-warning" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.bajoStock}</p>
-              <p className="text-sm text-muted-foreground">Bajo Stock</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-destructive/10 p-2">
-              <Package className="h-5 w-5 text-destructive" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.agotados}</p>
-              <p className="text-sm text-muted-foreground">Agotados</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <KpiStrip
+        items={[
+          { label: "Total Productos", valor: stats.total, tono: "primario" },
+          { label: "Disponibles", valor: stats.disponibles, tono: "positivo" },
+          { label: "Bajo Stock", valor: stats.bajoStock, tono: "alerta" },
+          { label: "Agotados", valor: stats.agotados, tono: "negativo" },
+        ]}
+      />
 
       {/* Header Actions */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 items-center gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input 
-              placeholder="Buscar producto..." 
-              className="pl-9" 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+      <BarraLista
+        busqueda={searchTerm}
+        onBusqueda={setSearchTerm}
+        placeholder="Buscar producto..."
+        contador={`${filteredProductos.length} registros`}
+        filtros={
           <Select value={categoriaFilter} onValueChange={setCategoriaFilter}>
-            <SelectTrigger className="w-40">
+            <SelectTrigger className="h-8 w-44 text-[13px]">
               <SelectValue placeholder="Categoría" />
             </SelectTrigger>
             <SelectContent>
@@ -1015,74 +1001,78 @@ const Productos = () => {
               ))}
             </SelectContent>
           </Select>
-        </div>
-        <div className="flex gap-2">
-          <Button variant={grouped ? "default" : "outline"} className="gap-2" onClick={() => setGrouped((g) => !g)}>
-            <FolderOpen className="h-4 w-4" />
-            {grouped ? "Agrupado por categoría" : "Agrupar por categoría"}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                <Upload className="h-4 w-4" />
-                Importar
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={downloadTemplate}>
-                <Download className="h-4 w-4 mr-2" />
-                Descargar Plantilla
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" />
-                Subir Archivo (CSV/Excel)
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,.txt,.xlsx,.xls"
-              className="hidden"
-              onChange={handleFileUpload}
-            />
-          </DropdownMenu>
-          <Button className="gap-2" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
-            <Plus className="h-4 w-4" />
-            Nuevo Producto
-          </Button>
-        </div>
-      </div>
+        }
+        acciones={
+          <>
+            {cols.selector}
+            <BotonExportar onClick={exportarProductos} total={productosOrdenados.length} />
+            <Button size="sm" variant={grouped ? "default" : "outline"} className="gap-1.5" onClick={() => setGrouped((g) => !g)}>
+              <FolderOpen className="h-3.5 w-3.5" />
+              {grouped ? "Agrupado por categoría" : "Agrupar por categoría"}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="gap-1.5">
+                  <Upload className="h-3.5 w-3.5" />
+                  Importar
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={downloadTemplate}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Descargar Plantilla
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  Subir Archivo (CSV/Excel)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.txt,.xlsx,.xls"
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+            </DropdownMenu>
+            <Button size="sm" className="gap-1.5" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
+              <Plus className="h-3.5 w-3.5" />
+              Nuevo Producto
+            </Button>
+          </>
+        }
+      />
 
       {/* Bulk Actions Bar */}
       {selectedIds.length > 0 && (
-        <div className="mb-4 flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 p-3">
-          <div className="flex items-center gap-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-1.5">
+          <div className="flex items-center gap-2">
             <Checkbox
               checked={selectedIds.length === filteredProductos.length}
               onCheckedChange={toggleSelectAll}
             />
-            <span className="font-medium text-primary">
+            <span className="text-[13px] font-medium text-primary">
               {selectedIds.length} producto{selectedIds.length > 1 ? 's' : ''} seleccionado{selectedIds.length > 1 ? 's' : ''}
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" className="gap-2" onClick={handleBulkActivate}>
-              <CheckSquare className="h-4 w-4" />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={handleBulkActivate}>
+              <CheckSquare className="h-3.5 w-3.5" />
               Activar
             </Button>
-            <Button size="sm" variant="outline" className="gap-2" onClick={handleBulkDeactivate}>
-              <XSquare className="h-4 w-4" />
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={handleBulkDeactivate}>
+              <XSquare className="h-3.5 w-3.5" />
               Desactivar
             </Button>
-            <Button size="sm" variant="outline" className="gap-2" onClick={() => setIsBulkCategoryOpen(true)}>
-              <FolderOpen className="h-4 w-4" />
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => setIsBulkCategoryOpen(true)}>
+              <FolderOpen className="h-3.5 w-3.5" />
               Cambiar Categoría
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline" className="gap-2">
-                  <MoreHorizontal className="h-4 w-4" />
+                <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs">
+                  <MoreHorizontal className="h-3.5 w-3.5" />
                   Más
                 </Button>
               </DropdownMenuTrigger>
@@ -1105,7 +1095,7 @@ const Productos = () => {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedIds([])}>
               Cancelar
             </Button>
           </div>
@@ -1113,27 +1103,27 @@ const Productos = () => {
       )}
 
       {/* Products Table */}
-      <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
+      <div className="rounded-lg border border-border bg-card animate-fade-in">
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : (
-          <Table>
+          <Table data-tabla="productos">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12">
+                <TableHead className="w-8">
                   <Checkbox
                     checked={selectedIds.length === filteredProductos.length && filteredProductos.length > 0}
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead>Producto</TableHead>
-                <TableHead>Categoría</TableHead>
+                <EncabezadoOrdenable clave="sku" orden={orden} onOrdenar={alternar}>SKU</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="nombre" orden={orden} onOrdenar={alternar}>Producto</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="categoria" orden={orden} onOrdenar={alternar}>Categoría</EncabezadoOrdenable>
                 <TableHead>Empaque</TableHead>
-                <TableHead className="text-right">Precio Base</TableHead>
-                <TableHead className="text-center">Stock</TableHead>
+                <EncabezadoOrdenable clave="precio" orden={orden} onOrdenar={alternar} alinear="derecha">Precio Base</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="stock" orden={orden} onOrdenar={alternar} alinear="centro">Stock</EncabezadoOrdenable>
                 <TableHead>Estado</TableHead>
                 <TableHead className="text-center">Activo</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
@@ -1145,8 +1135,8 @@ const Productos = () => {
                     <Fragment key={g.key}>
                       <TableRow className="cursor-pointer bg-muted/40 hover:bg-muted" onClick={() => toggleGroup(g.key)}>
                         <TableCell colSpan={10}>
-                          <div className="flex items-center gap-2 font-medium">
-                            <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", openGroups.has(g.key) && "rotate-90")} />
+                          <div className="flex items-center gap-2 whitespace-nowrap font-medium">
+                            <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 transition-transform", openGroups.has(g.key) && "rotate-90")} />
                             <span className="truncate">{g.nombre}</span>
                             <Badge variant="secondary">{g.items.length} producto{g.items.length !== 1 ? "s" : ""}</Badge>
                           </div>
@@ -1161,7 +1151,7 @@ const Productos = () => {
         )}
         {!loading && !grouped && <DataTablePagination pagination={pagination} />}
         {!loading && grouped && filteredProductos.length > 0 && (
-          <div className="border-t border-border px-4 py-2.5 text-sm text-muted-foreground">
+          <div className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
             {grupos.length} categoría{grupos.length !== 1 ? "s" : ""} · {filteredProductos.length} productos
           </div>
         )}
@@ -1322,7 +1312,12 @@ const Productos = () => {
       <Sheet open={isEditOpen} onOpenChange={setIsEditOpen}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           <SheetHeader>
-            <SheetTitle>Editar Producto</SheetTitle>
+            <SheetTitle className="flex items-center gap-2">Editar Producto {selectedProducto?.odoo_id && <OdooBadge />}</SheetTitle>
+            {selectedProducto?.odoo_id && (
+              <p className="text-xs text-muted-foreground">
+                Los campos con la marca Odoo se editan en Odoo. Aquí se administran imágenes, descripción, empaques, ofertas y visibilidad en la tienda.
+              </p>
+            )}
           </SheetHeader>
           <div className="grid gap-4 py-4">
             {/* Image Upload */}
@@ -1333,16 +1328,18 @@ const Productos = () => {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>SKU</Label>
+                <Label className="flex items-center gap-1.5">SKU {selectedProducto?.odoo_id && <OdooBadge />}</Label>
                 <Input
                   value={formData.sku}
+                  disabled={!!selectedProducto?.odoo_id}
                   onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Nombre *</Label>
+                <Label className="flex items-center gap-1.5">Nombre * {selectedProducto?.odoo_id && <OdooBadge />}</Label>
                 <Input
                   value={formData.nombre}
+                  disabled={!!selectedProducto?.odoo_id}
                   onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
                 />
               </div>
@@ -1357,8 +1354,8 @@ const Productos = () => {
             </div>
 
             <div className="space-y-2">
-              <Label>Categoría</Label>
-              <Select value={formData.categoria_id} onValueChange={(v) => setFormData({ ...formData, categoria_id: v })}>
+              <Label className="flex items-center gap-1.5">Categoría {selectedProducto?.odoo_id && <OdooBadge />}</Label>
+              <Select value={formData.categoria_id} disabled={!!selectedProducto?.odoo_id} onValueChange={(v) => setFormData({ ...formData, categoria_id: v })}>
                 <SelectTrigger>
                   <SelectValue placeholder="Sin categoría" />
                 </SelectTrigger>
@@ -1395,14 +1392,20 @@ const Productos = () => {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Precio Base *</Label>
+                <Label className="flex items-center gap-1.5">
+                  Precio Base * {selectedProducto?.precio_origen === 'odoo' && <OdooBadge titulo="Último precio de venta en Odoo · se actualiza desde Odoo" />}
+                </Label>
                 <Input
                   type="number"
                   step="0.01"
                   min="0"
                   value={formData.precio_base}
+                  disabled={!!selectedProducto?.odoo_id && selectedProducto.precio_origen === 'odoo'}
                   onChange={(e) => setFormData({ ...formData, precio_base: parseFloat(e.target.value) || 0 })}
                 />
+                {selectedProducto?.odoo_id && selectedProducto.precio_origen !== 'odoo' && (
+                  <p className="text-xs text-muted-foreground">Sin ventas en Odoo: el precio lo fija GUDS hasta que haya una venta en Odoo.</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Costo</Label>
@@ -1418,11 +1421,12 @@ const Productos = () => {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Stock Actual</Label>
+                <Label className="flex items-center gap-1.5">Stock Actual {selectedProducto?.odoo_id && <OdooBadge titulo="Stock de los almacenes propios en Odoo" />}</Label>
                 <Input
                   type="number"
                   min="0"
                   value={formData.stock_actual}
+                  disabled={!!selectedProducto?.odoo_id}
                   onChange={(e) => setFormData({ ...formData, stock_actual: parseInt(e.target.value) || 0 })}
                 />
               </div>
@@ -1443,7 +1447,7 @@ const Productos = () => {
                   checked={formData.activo}
                   onCheckedChange={(v) => setFormData({ ...formData, activo: v })}
                 />
-                <Label>Activo</Label>
+                <Label>{selectedProducto?.odoo_id ? "Visible en la tienda" : "Activo"}</Label>
               </div>
               <div className="flex items-center gap-2">
                 <Switch
@@ -1453,6 +1457,11 @@ const Productos = () => {
                 <Label>Destacado</Label>
               </div>
             </div>
+            {selectedProducto?.odoo_id && !selectedProducto.disponible && (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                No disponible para la venta: en Odoo no está a la venta, es un servicio o no tiene precio.
+              </p>
+            )}
 
             <div className="flex gap-2 pt-4">
               <Button variant="outline" className="flex-1" onClick={() => setIsEditOpen(false)}>

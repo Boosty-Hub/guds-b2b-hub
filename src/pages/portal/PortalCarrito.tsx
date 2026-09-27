@@ -45,6 +45,7 @@ interface CartItemDB {
   precio_unitario: number | null;
   tipo_empaque_id: string | null;
   producto: Producto;
+  tipo_empaque?: { unidades: number | null } | null;
 }
 
 interface CuponDB {
@@ -81,6 +82,14 @@ const PortalCarrito = () => {
   const [cfg, setCfg] = useState({ iva: 16, envio: 50, envioGratis: 500 });
   const { formatPrice, exchangeRate } = useCurrency();
   const { user } = useAuth();
+  const [credito, setCredito] = useState<{ modo: string; disponible: number; limite: number } | null>(null);
+  useEffect(() => {
+    if (!user?.cliente_id) return;
+    supabase.rpc("credito_disponible", { p_cliente_id: user.cliente_id }).then(({ data }) => {
+      const r = (data as { modo: string; disponible: number; limite: number }[] | null)?.[0];
+      if (r) setCredito(r);
+    });
+  }, [user?.cliente_id]);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -123,7 +132,8 @@ const PortalCarrito = () => {
       .from('carrito')
       .select(`
         *,
-        producto:productos(*)
+        producto:productos(*),
+        tipo_empaque:tipos_empaque(unidades)
       `)
       .eq('usuario_id', user?.id);
     
@@ -136,6 +146,16 @@ const PortalCarrito = () => {
     if (!item) return;
     
     const newQuantity = Math.max(1, item.cantidad + delta);
+    // No se puede pedir sobre lo comprometido: tope por el disponible del producto (en unidades)
+    if (delta > 0 && item.producto?.controla_stock !== false) {
+      const unidades = (i: CartItemDB) => Math.max(1, Number(i.tipo_empaque?.unidades ?? 1));
+      const enCarrito = cart.filter((i) => i.producto_id === item.producto_id).reduce((s, i) => s + i.cantidad * unidades(i), 0);
+      const disponible = Number(item.producto?.stock_disponible ?? item.producto?.stock_actual ?? 0);
+      if (enCarrito + delta * unidades(item) > disponible) {
+        toast({ title: "Sin disponible suficiente", description: `De ${item.producto?.nombre} quedan ${Math.floor(disponible)} unidades disponibles.`, variant: "destructive" });
+        return;
+      }
+    }
     
     // Update local state immediately
     setCart(prev => prev.map(i => 
@@ -663,7 +683,14 @@ const PortalCarrito = () => {
                 }`}
               >
                 <span className="text-2xl">{metodo.icon}</span>
-                <span className="font-medium">{metodo.name}</span>
+                <span className="text-left">
+                  <span className="block font-medium">{metodo.name}</span>
+                  {metodo.id === "credito" && credito && (
+                    <span className="block text-xs text-muted-foreground">
+                      {credito.modo === "abierto" ? "Crédito abierto" : Number(credito.limite) > 0 ? `Disponible ${formatPrice(Number(credito.disponible))}` : "Sin crédito aprobado"}
+                    </span>
+                  )}
+                </span>
                 {selectedPayment === metodo.id && (
                   <Badge className="ml-auto">Seleccionado</Badge>
                 )}

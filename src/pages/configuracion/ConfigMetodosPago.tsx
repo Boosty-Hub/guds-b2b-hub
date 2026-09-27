@@ -365,7 +365,7 @@ const ConfigMetodosPago = () => {
       description="Configura los métodos de pago disponibles para clientes y vendedores"
     >
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3 mb-6">
+      <div className="grid gap-4 md:grid-cols-3 mb-3">
         <Card className="border-border">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
@@ -373,7 +373,7 @@ const ConfigMetodosPago = () => {
                 <CreditCard className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{metodos.length}</p>
+                <p className="text-lg font-semibold">{metodos.length}</p>
                 <p className="text-xs text-muted-foreground">Total Métodos</p>
               </div>
             </div>
@@ -386,7 +386,7 @@ const ConfigMetodosPago = () => {
                 <CheckCircle className="h-5 w-5 text-green-500" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{metodosActivos}</p>
+                <p className="text-lg font-semibold">{metodosActivos}</p>
                 <p className="text-xs text-muted-foreground">Activos</p>
               </div>
             </div>
@@ -399,7 +399,7 @@ const ConfigMetodosPago = () => {
                 <XCircle className="h-5 w-5 text-gray-500" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{metodos.length - metodosActivos}</p>
+                <p className="text-lg font-semibold">{metodos.length - metodosActivos}</p>
                 <p className="text-xs text-muted-foreground">Inactivos</p>
               </div>
             </div>
@@ -408,7 +408,7 @@ const ConfigMetodosPago = () => {
       </div>
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-lg font-semibold">Métodos Configurados</h2>
           <p className="text-sm text-muted-foreground">Arrastra para reordenar la prioridad de los métodos</p>
@@ -618,7 +618,7 @@ const ConfigMetodosPago = () => {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Datos Bancarios</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-3 p-3 pt-0">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Banco</Label>
@@ -664,7 +664,7 @@ const ConfigMetodosPago = () => {
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm">Opciones</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3 p-3 pt-0">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-medium">Disponible en Portal de Cliente</p>
@@ -771,7 +771,7 @@ const ConfigMetodosPago = () => {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Datos Bancarios</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-3 p-3 pt-0">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Banco</Label>
@@ -817,7 +817,7 @@ const ConfigMetodosPago = () => {
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm">Opciones</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3 p-3 pt-0">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-medium">Disponible en Portal de Cliente</p>

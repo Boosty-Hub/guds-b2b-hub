@@ -137,7 +137,7 @@ const ConfigMoneda = () => {
       description="Gestiona la tasa de cambio USD/Bs y preferencias de moneda"
     >
       {/* Current Rate Card */}
-      <Card className="border-border mb-6 bg-gradient-to-r from-green-500/10 to-emerald-500/5">
+      <Card className="border-border mb-3 bg-gradient-to-r from-green-500/10 to-emerald-500/5">
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -158,17 +158,17 @@ const ConfigMoneda = () => {
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2 mb-6">
+      <div className="grid gap-3 lg:grid-cols-2 mb-3">
         {/* Update Rate */}
         <Card className="border-border">
-          <CardHeader>
+          <CardHeader className="p-3 pb-2">
             <CardTitle className="flex items-center gap-2">
               <RefreshCw className="h-5 w-5" />
               Actualizar Tasa
             </CardTitle>
             <CardDescription>Ingresa la nueva tasa de cambio manualmente</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 p-3 pt-0">
             <div className="space-y-2">
               <Label>Nueva Tasa (1 USD = X Bs.)</Label>
               <div className="flex gap-2">
@@ -211,8 +211,8 @@ const ConfigMoneda = () => {
 
         {/* Conversion Example */}
         <Card className="border-border">
-          <CardHeader>
-            <CardTitle>Ejemplo de Conversión</CardTitle>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Ejemplo de Conversión</CardTitle>
             <CardDescription>Así se verán los precios con la tasa actual</CardDescription>
           </CardHeader>
           <CardContent>
@@ -220,12 +220,12 @@ const ConfigMoneda = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="rounded-lg bg-blue-500/10 p-4 text-center">
                   <DollarSign className="h-8 w-8 mx-auto text-blue-500 mb-2" />
-                  <p className="text-2xl font-bold">${ejemploUSD.toFixed(2)}</p>
+                  <p className="text-lg font-semibold">${ejemploUSD.toFixed(2)}</p>
                   <p className="text-sm text-muted-foreground">Dólares (USD)</p>
                 </div>
                 <div className="rounded-lg bg-green-500/10 p-4 text-center">
-                  <span className="text-2xl font-bold text-green-500 block mb-2">Bs.</span>
-                  <p className="text-2xl font-bold">{ejemploBS.toLocaleString("es-VE", { minimumFractionDigits: 2 })}</p>
+                  <span className="text-lg font-semibold text-green-500 block mb-2">Bs.</span>
+                  <p className="text-lg font-semibold">{ejemploBS.toLocaleString("es-VE", { minimumFractionDigits: 2 })}</p>
                   <p className="text-sm text-muted-foreground">Bolívares (Bs.)</p>
                 </div>
               </div>
@@ -253,12 +253,12 @@ const ConfigMoneda = () => {
       </div>
 
       {/* Settings */}
-      <Card className="border-border mb-6">
-        <CardHeader>
-          <CardTitle>Configuración de Visualización</CardTitle>
+      <Card className="border-border mb-3">
+        <CardHeader className="p-3 pb-2">
+          <CardTitle className="text-sm">Configuración de Visualización</CardTitle>
           <CardDescription>Opciones de cómo se muestran las monedas en el sistema</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3 p-3 pt-0">
           <div className="flex items-center justify-between">
             <div>
               <p className="font-medium">Moneda Principal del Sistema</p>

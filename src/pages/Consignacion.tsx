@@ -53,9 +53,9 @@ const Consignacion = () => {
   const aprobadas = declaraciones.filter((d) => d.estado === "aprobado");
   const rechazadas = declaraciones.filter((d) => d.estado === "rechazado");
 
-  const pgPend = usePagination(pendientes, 25);
-  const pgApr = usePagination(aprobadas, 25);
-  const pgRech = usePagination(rechazadas, 25);
+  const pgPend = usePagination(pendientes, 50);
+  const pgApr = usePagination(aprobadas, 50);
+  const pgRech = usePagination(rechazadas, 50);
 
   const abrirDetalle = async (d: Declaracion) => {
     setDetalle(d);
@@ -82,9 +82,9 @@ const Consignacion = () => {
   };
 
   const renderTabla = (rows: Declaracion[], pg: ReturnType<typeof usePagination<Declaracion>>, accionable: boolean) => (
-    <div className="rounded-xl border border-border bg-card shadow-sm">
+    <div className="rounded-lg border border-border bg-card">
       {rows.length === 0 ? (
-        <p className="p-8 text-center text-muted-foreground">Sin declaraciones en esta categoría.</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">Sin declaraciones en esta categoría.</p>
       ) : (
         <>
           <Table>
@@ -99,18 +99,18 @@ const Consignacion = () => {
             <TableBody>
               {pg.pageItems.map((d) => (
                 <TableRow key={d.id}>
-                  <TableCell className="font-mono text-sm text-primary">{d.numero}</TableCell>
-                  <TableCell className="font-medium">{d.cliente?.nombre_negocio || "—"}</TableCell>
-                  <TableCell className="text-muted-foreground">{d.almacen?.nombre || "—"}</TableCell>
-                  <TableCell className="capitalize text-muted-foreground">{d.rol_declarante}</TableCell>
-                  <TableCell className="text-muted-foreground">{new Date(d.fecha).toLocaleDateString("es-VE")}</TableCell>
-                  <TableCell className="text-right font-semibold">{formatPrice(d.total)}</TableCell>
+                  <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{d.numero}</TableCell>
+                  <TableCell className="max-w-[260px] truncate font-medium" title={d.cliente?.nombre_negocio || undefined}>{d.cliente?.nombre_negocio || "—"}</TableCell>
+                  <TableCell className="max-w-[220px] truncate text-muted-foreground" title={d.almacen?.nombre || undefined}>{d.almacen?.nombre || "—"}</TableCell>
+                  <TableCell className="whitespace-nowrap capitalize text-muted-foreground">{d.rol_declarante}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(d.fecha).toLocaleDateString("es-VE")}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(d.total)}</TableCell>
                   {accionable ? (
-                    <TableCell className="text-right"><Button size="sm" onClick={() => abrirDetalle(d)}>Revisar</Button></TableCell>
+                    <TableCell className="text-right"><Button size="sm" className="h-7 px-2.5" onClick={() => abrirDetalle(d)}>Revisar</Button></TableCell>
                   ) : (
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap">
                       {d.factura?.numero ? (
-                        <Link to={`/admin/facturas/${d.factura_id}`} className="flex items-center gap-1 font-mono text-sm text-primary hover:underline">
+                        <Link to={`/admin/facturas/${d.factura_id}`} className="flex items-center gap-1 font-mono text-xs text-primary hover:underline">
                           <FileText className="h-3.5 w-3.5" /> {d.factura.numero}
                         </Link>
                       ) : "—"}
@@ -129,17 +129,17 @@ const Consignacion = () => {
   return (
     <MainLayout title="Consignación">
       {loading ? (
-        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
       ) : (
         <Tabs defaultValue="pendientes">
-          <TabsList>
+          <TabsList className="h-auto flex-wrap justify-start">
             <TabsTrigger value="pendientes" className="gap-1.5"><Boxes className="h-3.5 w-3.5" /> Pendientes ({pendientes.length})</TabsTrigger>
             <TabsTrigger value="aprobadas">Aprobadas ({aprobadas.length})</TabsTrigger>
             <TabsTrigger value="rechazadas">Rechazadas ({rechazadas.length})</TabsTrigger>
           </TabsList>
-          <TabsContent value="pendientes" className="mt-4">{renderTabla(pendientes, pgPend, true)}</TabsContent>
-          <TabsContent value="aprobadas" className="mt-4">{renderTabla(aprobadas, pgApr, false)}</TabsContent>
-          <TabsContent value="rechazadas" className="mt-4">{renderTabla(rechazadas, pgRech, false)}</TabsContent>
+          <TabsContent value="pendientes">{renderTabla(pendientes, pgPend, true)}</TabsContent>
+          <TabsContent value="aprobadas">{renderTabla(aprobadas, pgApr, false)}</TabsContent>
+          <TabsContent value="rechazadas">{renderTabla(rechazadas, pgRech, false)}</TabsContent>
         </Tabs>
       )}
 

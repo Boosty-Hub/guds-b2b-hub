@@ -1,11 +1,9 @@
 import { useState, useEffect } from "react";
 import { ConfiguracionLayout } from "@/components/configuracion/ConfiguracionLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -41,15 +39,11 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
-import { 
-  Plus, 
-  Search, 
+import {
+  Plus,
   UserPlus,
   Shield,
   Users,
-  UserCheck,
-  Mail,
-  Phone,
   Edit,
   Trash2,
   Eye,
@@ -58,9 +52,14 @@ import {
   Save
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase, Rol, Modulo, Permiso } from "@/lib/supabase";
+import { supabase, Rol, Modulo, Permiso, type Empresa } from "@/lib/supabase";
+import { EmpresaDistintivo } from "@/components/EmpresaSelector";
+import { UsuarioEmpresasField, guardarEmpresasUsuario, type EmpresasAsignadas } from "@/components/configuracion/UsuarioEmpresasField";
+import { useEmpresa } from "@/contexts/EmpresaContext";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
 
 interface UsuarioConRol {
   id: string;
@@ -149,6 +148,16 @@ const ConfigUsuarios = () => {
     color: "bg-gray-500",
   });
 
+  // Multiempresa: empresas de cada usuario
+  const { empresaActiva } = useEmpresa();
+  const [empresasTodas, setEmpresasTodas] = useState<Empresa[]>([]);
+  const [asignaciones, setAsignaciones] = useState<Record<string, { empresa_id: string; por_defecto: boolean }[]>>({});
+  const [empresasForm, setEmpresasForm] = useState<EmpresasAsignadas>({ ids: [], defecto: null });
+  const empresasPorDefecto = (): EmpresasAsignadas => {
+    const ids = empresaActiva ? [empresaActiva.id] : empresasTodas.map((e) => e.id);
+    return { ids, defecto: ids[0] ?? null };
+  };
+
   const [rolPermisos, setRolPermisos] = useState<Record<string, { ver: boolean; crear: boolean; editar: boolean; eliminar: boolean }>>({});
 
   useEffect(() => {
@@ -157,11 +166,19 @@ const ConfigUsuarios = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    const [usuariosRes, rolesRes, modulosRes] = await Promise.all([
+    const [usuariosRes, rolesRes, modulosRes, empresasRes, asignacionesRes] = await Promise.all([
       supabase.from('usuarios').select('*, rol:roles(*)').order('nombre'),
       supabase.from('roles').select('*').order('nombre'),
       supabase.from('modulos').select('*').eq('activo', true).order('orden'),
+      supabase.from('empresas').select('*').eq('activo', true).order('orden'),
+      supabase.from('usuario_empresas').select('usuario_id, empresa_id, por_defecto'),
     ]);
+    if (empresasRes.data) setEmpresasTodas(empresasRes.data as Empresa[]);
+    if (asignacionesRes.data) {
+      const mapa: Record<string, { empresa_id: string; por_defecto: boolean }[]> = {};
+      for (const a of asignacionesRes.data) (mapa[a.usuario_id] ??= []).push({ empresa_id: a.empresa_id, por_defecto: a.por_defecto });
+      setAsignaciones(mapa);
+    }
     
     console.log('Usuarios response:', usuariosRes);
     
@@ -216,6 +233,7 @@ const ConfigUsuarios = () => {
 
   const resetUserForm = () => {
     setUserForm({ nombre: "", apellido: "", email: "", telefono: "", rol_id: "", password: "" });
+    setEmpresasForm(empresasPorDefecto());
   };
 
   const resetRolForm = () => {
@@ -227,6 +245,10 @@ const ConfigUsuarios = () => {
   const handleCreateUser = async () => {
     if (!userForm.nombre || !userForm.email || !userForm.rol_id) {
       toast({ title: "Error", description: "Completa nombre, email y rol", variant: "destructive" });
+      return;
+    }
+    if (!empresasForm.ids.length) {
+      toast({ title: "Error", description: "Asigna al menos una empresa", variant: "destructive" });
       return;
     }
     if (!userForm.password || userForm.password.length < 6) {
@@ -261,6 +283,10 @@ const ConfigUsuarios = () => {
     }
 
     const row = Array.isArray(data) ? data[0] : data;
+    if (row?.usuario_id) {
+      const errorEmpresas = await guardarEmpresasUsuario(row.usuario_id, empresasForm);
+      if (errorEmpresas) toast({ title: "Usuario creado sin empresas", description: errorEmpresas.message, variant: "destructive" });
+    }
     resetUserForm();
     setIsCreateUserOpen(false);
     fetchData();
@@ -274,6 +300,10 @@ const ConfigUsuarios = () => {
     if (!selectedUsuario) return;
     if (!userForm.rol_id) {
       toast({ title: "Error", description: "Selecciona un rol para el usuario", variant: "destructive" });
+      return;
+    }
+    if (!empresasForm.ids.length) {
+      toast({ title: "Error", description: "Asigna al menos una empresa", variant: "destructive" });
       return;
     }
 
@@ -293,6 +323,12 @@ const ConfigUsuarios = () => {
 
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    const errorEmpresas = await guardarEmpresasUsuario(selectedUsuario.id, empresasForm);
+    if (errorEmpresas) {
+      toast({ title: "No se guardaron las empresas", description: errorEmpresas.message, variant: "destructive" });
       return;
     }
 
@@ -469,6 +505,11 @@ const ConfigUsuarios = () => {
       rol_id: usuario.rol_id || "",
       password: "",
     });
+    const actuales = asignaciones[usuario.id] ?? [];
+    setEmpresasForm({
+      ids: actuales.map((a) => a.empresa_id),
+      defecto: actuales.find((a) => a.por_defecto)?.empresa_id ?? actuales[0]?.empresa_id ?? null,
+    });
     setIsEditUserOpen(true);
   };
 
@@ -507,10 +548,6 @@ const ConfigUsuarios = () => {
     }));
   };
 
-  const getInitials = (nombre: string) => {
-    return nombre.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
-  };
-
   const filteredUsuarios = usuarios.filter(u => {
     const matchSearch = u.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
                        u.email.toLowerCase().includes(searchTerm.toLowerCase());
@@ -518,8 +555,8 @@ const ConfigUsuarios = () => {
     return matchSearch && matchRol;
   });
 
-  const pagination = usePagination(filteredUsuarios, 25);
-  const pagination2 = usePagination(modulos, 25);
+  const pagination = usePagination(filteredUsuarios, 50);
+  const pagination2 = usePagination(modulos, 50);
 
   const stats = {
     total: usuarios.length,
@@ -543,246 +580,223 @@ const ConfigUsuarios = () => {
       title="Gestión de Usuarios y Roles" 
       description="Administra usuarios, roles y permisos del sistema"
     >
-      <Tabs defaultValue="usuarios" className="space-y-6">
+      <Tabs defaultValue="usuarios">
         <TabsList>
-          <TabsTrigger value="usuarios" className="gap-2">
-            <Users className="h-4 w-4" />
+          <TabsTrigger value="usuarios" className="gap-1.5">
+            <Users className="h-3.5 w-3.5" />
             Usuarios
           </TabsTrigger>
-          <TabsTrigger value="roles" className="gap-2">
-            <Shield className="h-4 w-4" />
+          <TabsTrigger value="roles" className="gap-1.5">
+            <Shield className="h-3.5 w-3.5" />
             Roles y Permisos
           </TabsTrigger>
         </TabsList>
 
         {/* Tab Usuarios */}
-        <TabsContent value="usuarios" className="space-y-6">
-          {/* Stats */}
-          <div className="grid gap-4 md:grid-cols-3">
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center">
-                    <Users className="h-5 w-5 text-blue-500" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{stats.total}</p>
-                    <p className="text-xs text-muted-foreground">Total Usuarios</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
-                    <UserCheck className="h-5 w-5 text-green-500" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{stats.activos}</p>
-                    <p className="text-xs text-muted-foreground">Activos</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-purple-500/10 flex items-center justify-center">
-                    <Shield className="h-5 w-5 text-purple-500" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{stats.roles}</p>
-                    <p className="text-xs text-muted-foreground">Roles</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+        <TabsContent value="usuarios">
+          <KpiStrip
+            items={[
+              { label: "Total Usuarios", valor: stats.total },
+              { label: "Activos", valor: stats.activos, tono: "positivo" },
+              { label: "Roles", valor: stats.roles, tono: "primario" },
+            ]}
+          />
 
-          {/* Filters */}
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-                <div className="flex flex-1 gap-4 w-full md:w-auto">
-                  <div className="relative flex-1 md:max-w-sm">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      placeholder="Buscar por nombre o email..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                  <Select value={filterRol} onValueChange={setFilterRol}>
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="Rol" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todos">Todos los roles</SelectItem>
-                      {roles.map(rol => (
-                        <SelectItem key={rol.id} value={rol.id}>{rol.nombre}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button className="gap-2" onClick={() => { resetUserForm(); setIsCreateUserOpen(true); }}>
-                  <UserPlus className="h-4 w-4" />
-                  Nuevo Usuario
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <BarraLista
+            busqueda={searchTerm}
+            onBusqueda={setSearchTerm}
+            placeholder="Buscar por nombre o email..."
+            filtros={
+              <Select value={filterRol} onValueChange={setFilterRol}>
+                <SelectTrigger className="h-8 w-40 text-[13px]">
+                  <SelectValue placeholder="Rol" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos los roles</SelectItem>
+                  {roles.map(rol => (
+                    <SelectItem key={rol.id} value={rol.id}>{rol.nombre}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+            contador={loading ? undefined : `${filteredUsuarios.length} registros`}
+            acciones={
+              <Button size="sm" className="gap-1.5" onClick={() => { resetUserForm(); setIsCreateUserOpen(true); }}>
+                <UserPlus className="h-3.5 w-3.5" />
+                Nuevo Usuario
+              </Button>
+            }
+          />
 
           {/* Users Table */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Lista de Usuarios ({filteredUsuarios.length})</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Usuario</TableHead>
-                      <TableHead>Contacto</TableHead>
-                      <TableHead>Rol</TableHead>
-                      <TableHead className="text-center">Estado</TableHead>
-                      <TableHead className="text-right">Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {pagination.pageItems.map((usuario) => (
-                      <TableRow key={usuario.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-10 w-10">
-                              <AvatarFallback className={`${usuario.rol?.color || 'bg-gray-500'} text-white`}>
-                                {getInitials(usuario.nombre)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="font-medium">{usuario.nombre} {usuario.apellido}</p>
-                              <p className="text-sm text-muted-foreground">{usuario.email}</p>
-                              {usuario.cliente && (
-                                <p className="text-xs text-blue-500">🏪 {usuario.cliente.nombre_negocio}</p>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 text-sm">
-                              <Mail className="h-3 w-3 text-muted-foreground" />
-                              <span>{usuario.email}</span>
-                            </div>
-                            {usuario.telefono && (
-                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                <Phone className="h-3 w-3" />
-                                <span>{usuario.telefono}</span>
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            <Badge className={`${usuario.rol?.color || 'bg-gray-500'} text-white border-0`}>
-                              {usuario.rol?.nombre || 'Sin rol'}
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            {loading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Usuario</TableHead>
+                    <TableHead>Contacto</TableHead>
+                    <TableHead>Rol</TableHead>
+                    <TableHead>Empresas</TableHead>
+                    <TableHead className="text-center">Estado</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pagination.pageItems.map((usuario) => (
+                    <TableRow key={usuario.id}>
+                      <TableCell>
+                        <div className="flex items-center whitespace-nowrap">
+                          <span className="max-w-[220px] truncate font-medium" title={`${usuario.nombre} ${usuario.apellido || ""}`.trim()}>
+                            {usuario.nombre} {usuario.apellido}
+                          </span>
+                          {usuario.cliente && (
+                            <span className="ml-1.5 max-w-[180px] truncate text-xs text-blue-500" title={usuario.cliente.nombre_negocio}>🏪 {usuario.cliente.nombre_negocio}</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center whitespace-nowrap">
+                          <span className="max-w-[240px] truncate" title={usuario.email}>{usuario.email}</span>
+                          {usuario.telefono && (
+                            <span className="ml-1.5 text-xs text-muted-foreground">{usuario.telefono}</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1 whitespace-nowrap">
+                          <Badge className={`${usuario.rol?.color || 'bg-gray-500'} border-0 text-white`}>
+                            {usuario.rol?.nombre || 'Sin rol'}
+                          </Badge>
+                          {usuario.cliente_id && (
+                            <Badge variant="outline" className="border-blue-500 text-xs text-blue-500">
+                              👤 Cliente
                             </Badge>
-                            {usuario.cliente_id && (
-                              <Badge variant="outline" className="text-xs border-blue-500 text-blue-500">
-                                👤 Cliente
-                              </Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Switch
-                            checked={usuario.activo}
-                            onCheckedChange={() => handleToggleUserStatus(usuario)}
-                          />
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" onClick={() => openEditUser(usuario)}>
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="text-destructive"
-                              onClick={() => { setSelectedUsuario(usuario); setIsDeleteUserOpen(true); }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-              {!loading && <DataTablePagination pagination={pagination} />}
-            </CardContent>
-          </Card>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1 whitespace-nowrap">
+                          {(asignaciones[usuario.id] ?? []).length === 0 ? (
+                            <span className="text-xs text-muted-foreground">Sin empresa</span>
+                          ) : (asignaciones[usuario.id] ?? []).map((a) => {
+                            const emp = empresasTodas.find((e) => e.id === a.empresa_id);
+                            return emp ? (
+                              <span
+                                key={a.empresa_id}
+                                className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0 text-xs ${a.por_defecto ? "border-primary/40" : "border-border"}`}
+                                title={a.por_defecto ? "Empresa por defecto" : undefined}
+                              >
+                                <EmpresaDistintivo empresa={emp} className="h-4 w-4 text-[8px]" />
+                                {emp.nombre_corto}
+                              </span>
+                            ) : null;
+                          })}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Switch
+                          checked={usuario.activo}
+                          onCheckedChange={() => handleToggleUserStatus(usuario)}
+                        />
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" onClick={() => openEditUser(usuario)}>
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive"
+                            title="Eliminar"
+                            onClick={() => { setSelectedUsuario(usuario); setIsDeleteUserOpen(true); }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            {!loading && <DataTablePagination pagination={pagination} />}
+          </div>
         </TabsContent>
 
         {/* Tab Roles */}
-        <TabsContent value="roles" className="space-y-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-semibold">Roles del Sistema</h3>
-              <p className="text-sm text-muted-foreground">Gestiona los roles y sus permisos</p>
-            </div>
-            <Button className="gap-2" onClick={() => { resetRolForm(); setIsCreateRolOpen(true); }}>
-              <Plus className="h-4 w-4" />
-              Nuevo Rol
-            </Button>
-          </div>
+        <TabsContent value="roles">
+          <BarraLista
+            filtros={
+              <p className="min-w-0 text-sm font-semibold">
+                Roles del Sistema
+                <span className="ml-1.5 text-xs font-normal text-muted-foreground">Gestiona los roles y sus permisos</span>
+              </p>
+            }
+            contador={`${roles.length} registros`}
+            acciones={
+              <Button size="sm" className="gap-1.5" onClick={() => { resetRolForm(); setIsCreateRolOpen(true); }}>
+                <Plus className="h-3.5 w-3.5" />
+                Nuevo Rol
+              </Button>
+            }
+          />
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {roles.map(rol => (
-              <Card key={rol.id} className="relative">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`h-3 w-3 rounded-full ${rol.color}`} />
-                      <CardTitle className="text-base">{rol.nombre}</CardTitle>
-                    </div>
-                    {rol.es_sistema && (
-                      <Badge variant="secondary" className="text-xs">Sistema</Badge>
-                    )}
-                  </div>
-                  <CardDescription>{rol.descripcion || 'Sin descripción'}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Rol</TableHead>
+                  <TableHead>Descripción</TableHead>
+                  <TableHead className="text-right">Usuarios</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {roles.map(rol => (
+                  <TableRow key={rol.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${rol.color}`} />
+                        <span className="font-medium">{rol.nombre}</span>
+                        {rol.es_sistema && (
+                          <Badge variant="secondary" className="px-1.5 py-0 text-[11px]">Sistema</Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <span className="block max-w-[420px] truncate" title={rol.descripcion || undefined}>{rol.descripcion || 'Sin descripción'}</span>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right text-muted-foreground">
                       {usuarios.filter(u => u.rol_id === rol.id).length} usuarios
-                    </span>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => openEditRol(rol)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      {!rol.es_sistema && (
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-destructive"
-                          onClick={() => { setSelectedRol(rol); setIsDeleteRolOpen(true); }}
-                        >
-                          <Trash2 className="h-4 w-4" />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar rol" onClick={() => openEditRol(rol)}>
+                          <Edit className="h-3.5 w-3.5" />
                         </Button>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                        {!rol.es_sistema && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive"
+                            title="Eliminar rol"
+                            onClick={() => { setSelectedRol(rol); setIsDeleteRolOpen(true); }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         </TabsContent>
       </Tabs>
@@ -842,6 +856,7 @@ const ConfigUsuarios = () => {
                 </SelectContent>
               </Select>
             </div>
+            <UsuarioEmpresasField empresas={empresasTodas} value={empresasForm} onChange={setEmpresasForm} />
             <div className="space-y-2">
               <Label>Contraseña *</Label>
               <div className="relative">
@@ -917,6 +932,7 @@ const ConfigUsuarios = () => {
                 </SelectContent>
               </Select>
             </div>
+            <UsuarioEmpresasField empresas={empresasTodas} value={empresasForm} onChange={setEmpresasForm} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditUserOpen(false)}>Cancelar</Button>

@@ -10,6 +10,7 @@ import { CurrencySwitch } from "@/components/CurrencySwitch";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { PortalCartWidget } from "@/components/portal/PortalCartWidget";
 import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
+import { EmpresaSelector } from "@/components/EmpresaSelector";
 
 interface PortalMobileLayoutProps {
   children: ReactNode;
@@ -91,6 +92,7 @@ export const PortalMobileLayout = ({
             <div className="flex items-center gap-3">
               {isTablet ? (
                 <>
+                  <EmpresaSelector variant="header" />
                   <CurrencySwitch variant="header" />
                   <NotificationsDropdown variant="header" />
                   <BoostySupportSlot />
@@ -105,6 +107,7 @@ export const PortalMobileLayout = ({
                 </>
               ) : (
                 <>
+                  <EmpresaSelector variant="header" compacto />
                   <button
                     onClick={() => setCurrency(currency === "USD" ? "BS" : "USD")}
                     className="bg-white/20 px-2 py-1 rounded text-xs font-medium"

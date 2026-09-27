@@ -65,11 +65,11 @@ export function TopClients() {
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
-        <div className="border-b border-border p-4">
-          <h3 className="text-lg font-semibold text-foreground">Mejores Clientes</h3>
+      <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card">
+        <div className="border-b border-border bg-muted/30 px-3 py-1.5">
+          <h3 className="text-[13px] font-semibold text-foreground">Mejores Clientes</h3>
         </div>
-        <div className="flex items-center justify-center py-12">
+        <div className="flex items-center justify-center py-6">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       </div>
@@ -77,30 +77,23 @@ export function TopClients() {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
-      <div className="border-b border-border p-4 flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-foreground">Mejores Clientes</h3>
-        <Link to="/admin/clientes" className="text-sm text-primary hover:underline">Ver todos</Link>
+    <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card">
+      <div className="border-b border-border bg-muted/30 px-3 py-1.5 flex items-center justify-between">
+        <h3 className="text-[13px] font-semibold text-foreground">Mejores Clientes</h3>
+        <Link to="/admin/clientes" className="text-xs text-primary hover:underline">Ver todos</Link>
       </div>
       <div className="divide-y divide-border">
         {clients.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">
+          <div className="p-4 text-center text-sm text-muted-foreground">
             No hay clientes registrados
           </div>
         ) : (
           clients.map((client) => (
-            <div key={client.id} className="flex items-center gap-4 p-4 transition-colors hover:bg-muted/50">
-              <Avatar className="h-10 w-10">
-                <AvatarFallback className="bg-primary/10 text-primary font-medium">
-                  {getInitials(client.nombre_negocio)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1">
-                <p className="font-medium text-foreground">{client.nombre_negocio}</p>
-                <p className="text-sm text-muted-foreground">{client.ordenes_count} órdenes</p>
-              </div>
-              <p className="font-semibold text-foreground">{formatPrice(client.total_ventas)}</p>
-            </div>
+            <Link key={client.id} to={`/admin/clientes/${client.id}`} className="flex items-center gap-2 px-3 py-1 text-[13px] transition-colors hover:bg-muted/50">
+              <p className="min-w-0 flex-1 truncate font-medium text-foreground" title={client.nombre_negocio}>{client.nombre_negocio}</p>
+              <span className="shrink-0 text-[11px] text-muted-foreground">{client.ordenes_count} órd.</span>
+              <p className="w-24 shrink-0 text-right font-semibold tabular-nums text-foreground">{formatPrice(client.total_ventas)}</p>
+            </Link>
           ))
         )}
       </div>

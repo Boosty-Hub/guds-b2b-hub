@@ -23,6 +23,7 @@ import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
+import { EmpresaSelector, ModoConsultaBanner } from "@/components/EmpresaSelector";
 
 interface DeliveryLayoutProps {
   children: ReactNode;
@@ -65,17 +66,22 @@ export const DeliveryLayout = ({ children, title }: DeliveryLayoutProps) => {
           </button>
           <h1 className="font-semibold">{title}</h1>
           <div className="flex items-center gap-2">
+            <EmpresaSelector variant="header" compacto />
             <BoostySupportSlot media="(max-width: 767.98px)" />
             <NotificationsDropdown variant="header" />
           </div>
         </div>
       </header>
+      <div className="md:hidden">
+        <ModoConsultaBanner />
+      </div>
 
       {/* Desktop Header */}
       <div className="hidden md:block md:pl-64">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card px-6">
           <h1 className="text-xl font-semibold text-foreground">{title}</h1>
           <div className="flex items-center gap-4">
+            <EmpresaSelector />
             <NotificationsDropdown />
             <BoostySupportSlot media="(min-width: 768px)" />
             <div className="flex items-center gap-3">
@@ -91,6 +97,7 @@ export const DeliveryLayout = ({ children, title }: DeliveryLayoutProps) => {
             </div>
           </div>
         </header>
+        <ModoConsultaBanner />
       </div>
 
       {/* Main Content */}

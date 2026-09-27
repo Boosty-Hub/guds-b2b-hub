@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -38,13 +37,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Search, Building2, MapPin, Users, Eye, Edit, Loader2, Trash2, Save, UserPlus } from "lucide-react";
+import { Plus, Building2, Eye, Edit, Loader2, Trash2, Save, UserPlus } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase, Cliente, ListaPrecios } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { OdooBadge } from "@/components/OdooBadge";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
+import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
+import { useColumnas } from "@/components/datos/columnas";
 
 interface ClienteConLista extends Cliente {
   lista_precios?: ListaPrecios | null;
@@ -136,8 +140,9 @@ const Clientes = () => {
       return;
     }
 
+    const { data: codigo } = await supabase.rpc('generar_codigo_cliente');
     const { error } = await supabase.from('clientes').insert({
-      codigo: generateCodigo(),
+      codigo: (codigo as string | null) || generateCodigo(),
       nombre_negocio: formData.nombre_negocio,
       tipo_negocio: formData.tipo_negocio,
       rif: formData.rif,
@@ -165,9 +170,10 @@ const Clientes = () => {
   const handleEdit = async () => {
     if (!selectedCliente) return;
 
+    // Cliente de Odoo: sus datos se editan en Odoo; en GUDS solo la lista de precios
     const { error } = await supabase
       .from('clientes')
-      .update({
+      .update(selectedCliente.odoo_id ? { lista_precios_id: formData.lista_precios_id || null, limite_credito: formData.limite_credito } : {
         nombre_negocio: formData.nombre_negocio,
         tipo_negocio: formData.tipo_negocio,
         rif: formData.rif,
@@ -213,15 +219,16 @@ const Clientes = () => {
   const openEditSheet = (cliente: ClienteConLista) => {
     setSelectedCliente(cliente);
     setFormData({
-      nombre_negocio: cliente.nombre_negocio,
-      tipo_negocio: cliente.tipo_negocio,
-      rif: cliente.rif,
-      email: cliente.email,
+      // Los clientes de Odoo pueden venir sin correo, dirección o ciudad: los campos siempre reciben texto
+      nombre_negocio: cliente.nombre_negocio || "",
+      tipo_negocio: cliente.tipo_negocio || "",
+      rif: cliente.rif || "",
+      email: cliente.email || "",
       telefono: cliente.telefono || "",
-      direccion: cliente.direccion,
-      ciudad: cliente.ciudad,
-      limite_credito: cliente.limite_credito,
-      dias_credito: cliente.dias_credito,
+      direccion: cliente.direccion || "",
+      ciudad: cliente.ciudad || "",
+      limite_credito: cliente.limite_credito ?? 0,
+      dias_credito: cliente.dias_credito ?? 0,
       lista_precios_id: cliente.lista_precios_id || "",
       activo: cliente.activo,
     });
@@ -234,102 +241,78 @@ const Clientes = () => {
     c.rif.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const pagination = usePagination(filteredClientes, 25);
+  const { ordenadas, orden, alternar } = useOrdenTabla(filteredClientes, {
+    nombre: (c) => c.nombre_negocio, rif: (c) => c.rif, ciudad: (c) => c.ciudad, estado: (c) => (c.activo ? 1 : 0),
+    limite: (c) => Number(c.limite_credito || 0), usado: (c) => Number(c.credito_utilizado || 0),
+  });
+  const pagination = usePagination(ordenadas, 50);
+  const exportar = () => exportarCSV("clientes", ordenadas, [
+    { titulo: "Código", valor: (c) => c.codigo }, { titulo: "Cliente", valor: (c) => c.nombre_negocio }, { titulo: "RIF", valor: (c) => c.rif },
+    { titulo: "Ciudad", valor: (c) => c.ciudad }, { titulo: "Teléfono", valor: (c) => c.telefono }, { titulo: "Email", valor: (c) => c.email },
+    { titulo: "Activo", valor: (c) => (c.activo ? "Sí" : "No") }, { titulo: "Límite crédito", valor: (c) => Number(c.limite_credito || 0) },
+    { titulo: "Crédito utilizado", valor: (c) => Number(c.credito_utilizado || 0) },
+  ]);
 
   const stats = {
     total: clientes.length,
     activos: clientes.filter(c => c.activo).length,
   };
 
+  const cols = useColumnas("clientes", [{ etiqueta: "Cliente", fija: true }, { etiqueta: "RIF" }, { etiqueta: "Ciudad" }, { etiqueta: "Lista de Precios" }, { etiqueta: "Estado" }, { etiqueta: "Límite crédito" }, { etiqueta: "Usado" }, { etiqueta: "Acciones", fija: true }]);
   return (
     <MainLayout title="Clientes">
+      {cols.estilo}
       {/* Stats */}
-      <div className="mb-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2">
-              <Building2 className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.total}</p>
-              <p className="text-sm text-muted-foreground">Total Clientes</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-success/10 p-2">
-              <Building2 className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.activos}</p>
-              <p className="text-sm text-muted-foreground">Activos</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-warning/10 p-2">
-              <MapPin className="h-5 w-5 text-warning" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{clientes.filter(c => c.limite_credito > 0).length}</p>
-              <p className="text-sm text-muted-foreground">Con Crédito</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-destructive/10 p-2">
-              <Users className="h-5 w-5 text-destructive" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{formatPrice(clientes.reduce((sum, c) => sum + Number(c.credito_utilizado || 0), 0))}</p>
-              <p className="text-sm text-muted-foreground">Crédito Utilizado</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <KpiStrip
+        items={[
+          { label: "Total Clientes", valor: stats.total, tono: "primario" },
+          { label: "Activos", valor: stats.activos, tono: "positivo" },
+          { label: "Con Crédito", valor: clientes.filter(c => c.limite_credito > 0).length, tono: "alerta" },
+          { label: "Crédito Utilizado", valor: formatPrice(clientes.reduce((sum, c) => sum + Number(c.credito_utilizado || 0), 0)), tono: "negativo" },
+        ]}
+      />
 
       {/* Header Actions */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input 
-            placeholder="Buscar cliente..." 
-            className="pl-9" 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <Button className="gap-2" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
-          <Plus className="h-4 w-4" />
-          Nuevo Cliente
-        </Button>
-      </div>
+      <BarraLista
+        busqueda={searchTerm}
+        onBusqueda={setSearchTerm}
+        placeholder="Buscar cliente..."
+        contador={`${filteredClientes.length} registros`}
+        acciones={
+          <>
+            {cols.selector}
+            <BotonExportar onClick={exportar} total={ordenadas.length} />
+            <Button size="sm" className="gap-1.5" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
+              <Plus className="h-3.5 w-3.5" />
+              Nuevo Cliente
+            </Button>
+          </>
+        }
+      />
 
       {/* Clients Table */}
-      <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
+      <div className="rounded-lg border border-border bg-card animate-fade-in">
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : filteredClientes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <Building2 className="h-12 w-12 mb-4 opacity-50" />
-            <p>No hay clientes registrados</p>
-            <p className="text-sm">Los clientes aparecerán aquí cuando se aprueben registros</p>
+          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+            <Building2 className="mb-2 h-8 w-8 opacity-50" />
+            <p className="text-sm">No hay clientes registrados</p>
+            <p className="text-xs">Los clientes aparecerán aquí cuando se aprueben registros</p>
           </div>
         ) : (
-          <Table>
+          <Table data-tabla="clientes">
             <TableHeader>
               <TableRow>
-                <TableHead>Cliente</TableHead>
-                <TableHead>RIF</TableHead>
-                <TableHead>Ciudad</TableHead>
+                <EncabezadoOrdenable clave="nombre" orden={orden} onOrdenar={alternar}>Cliente</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="rif" orden={orden} onOrdenar={alternar}>RIF</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="ciudad" orden={orden} onOrdenar={alternar}>Ciudad</EncabezadoOrdenable>
                 <TableHead>Lista de Precios</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Crédito</TableHead>
+                <EncabezadoOrdenable clave="estado" orden={orden} onOrdenar={alternar}>Estado</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="limite" orden={orden} onOrdenar={alternar} alinear="derecha">Límite crédito</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="usado" orden={orden} onOrdenar={alternar} alinear="derecha">Usado</EncabezadoOrdenable>
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
@@ -341,63 +324,52 @@ const Clientes = () => {
                   onClick={() => navigate(`/admin/clientes/${cliente.id}`)}
                 >
                   <TableCell>
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-9 w-9">
-                        <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                          {cliente.nombre_negocio.split(' ').map(w => w[0]).join('').slice(0, 2)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-medium">{cliente.nombre_negocio}</p>
-                        <p className="text-xs text-muted-foreground">{cliente.codigo}</p>
-                      </div>
+                    <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+                      <span className="max-w-[260px] truncate font-medium" title={cliente.nombre_negocio}>{cliente.nombre_negocio}</span>
+                      {cliente.odoo_id && <OdooBadge />}
+                      <span className="ml-1.5 text-xs text-muted-foreground">{cliente.codigo}</span>
                     </div>
                   </TableCell>
-                  <TableCell className="font-mono text-sm">{cliente.rif}</TableCell>
-                  <TableCell className="text-muted-foreground">{cliente.ciudad}</TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap font-mono text-xs">{cliente.rif}</TableCell>
+                  <TableCell className="max-w-[160px] truncate whitespace-nowrap text-muted-foreground" title={cliente.ciudad || undefined}>{cliente.ciudad}</TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <Badge variant="outline">{cliente.lista_precios?.nombre || 'Sin asignar'}</Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <Badge variant={cliente.activo ? "default" : "secondary"}>
                       {cliente.activo ? "Activo" : "Inactivo"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <div className="text-sm">
-                      <p className="font-semibold">{formatPrice(cliente.limite_credito)}</p>
-                      {cliente.credito_utilizado > 0 && (
-                        <p className="text-xs text-destructive">Usado: {formatPrice(cliente.credito_utilizado)}</p>
-                      )}
-                    </div>
+                  <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(cliente.limite_credito)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right">
+                    {cliente.credito_utilizado > 0
+                      ? <span className="text-destructive">{formatPrice(cliente.credito_utilizado)}</span>
+                      : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex justify-end gap-1">
+                    <div className="flex justify-end gap-0.5">
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8"
+                        className="h-7 w-7"
                         title="Ver detalle"
                         onClick={() => navigate(`/admin/clientes/${cliente.id}`)}
                       >
-                        <Eye className="h-4 w-4" />
+                        <Eye className="h-3.5 w-3.5" />
                       </Button>
                       <Link to={`/admin/clientes/${cliente.id}/usuarios`}>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" title="Usuarios del Portal">
-                          <UserPlus className="h-4 w-4" />
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Usuarios del Portal">
+                          <UserPlus className="h-3.5 w-3.5" />
                         </Button>
                       </Link>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditSheet(cliente)}>
-                        <Edit className="h-4 w-4" />
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" onClick={() => openEditSheet(cliente)}>
+                        <Edit className="h-3.5 w-3.5" />
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-8 w-8 text-destructive"
-                        onClick={() => { setSelectedCliente(cliente); setIsDeleteOpen(true); }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {!cliente.odoo_id && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" title="Eliminar" onClick={() => { setSelectedCliente(cliente); setIsDeleteOpen(true); }}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -539,21 +511,26 @@ const Clientes = () => {
       <Sheet open={isEditOpen} onOpenChange={setIsEditOpen}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           <SheetHeader>
-            <SheetTitle>Editar Cliente</SheetTitle>
-            <SheetDescription>Modifica los datos del cliente</SheetDescription>
+            <SheetTitle className="flex items-center gap-2">Editar Cliente {!!selectedCliente?.odoo_id && <OdooBadge />}</SheetTitle>
+            <SheetDescription>
+              {selectedCliente?.odoo_id
+                ? "Los datos con la marca Odoo se editan en Odoo. Aquí se asigna la lista de precios."
+                : "Modifica los datos del cliente"}
+            </SheetDescription>
           </SheetHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Nombre del Negocio *</Label>
+              <Label className="flex items-center gap-1.5">Nombre del Negocio * {!!selectedCliente?.odoo_id && <OdooBadge />}</Label>
               <Input
                 value={formData.nombre_negocio}
+                disabled={!!selectedCliente?.odoo_id}
                 onChange={(e) => setFormData({ ...formData, nombre_negocio: e.target.value })}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Tipo de Negocio *</Label>
-                <Select value={formData.tipo_negocio} onValueChange={(v) => setFormData({ ...formData, tipo_negocio: v })}>
+                <Label className="flex items-center gap-1.5">Tipo de Negocio * {!!selectedCliente?.odoo_id && <OdooBadge />}</Label>
+                <Select disabled={!!selectedCliente?.odoo_id} value={formData.tipo_negocio} onValueChange={(v) => setFormData({ ...formData, tipo_negocio: v })}>
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar" />
                   </SelectTrigger>
@@ -565,41 +542,46 @@ const Clientes = () => {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>RIF *</Label>
+                <Label className="flex items-center gap-1.5">RIF * {!!selectedCliente?.odoo_id && <OdooBadge />}</Label>
                 <Input
                   value={formData.rif}
+                disabled={!!selectedCliente?.odoo_id}
                   onChange={(e) => setFormData({ ...formData, rif: e.target.value })}
                 />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Email *</Label>
+                <Label className="flex items-center gap-1.5">Email * {!!selectedCliente?.odoo_id && <OdooBadge />}</Label>
                 <Input
                   type="email"
                   value={formData.email}
+                disabled={!!selectedCliente?.odoo_id}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Teléfono</Label>
+                <Label className="flex items-center gap-1.5">Teléfono {!!selectedCliente?.odoo_id && <OdooBadge />}</Label>
                 <Input
                   value={formData.telefono}
+                disabled={!!selectedCliente?.odoo_id}
                   onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
                 />
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Dirección *</Label>
+              <Label className="flex items-center gap-1.5">Dirección * {!!selectedCliente?.odoo_id && <OdooBadge />}</Label>
               <Input
                 value={formData.direccion}
+                disabled={!!selectedCliente?.odoo_id}
                 onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
               />
             </div>
             <div className="space-y-2">
-              <Label>Ciudad *</Label>
+              <Label className="flex items-center gap-1.5">Ciudad * {!!selectedCliente?.odoo_id && <OdooBadge />}</Label>
               <Input
                 value={formData.ciudad}
+                disabled={!!selectedCliente?.odoo_id}
                 onChange={(e) => setFormData({ ...formData, ciudad: e.target.value })}
               />
             </div>
@@ -618,25 +600,29 @@ const Clientes = () => {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Límite de Crédito</Label>
+                <Label className="flex items-center gap-1.5">Límite de Crédito {!!selectedCliente?.odoo_id && <OdooBadge titulo="Viene de Odoo; si lo cambias aquí queda pendiente de enviar a Odoo" />}</Label>
                 <Input
                   type="number"
+                  min={0}
                   value={formData.limite_credito}
                   onChange={(e) => setFormData({ ...formData, limite_credito: Number(e.target.value) })}
                 />
+                {!!selectedCliente?.odoo_id && <p className="text-xs text-muted-foreground">Al guardar queda pendiente de enviar a Odoo.</p>}
               </div>
               <div className="space-y-2">
-                <Label>Días de Crédito</Label>
+                <Label className="flex items-center gap-1.5">Días de Crédito {!!selectedCliente?.odoo_id && <OdooBadge />}</Label>
                 <Input
                   type="number"
                   value={formData.dias_credito}
+                disabled={!!selectedCliente?.odoo_id}
                   onChange={(e) => setFormData({ ...formData, dias_credito: Number(e.target.value) })}
                 />
               </div>
             </div>
             <div className="flex items-center justify-between rounded-lg border p-3">
-              <Label>Cliente Activo</Label>
+              <Label className="flex items-center gap-1.5">Cliente Activo {!!selectedCliente?.odoo_id && <OdooBadge />}</Label>
               <Switch
+                disabled={!!selectedCliente?.odoo_id}
                 checked={formData.activo}
                 onCheckedChange={(checked) => setFormData({ ...formData, activo: checked })}
               />

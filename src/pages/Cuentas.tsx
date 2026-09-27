@@ -28,13 +28,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { HandCoins, Search, DollarSign, TrendingUp, TrendingDown, Users, Loader2 } from "lucide-react";
+import { HandCoins, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { SelectorFacturas, type FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
 
 interface ClienteCuenta {
   id: string;
@@ -176,8 +178,8 @@ const Cuentas = () => {
   const movimientosFiltrados = movimientos.filter((m) =>
     m.cliente.toLowerCase().includes(searchTrx.toLowerCase()) || (m.referencia || "").toLowerCase().includes(searchTrx.toLowerCase()));
 
-  const pagination = usePagination(cuentasFiltradas, 25);
-  const pagination2 = usePagination(movimientosFiltrados, 25);
+  const pagination = usePagination(cuentasFiltradas, 50);
+  const pagination2 = usePagination(movimientosFiltrados, 50);
 
   // Dialog: deudores + banco/método seleccionado
   const deudores = useMemo(() => [...deudaCliente.entries()]
@@ -247,70 +249,55 @@ const Cuentas = () => {
     fetchAll();
   };
 
+  const [tab, setTab] = useState<string>("accounts");
+  const pestanas = (
+    <TabsList>
+      <TabsTrigger value="accounts">Estado de Cuentas</TabsTrigger>
+      <TabsTrigger value="transactions">Movimientos</TabsTrigger>
+    </TabsList>
+  );
+
   return (
     <MainLayout title="Estado de Cuentas">
-      {/* Stats */}
-      <div className="mb-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-destructive/10 p-2"><TrendingDown className="h-5 w-5 text-destructive" /></div>
-            <div>
-              <p className="text-2xl font-bold text-destructive">{formatPrice(totalPorCobrar)}</p>
-              <p className="text-sm text-muted-foreground">Total por Cobrar</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-success/10 p-2"><TrendingUp className="h-5 w-5 text-success" /></div>
-            <div>
-              <p className="text-2xl font-bold text-success">{formatPrice(cobradoMes)}</p>
-              <p className="text-sm text-muted-foreground">Cobrado este Mes</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-warning/10 p-2"><Users className="h-5 w-5 text-warning" /></div>
-            <div>
-              <p className="text-2xl font-bold">{clientesConDeuda}</p>
-              <p className="text-sm text-muted-foreground">Clientes con Deuda</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2"><DollarSign className="h-5 w-5 text-primary" /></div>
-            <div>
-              <p className="text-2xl font-bold">{pagos.filter((p) => p.estado === "verificado").length}</p>
-              <p className="text-sm text-muted-foreground">Recibos registrados</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <KpiStrip items={[
+        { label: "Total por Cobrar", valor: formatPrice(totalPorCobrar), tono: "negativo" },
+        { label: "Cobrado este Mes", valor: formatPrice(cobradoMes), tono: "positivo" },
+        { label: "Clientes con Deuda", valor: clientesConDeuda, tono: "alerta" },
+        { label: "Recibos registrados", valor: pagos.filter((p) => p.estado === "verificado").length },
+      ]} />
 
-      <Tabs defaultValue="accounts" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="accounts">Estado de Cuentas</TabsTrigger>
-          <TabsTrigger value="transactions">Movimientos</TabsTrigger>
-        </TabsList>
+      <Tabs value={tab} onValueChange={setTab}>
+        {/* Pestañas, búsqueda, filtros y acciones de la pestaña activa en una sola fila */}
+        {tab === "accounts" ? (
+          <BarraLista
+            pestanas={pestanas}
+            busqueda={searchAcc}
+            onBusqueda={setSearchAcc}
+            placeholder="Buscar cliente..."
+            contador={`${cuentasFiltradas.length} registros`}
+            acciones={
+              <Button size="sm" className="gap-1.5" onClick={abrirCobro}>
+                <HandCoins className="h-3.5 w-3.5" /> Registrar Cobro
+              </Button>
+            }
+          />
+        ) : (
+          <BarraLista
+            pestanas={pestanas}
+            busqueda={searchTrx}
+            onBusqueda={setSearchTrx}
+            placeholder="Buscar por cliente o referencia..."
+            contador={`${movimientosFiltrados.length} registros`}
+          />
+        )}
 
-        <TabsContent value="accounts" className="space-y-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Buscar cliente..." className="pl-9" value={searchAcc} onChange={(e) => setSearchAcc(e.target.value)} />
-            </div>
-            <Button className="gap-2" onClick={abrirCobro}>
-              <HandCoins className="h-4 w-4" /> Registrar Cobro
-            </Button>
-          </div>
+        <TabsContent value="accounts">
 
-          <div className="rounded-xl border border-border bg-card shadow-sm">
+          <div className="rounded-lg border border-border bg-card">
             {loading ? (
-              <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+              <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
             ) : cuentasFiltradas.length === 0 ? (
-              <div className="py-16 text-center text-muted-foreground">No hay clientes</div>
+              <div className="py-10 text-center text-muted-foreground">No hay clientes</div>
             ) : (
               <Table>
                 <TableHeader>
@@ -329,16 +316,18 @@ const Cuentas = () => {
                     return (
                       <TableRow key={c.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/cuentas/${c.id}`)}>
                         <TableCell>
-                          <p className="font-medium">{c.nombre_negocio}</p>
-                          <p className="text-xs text-muted-foreground">{c.codigo || "—"}</p>
+                          <div className="flex min-w-0 items-center">
+                            <span className="max-w-[260px] truncate font-medium" title={c.nombre_negocio}>{c.nombre_negocio}</span>
+                            <span className="ml-1.5 whitespace-nowrap text-xs text-muted-foreground">{c.codigo || "—"}</span>
+                          </div>
                         </TableCell>
-                        <TableCell className={`text-right font-semibold ${saldo > 0 ? "text-destructive" : ""}`}>
+                        <TableCell className={`whitespace-nowrap text-right font-semibold ${saldo > 0 ? "text-destructive" : ""}`}>
                           {formatPrice(saldo)}
                         </TableCell>
                         <TableCell className="text-center text-muted-foreground">{docs || "—"}</TableCell>
-                        <TableCell className="text-right text-muted-foreground">{formatPrice(Number(c.limite_credito))}</TableCell>
-                        <TableCell className="text-muted-foreground">{formatDate(ultimoPagoByClient.get(c.id) || null)}</TableCell>
-                        <TableCell><Badge variant={est.variant}>{est.label}</Badge></TableCell>
+                        <TableCell className="whitespace-nowrap text-right text-muted-foreground">{formatPrice(Number(c.limite_credito))}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(ultimoPagoByClient.get(c.id) || null)}</TableCell>
+                        <TableCell className="whitespace-nowrap"><Badge variant={est.variant}>{est.label}</Badge></TableCell>
                       </TableRow>
                     );
                   })}
@@ -349,16 +338,12 @@ const Cuentas = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="transactions" className="space-y-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Buscar por cliente o referencia..." className="pl-9" value={searchTrx} onChange={(e) => setSearchTrx(e.target.value)} />
-          </div>
-          <div className="rounded-xl border border-border bg-card shadow-sm">
+        <TabsContent value="transactions">
+          <div className="rounded-lg border border-border bg-card">
             {loading ? (
-              <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+              <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
             ) : movimientosFiltrados.length === 0 ? (
-              <div className="py-16 text-center text-muted-foreground">No hay movimientos registrados</div>
+              <div className="py-10 text-center text-muted-foreground">No hay movimientos registrados</div>
             ) : (
               <Table>
                 <TableHeader>
@@ -374,16 +359,16 @@ const Cuentas = () => {
                 <TableBody>
                   {pagination2.pageItems.map((m) => (
                     <TableRow key={`${m.tipo}-${m.id}`} className="hover:bg-muted/50">
-                      <TableCell className="text-muted-foreground">{formatDate(m.fecha)}</TableCell>
-                      <TableCell className="font-medium">{m.cliente}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(m.fecha)}</TableCell>
+                      <TableCell className="font-medium"><span className="block max-w-[260px] truncate" title={m.cliente}>{m.cliente}</span></TableCell>
                       <TableCell>
                         <Badge variant={m.tipo === "pago" ? "default" : "destructive"}>{m.tipo === "pago" ? "Cobro" : "Cargo"}</Badge>
                       </TableCell>
-                      <TableCell className={`text-right font-semibold ${m.tipo === "pago" ? "text-success" : "text-destructive"}`}>
+                      <TableCell className={`whitespace-nowrap text-right font-semibold ${m.tipo === "pago" ? "text-success" : "text-destructive"}`}>
                         {m.tipo === "pago" ? "+" : "-"}{formatPrice(m.monto)}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{m.metodo}</TableCell>
-                      <TableCell className="font-mono text-sm text-primary">{m.referencia}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{m.metodo}</TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{m.referencia}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

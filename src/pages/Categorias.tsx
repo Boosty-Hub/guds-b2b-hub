@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -21,12 +20,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,20 +37,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { 
-  Plus, 
-  MoreHorizontal,
+import {
+  Plus,
   Edit,
   Trash2,
   GripVertical,
-  Eye,
-  EyeOff,
-  FolderOpen,
   Smartphone,
-  Package
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useStoreConfig, Categoria } from "@/contexts/StoreConfigContext";
+import { OdooBadge } from "@/components/OdooBadge";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
+import { Panel } from "@/components/datos/FichaCampos";
 
 const colorOptions = [
   { value: "bg-yellow-500", label: "Amarillo" },
@@ -130,7 +129,8 @@ const Categorias = () => {
 
     try {
       await updateCategoria(selectedCategoria.id, {
-        nombre: formData.nombre,
+        // En categorías de Odoo el nombre se edita en Odoo
+        ...(selectedCategoria.odooId ? {} : { nombre: formData.nombre }),
         icono: formData.icono,
         color: formData.color,
       });
@@ -195,163 +195,114 @@ const Categorias = () => {
   return (
     <MainLayout title="Categorías">
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3 mb-6">
-        <Card className="border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <FolderOpen className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{categorias.length}</p>
-                <p className="text-xs text-muted-foreground">Total Categorías</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
-                <Eye className="h-5 w-5 text-green-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{activeCategorias}</p>
-                <p className="text-xs text-muted-foreground">Activas</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <Package className="h-5 w-5 text-blue-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{totalProductos}</p>
-                <p className="text-xs text-muted-foreground">Productos Total</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <KpiStrip
+        items={[
+          { label: "Total Categorías", valor: categorias.length, tono: "primario" },
+          { label: "Activas", valor: activeCategorias, tono: "positivo" },
+          { label: "Productos Total", valor: totalProductos },
+        ]}
+      />
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-lg font-semibold">Gestión de Categorías</h2>
-          <p className="text-sm text-muted-foreground">Las categorías se muestran en el portal cliente y catálogo</p>
-        </div>
-        <Button className="gap-2" onClick={() => {
-          resetForm();
-          setIsCreateOpen(true);
-        }}>
-          <Plus className="h-4 w-4" />
-          Nueva Categoría
-        </Button>
-      </div>
-
-      {/* Preview */}
-      <Card className="border-border mb-6">
-        <CardHeader>
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Smartphone className="h-4 w-4" />
-            Vista Previa - Portal Cliente
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="bg-muted rounded-xl p-4 max-w-md mx-auto">
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {categorias.filter(c => c.activo).sort((a, b) => a.orden - b.orden).map((cat) => (
-                <div key={cat.id} className="flex flex-col items-center gap-2 min-w-[70px]">
-                  <div className={`h-14 w-14 rounded-full ${cat.color} flex items-center justify-center text-2xl`}>
-                    {cat.icono}
-                  </div>
-                  <span className="text-xs text-center">{cat.nombre}</span>
-                </div>
-              ))}
-            </div>
+      <BarraLista
+        filtros={
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold leading-tight">Gestión de Categorías</h2>
+            <p className="text-xs text-muted-foreground">Las categorías se muestran en el portal cliente y catálogo</p>
           </div>
-        </CardContent>
-      </Card>
+        }
+        contador={`${categorias.length} registros`}
+        acciones={
+          <Button size="sm" className="gap-1.5" onClick={() => {
+            resetForm();
+            setIsCreateOpen(true);
+          }}>
+            <Plus className="h-3.5 w-3.5" />
+            Nueva Categoría
+          </Button>
+        }
+      />
 
-      {/* Categories Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {categorias.sort((a, b) => a.orden - b.orden).map((categoria) => (
-          <Card key={categoria.id} className={`border-border ${!categoria.activo ? "opacity-60" : ""}`}>
-            <CardContent className="p-4">
-              <div className="flex items-start gap-4">
-                <div className="cursor-grab text-muted-foreground hover:text-foreground mt-1">
-                  <GripVertical className="h-5 w-5" />
-                </div>
-                
-                {/* Category Icon */}
-                <div className={`h-14 w-14 rounded-full ${categoria.color} flex items-center justify-center text-2xl flex-shrink-0`}>
-                  {categoria.icono}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-semibold truncate">{categoria.nombre}</h3>
+      {/* Categories Table */}
+      <div className="rounded-lg border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-6"></TableHead>
+              <TableHead className="w-10">Icono</TableHead>
+              <TableHead>Categoría</TableHead>
+              <TableHead className="text-right">Productos</TableHead>
+              <TableHead className="text-center">Activo</TableHead>
+              <TableHead className="text-right">Acciones</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {categorias.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">No hay categorías</TableCell>
+              </TableRow>
+            ) : categorias.sort((a, b) => a.orden - b.orden).map((categoria) => (
+              <TableRow key={categoria.id} className={!categoria.activo ? "opacity-60" : ""}>
+                <TableCell className="pr-0">
+                  <div className="cursor-grab text-muted-foreground hover:text-foreground">
+                    <GripVertical className="h-3.5 w-3.5" />
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className={`h-6 w-6 rounded-full ${categoria.color} flex items-center justify-center text-sm`}>
+                    {categoria.icono}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+                    <span className="max-w-[260px] truncate font-medium" title={categoria.nombre}>{categoria.nombre}</span>
+                    {categoria.odooId && <OdooBadge />}
                     {!categoria.activo && (
                       <Badge variant="secondary" className="text-xs">Inactivo</Badge>
                     )}
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {categoria.productosCount} productos
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-right">{categoria.productosCount} productos</TableCell>
+                <TableCell className="text-center">
                   <Switch
                     checked={categoria.activo}
                     onCheckedChange={() => handleToggleActivo(categoria)}
+                    title={categoria.activo ? "Desactivar" : "Activar"}
                   />
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon">
-                        <MoreHorizontal className="h-4 w-4" />
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex justify-end gap-0.5">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" onClick={() => openEditDialog(categoria)}>
+                      <Edit className="h-3.5 w-3.5" />
+                    </Button>
+                    {!categoria.odooId && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="Eliminar" onClick={() => { setSelectedCategoria(categoria); setIsDeleteOpen(true); }}>
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => openEditDialog(categoria)}>
-                        <Edit className="h-4 w-4 mr-2" />
-                        Editar
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleToggleActivo(categoria)}>
-                        {categoria.activo ? (
-                          <>
-                            <EyeOff className="h-4 w-4 mr-2" />
-                            Desactivar
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="h-4 w-4 mr-2" />
-                            Activar
-                          </>
-                        )}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem 
-                        className="text-destructive"
-                        onClick={() => {
-                          setSelectedCategoria(categoria);
-                          setIsDeleteOpen(true);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Eliminar
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </div>
+
+      {/* Vista previa del portal (debajo de la lista para priorizar los datos) */}
+      <Panel className="mt-3" titulo={<><Smartphone className="h-3.5 w-3.5" /> Vista Previa - Portal Cliente</>}>
+        <div className="mx-auto max-w-md rounded-lg bg-muted p-2">
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {categorias.filter(c => c.activo).sort((a, b) => a.orden - b.orden).map((cat) => (
+              <div key={cat.id} className="flex min-w-[56px] flex-col items-center gap-1">
+                <div className={`h-10 w-10 rounded-full ${cat.color} flex items-center justify-center text-lg`}>
+                  {cat.icono}
+                </div>
+                <span className="text-center text-[11px] leading-tight">{cat.nombre}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Panel>
 
       {/* Create Dialog */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
@@ -426,13 +377,14 @@ const Categorias = () => {
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Editar Categoría</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">Editar Categoría {selectedCategoria?.odooId && <OdooBadge />}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
-              <Label>Nombre *</Label>
+              <Label className="flex items-center gap-1.5">Nombre * {selectedCategoria?.odooId && <OdooBadge />}</Label>
               <Input
                 placeholder="Ej: Aceites"
+                disabled={!!selectedCategoria?.odooId}
                 value={formData.nombre}
                 onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
               />

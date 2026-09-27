@@ -1,579 +1,288 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { 
-  Plus, 
-  Search, 
-  ArrowLeft, 
-  Users, 
-  Loader2, 
-  Trash2, 
-  Save, 
-  Edit,
-  Mail,
-  Phone,
-  Building2,
-  UserPlus,
-  Eye,
-  EyeOff
-} from "lucide-react";
-import { supabase, Usuario, Cliente } from "@/lib/supabase";
+import { ArrowLeft, Loader2, Plus, Pencil, Trash2, KeyRound, UserPlus, Copy, Mail, Phone, ShieldCheck, ShieldOff, Users } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
-import { usePagination } from "@/hooks/use-pagination";
-import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { usePermissions } from "@/contexts/PermissionsContext";
+
+interface Contacto {
+  id: string; nombre: string; cargo: string | null; email: string | null; telefono: string | null; celular: string | null;
+  es_principal: boolean; activo: boolean; notas: string | null;
+}
+interface UsuarioPortal { id: string; email: string; activo: boolean; debe_cambiar_clave: boolean; contacto_id: string | null; nombre: string; apellido: string | null }
+interface Credenciales { titulo: string; email: string; password: string }
+
+const vacio = { nombre: "", cargo: "", email: "", telefono: "", celular: "", es_principal: false, notas: "" };
 
 const ClienteUsuarios = () => {
   const { clienteId } = useParams<{ clienteId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-
-  const [cliente, setCliente] = useState<Cliente | null>(null);
-  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const { can } = usePermissions();
+  const puedeEditar = can("clientes", "editar");
+  const [cliente, setCliente] = useState<{ nombre_negocio: string; rif: string | null } | null>(null);
+  const [contactos, setContactos] = useState<Contacto[]>([]);
+  const [usuarios, setUsuarios] = useState<UsuarioPortal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [form, setForm] = useState({ ...vacio });
+  const [editando, setEditando] = useState<Contacto | null>(null);
+  const [formAbierto, setFormAbierto] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [trabajando, setTrabajando] = useState<string | null>(null);
+  const [aBorrar, setABorrar] = useState<Contacto | null>(null);
+  const [credenciales, setCredenciales] = useState<Credenciales | null>(null);
 
-  // Sheet states
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-  const [selectedUsuario, setSelectedUsuario] = useState<Usuario | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-
-  // Form state
-  const [formData, setFormData] = useState({
-    nombre: "",
-    apellido: "",
-    email: "",
-    telefono: "",
-    password: "",
-    activo: true,
-  });
-
-  useEffect(() => {
-    if (clienteId) {
-      fetchData();
-    }
-  }, [clienteId]);
-
-  const fetchData = async () => {
+  const cargar = async () => {
     setLoading(true);
-    
-    // Fetch cliente
-    const { data: clienteData } = await supabase
-      .from('clientes')
-      .select('*')
-      .eq('id', clienteId)
-      .single();
-    
-    if (clienteData) {
-      setCliente(clienteData);
-    }
-
-    // Fetch usuarios del cliente
-    const { data: usuariosData } = await supabase
-      .from('usuarios')
-      .select('*')
-      .eq('cliente_id', clienteId)
-      .eq('role', 'cliente')
-      .order('nombre');
-    
-    if (usuariosData) {
-      setUsuarios(usuariosData);
-    }
-
+    const [{ data: c }, { data: k }, { data: u }] = await Promise.all([
+      supabase.from("clientes").select("nombre_negocio, rif").eq("id", clienteId).maybeSingle(),
+      supabase.from("cliente_contactos").select("*").eq("cliente_id", clienteId).order("es_principal", { ascending: false }).order("nombre"),
+      supabase.from("usuarios").select("id, email, activo, debe_cambiar_clave, contacto_id, nombre, apellido").eq("cliente_id", clienteId).eq("role", "cliente"),
+    ]);
+    setCliente(c as { nombre_negocio: string; rif: string | null } | null);
+    setContactos((k as Contacto[]) ?? []);
+    setUsuarios((u as UsuarioPortal[]) ?? []);
     setLoading(false);
   };
+  useEffect(() => { cargar(); }, [clienteId]);
 
-  const resetForm = () => {
-    setFormData({
-      nombre: "",
-      apellido: "",
-      email: "",
-      telefono: "",
-      password: "",
-      activo: true,
-    });
-    setShowPassword(false);
+  const usuarioDe = (contactoId: string) => usuarios.find((u) => u.contacto_id === contactoId) ?? null;
+  const sinContacto = usuarios.filter((u) => !u.contacto_id);
+
+  const abrirNuevo = () => { setEditando(null); setForm({ ...vacio, es_principal: contactos.length === 0 }); setFormAbierto(true); };
+  const abrirEditar = (k: Contacto) => {
+    setEditando(k);
+    setForm({ nombre: k.nombre, cargo: k.cargo || "", email: k.email || "", telefono: k.telefono || "", celular: k.celular || "", es_principal: k.es_principal, notas: k.notas || "" });
+    setFormAbierto(true);
   };
 
-  const handleCreate = async () => {
-    if (!formData.nombre || !formData.email || !formData.password) {
-      toast({ title: "Error", description: "Nombre, email y contraseña son requeridos", variant: "destructive" });
+  const guardar = async () => {
+    if (!form.nombre.trim()) { toast({ title: "Falta el nombre del contacto", variant: "destructive" }); return; }
+    if (form.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) { toast({ title: "Correo no válido", variant: "destructive" }); return; }
+    const u = editando ? usuarioDe(editando.id) : null;
+    if (u && form.email.trim().toLowerCase() !== (editando?.email || "").toLowerCase()) {
+      toast({ title: "El correo es el usuario del portal", description: "Para cambiarlo, quita el acceso y vuelve a darlo con el correo nuevo.", variant: "destructive" });
       return;
     }
-
-    if (formData.password.length < 6) {
-      toast({ title: "Error", description: "La contraseña debe tener al menos 6 caracteres", variant: "destructive" });
-      return;
+    setGuardando(true);
+    const payload = {
+      nombre: form.nombre.trim(), cargo: form.cargo.trim() || null, email: form.email.trim().toLowerCase() || null,
+      telefono: form.telefono.trim() || null, celular: form.celular.trim() || null, es_principal: form.es_principal, notas: form.notas.trim() || null,
+    };
+    if (payload.es_principal) {
+      await supabase.from("cliente_contactos").update({ es_principal: false }).eq("cliente_id", clienteId).neq("id", editando?.id ?? "00000000-0000-0000-0000-000000000000");
     }
-
-    setSaving(true);
-
-    try {
-      // Crear usuario en Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            nombre: formData.nombre,
-            apellido: formData.apellido,
-          }
-        }
-      });
-
-      if (authError) {
-        toast({ title: "Error", description: authError.message, variant: "destructive" });
-        setSaving(false);
-        return;
-      }
-
-      // Crear registro en tabla usuarios
-      const { error: dbError } = await supabase.from('usuarios').insert({
-        auth_id: authData.user?.id || null,
-        email: formData.email,
-        nombre: formData.nombre,
-        apellido: formData.apellido || null,
-        telefono: formData.telefono || null,
-        role: 'cliente',
-        cliente_id: clienteId,
-        activo: formData.activo,
-      });
-
-      if (dbError) {
-        toast({ title: "Error", description: dbError.message, variant: "destructive" });
-        setSaving(false);
-        return;
-      }
-
-      toast({ title: "Usuario Creado", description: `${formData.nombre} ha sido creado exitosamente` });
-      resetForm();
-      setIsCreateOpen(false);
-      fetchData();
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    }
-
-    setSaving(false);
+    const { error } = editando
+      ? await supabase.from("cliente_contactos").update({ ...payload, updated_at: new Date().toISOString() }).eq("id", editando.id)
+      : await supabase.from("cliente_contactos").insert({ ...payload, cliente_id: clienteId });
+    setGuardando(false);
+    if (error) { toast({ title: "No se pudo guardar", description: error.message, variant: "destructive" }); return; }
+    toast({ title: editando ? "Contacto actualizado" : "Contacto agregado", description: payload.nombre });
+    setFormAbierto(false);
+    cargar();
   };
 
-  const handleEdit = async () => {
-    if (!selectedUsuario) return;
-
-    if (!formData.nombre || !formData.email) {
-      toast({ title: "Error", description: "Nombre y email son requeridos", variant: "destructive" });
-      return;
-    }
-
-    setSaving(true);
-
-    const { error } = await supabase
-      .from('usuarios')
-      .update({
-        nombre: formData.nombre,
-        apellido: formData.apellido || null,
-        email: formData.email,
-        telefono: formData.telefono || null,
-        activo: formData.activo,
-      })
-      .eq('id', selectedUsuario.id);
-
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-      setSaving(false);
-      return;
-    }
-
-    toast({ title: "Usuario Actualizado", description: `${formData.nombre} ha sido actualizado` });
-    resetForm();
-    setIsEditOpen(false);
-    setSelectedUsuario(null);
-    fetchData();
-    setSaving(false);
+  const borrar = async () => {
+    if (!aBorrar) return;
+    const { error } = await supabase.from("cliente_contactos").delete().eq("id", aBorrar.id);
+    if (error) toast({ title: "No se pudo eliminar", description: error.message, variant: "destructive" });
+    else { toast({ title: "Contacto eliminado", description: aBorrar.nombre }); cargar(); }
+    setABorrar(null);
   };
 
-  const handleDelete = async () => {
-    if (!selectedUsuario) return;
-
-    const { error } = await supabase.from('usuarios').delete().eq('id', selectedUsuario.id);
-
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Usuario Eliminado", description: `${selectedUsuario.nombre} ha sido eliminado`, variant: "destructive" });
-    }
-
-    setIsDeleteOpen(false);
-    setSelectedUsuario(null);
-    fetchData();
+  const darAcceso = async (k: Contacto) => {
+    setTrabajando(k.id);
+    const { data, error } = await supabase.rpc("crear_acceso_contacto", { p_contacto_id: k.id });
+    setTrabajando(null);
+    if (error) { toast({ title: "No se pudo dar acceso", description: error.message, variant: "destructive" }); return; }
+    const r = (data as { email: string; password_temporal: string }[] | null)?.[0];
+    if (r) setCredenciales({ titulo: `Acceso al portal para ${k.nombre}`, email: r.email, password: r.password_temporal });
+    cargar();
   };
 
-  const openEditSheet = (usuario: Usuario) => {
-    setSelectedUsuario(usuario);
-    setFormData({
-      nombre: usuario.nombre,
-      apellido: usuario.apellido || "",
-      email: usuario.email,
-      telefono: usuario.telefono || "",
-      password: "",
-      activo: usuario.activo,
-    });
-    setIsEditOpen(true);
+  const restablecer = async (u: UsuarioPortal, nombre: string) => {
+    setTrabajando(u.id);
+    const { data, error } = await supabase.rpc("restablecer_clave_cliente", { p_usuario_id: u.id });
+    setTrabajando(null);
+    if (error) { toast({ title: "No se pudo restablecer", description: error.message, variant: "destructive" }); return; }
+    setCredenciales({ titulo: `Nueva contraseña temporal para ${nombre}`, email: u.email, password: data as string });
+    cargar();
   };
 
-  const filteredUsuarios = usuarios.filter(u =>
-    u.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (u.apellido && u.apellido.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const cambiarAcceso = async (u: UsuarioPortal, activo: boolean) => {
+    setTrabajando(u.id);
+    const { error } = await supabase.rpc("cambiar_acceso_cliente", { p_usuario_id: u.id, p_activo: activo });
+    setTrabajando(null);
+    if (error) { toast({ title: "No se pudo cambiar el acceso", description: error.message, variant: "destructive" }); return; }
+    toast({ title: activo ? "Acceso reactivado" : "Acceso desactivado", description: u.email });
+    cargar();
+  };
 
-  const pagination = usePagination(filteredUsuarios, 25);
+  const copiar = async (texto: string) => {
+    try { await navigator.clipboard.writeText(texto); toast({ title: "Copiado" }); } catch { toast({ title: "No se pudo copiar", variant: "destructive" }); }
+  };
+  const mensaje = credenciales
+    ? `Hola, ya tienes acceso al portal de clientes de GUDS.\nEntra en ${window.location.origin}/login\nUsuario: ${credenciales.email}\nContraseña temporal: ${credenciales.password}\nAl entrar se te pedirá crear tu propia contraseña.`
+    : "";
+
+  const estadoAcceso = (u: UsuarioPortal | null) => {
+    if (!u) return <Badge variant="outline" className="font-normal text-muted-foreground">Sin acceso</Badge>;
+    if (!u.activo) return <Badge variant="outline" className="border-destructive/40 bg-destructive/10 font-normal text-destructive">Desactivado</Badge>;
+    if (u.debe_cambiar_clave) return <Badge variant="outline" className="border-warning/60 bg-warning/15 font-normal">Clave temporal</Badge>;
+    return <Badge variant="outline" className="border-success/40 bg-success/10 font-normal text-success">Activo</Badge>;
+  };
 
   return (
-    <MainLayout title={`Usuarios - ${cliente?.nombre_negocio || 'Cliente'}`}>
-      {/* Back Button & Header */}
-      <div className="mb-6 flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/admin/clientes')}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <div className="flex-1">
-          <h2 className="text-xl font-semibold">Usuarios del Portal</h2>
-          {cliente && (
-            <p className="text-sm text-muted-foreground flex items-center gap-2">
-              <Building2 className="h-4 w-4" />
-              {cliente.nombre_negocio} - {cliente.codigo}
-            </p>
-          )}
+    <MainLayout title="Contactos y acceso al portal">
+      <Button variant="ghost" size="sm" className="mb-2 h-7 gap-1.5 px-2 text-xs" onClick={() => navigate(`/admin/clientes/${clienteId}`)}><ArrowLeft className="h-3.5 w-3.5" /> Volver al cliente</Button>
+
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-4 rounded-lg border border-border bg-card p-3">
+        <div>
+          <h1 className="text-base font-semibold">{cliente?.nombre_negocio || "Cliente"}</h1>
+          <p className="text-sm text-muted-foreground">{cliente?.rif || ""}</p>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            Personas del cliente. Cada contacto con correo puede tener su propio usuario del portal: GUDS genera una contraseña temporal
+            que le compartes y, al entrar por primera vez, el contacto crea la suya.
+          </p>
         </div>
+        {puedeEditar && <Button className="gap-2" onClick={abrirNuevo}><Plus className="h-4 w-4" /> Nuevo contacto</Button>}
       </div>
 
-      {/* Stats */}
-      <div className="mb-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2">
-              <Users className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{usuarios.length}</p>
-              <p className="text-sm text-muted-foreground">Total Usuarios</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-success/10 p-2">
-              <Users className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{usuarios.filter(u => u.activo).length}</p>
-              <p className="text-sm text-muted-foreground">Activos</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-destructive/10 p-2">
-              <Users className="h-5 w-5 text-destructive" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{usuarios.filter(u => !u.activo).length}</p>
-              <p className="text-sm text-muted-foreground">Inactivos</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Header Actions */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input 
-            placeholder="Buscar usuario..." 
-            className="pl-9" 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <Button className="gap-2" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
-          <UserPlus className="h-4 w-4" />
-          Nuevo Usuario
-        </Button>
-      </div>
-
-      {/* Users Table */}
-      <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
+      <div className="rounded-lg border border-border bg-card">
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        ) : filteredUsuarios.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <Users className="h-12 w-12 mb-4 opacity-50" />
-            <p>No hay usuarios registrados para este cliente</p>
-            <p className="text-sm">Crea usuarios para que puedan acceder al portal</p>
-          </div>
+          <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        ) : contactos.length === 0 ? (
+          <div className="flex flex-col items-center py-16 text-muted-foreground"><Users className="mb-3 h-10 w-10 opacity-50" /><p>Este cliente todavía no tiene contactos.</p></div>
         ) : (
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Usuario</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Teléfono</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
-              </TableRow>
+              <TableRow><TableHead>Contacto</TableHead><TableHead>Correo / teléfono</TableHead><TableHead>Portal</TableHead><TableHead className="text-right">Acciones</TableHead></TableRow>
             </TableHeader>
             <TableBody>
-              {pagination.pageItems.map((usuario) => (
-                <TableRow key={usuario.id} className="hover:bg-muted/50">
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-9 w-9">
-                        <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                          {usuario.nombre.charAt(0)}{usuario.apellido?.charAt(0) || ''}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-medium">{usuario.nombre} {usuario.apellido}</p>
-                        <p className="text-xs text-muted-foreground">Usuario del portal</p>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Mail className="h-4 w-4" />
-                      {usuario.email}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {usuario.telefono ? (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Phone className="h-4 w-4" />
-                        {usuario.telefono}
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={usuario.activo ? "default" : "secondary"}>
-                      {usuario.activo ? "Activo" : "Inactivo"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditSheet(usuario)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-8 w-8 text-destructive"
-                        onClick={() => { setSelectedUsuario(usuario); setIsDeleteOpen(true); }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {contactos.map((k) => {
+                const u = usuarioDe(k.id);
+                return (
+                  <TableRow key={k.id}>
+                    <TableCell>
+                      <div className="font-medium">{k.nombre}{k.es_principal && <Badge variant="secondary" className="ml-2 text-[10px]">Principal</Badge>}</div>
+                      <p className="text-xs text-muted-foreground">{k.cargo || "—"}</p>
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {k.email ? <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-muted-foreground" />{k.email}</span> : <span className="text-muted-foreground">Sin correo</span>}
+                      {(k.celular || k.telefono) && <span className="flex items-center gap-1.5 text-muted-foreground"><Phone className="h-3.5 w-3.5" />{k.celular || k.telefono}</span>}
+                    </TableCell>
+                    <TableCell>
+                      {estadoAcceso(u)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {puedeEditar && (
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {!u ? (
+                            <Button size="sm" variant="outline" className="gap-1.5" disabled={!k.email || trabajando === k.id} onClick={() => darAcceso(k)} title={k.email ? "" : "Agrega un correo para dar acceso"}>
+                              {trabajando === k.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />} Dar acceso
+                            </Button>
+                          ) : (
+                            <>
+                              <Button size="sm" variant="outline" className="gap-1.5" disabled={trabajando === u.id} onClick={() => restablecer(u, k.nombre)}>
+                                <KeyRound className="h-3.5 w-3.5" /> Restablecer clave
+                              </Button>
+                              <Button size="sm" variant="ghost" className="gap-1.5" disabled={trabajando === u.id} onClick={() => cambiarAcceso(u, !u.activo)}>
+                                {u.activo ? <><ShieldOff className="h-3.5 w-3.5" /> Desactivar</> : <><ShieldCheck className="h-3.5 w-3.5" /> Activar</>}
+                              </Button>
+                            </>
+                          )}
+                          <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => abrirEditar(k)}><Pencil className="h-4 w-4" /></Button>
+                          {!u && <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => setABorrar(k)}><Trash2 className="h-4 w-4" /></Button>}
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}
-        {!loading && <DataTablePagination pagination={pagination} />}
       </div>
 
-      {/* Create User Sheet */}
-      <Sheet open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>Nuevo Usuario</SheetTitle>
-            <SheetDescription>
-              Crea un usuario para que pueda acceder al portal de {cliente?.nombre_negocio}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Nombre *</Label>
-                <Input
-                  placeholder="Juan"
-                  value={formData.nombre}
-                  onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                />
+      {sinContacto.length > 0 && (
+        <div className="mt-3 rounded-lg border border-border bg-card p-3">
+          <h2 className="mb-2 text-[13px] font-semibold">Otros usuarios del portal ({sinContacto.length})</h2>
+          <div className="divide-y divide-border">
+            {sinContacto.map((u) => (
+              <div key={u.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                <span>{[u.nombre, u.apellido].filter(Boolean).join(" ")} · {u.email}</span>
+                <span className="flex items-center gap-2">{estadoAcceso(u)}
+                  {puedeEditar && <Button size="sm" variant="outline" className="gap-1.5" onClick={() => restablecer(u, u.nombre)}><KeyRound className="h-3.5 w-3.5" /> Restablecer clave</Button>}
+                </span>
               </div>
-              <div className="space-y-2">
-                <Label>Apellido</Label>
-                <Input
-                  placeholder="Pérez"
-                  value={formData.apellido}
-                  onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Email *</Label>
-              <Input
-                type="email"
-                placeholder="usuario@ejemplo.com"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Teléfono</Label>
-              <Input
-                placeholder="+58 412 1234567"
-                value={formData.telefono}
-                onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Contraseña *</Label>
-              <div className="relative">
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Mínimo 6 caracteres"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0 h-full px-3"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <Label>Usuario Activo</Label>
-              <Switch
-                checked={formData.activo}
-                onCheckedChange={(checked) => setFormData({ ...formData, activo: checked })}
-              />
-            </div>
-            <div className="flex gap-2 pt-4">
-              <Button variant="outline" className="flex-1" onClick={() => setIsCreateOpen(false)}>
-                Cancelar
-              </Button>
-              <Button className="flex-1 gap-2" onClick={handleCreate} disabled={saving}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Crear Usuario
-              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <Dialog open={formAbierto} onOpenChange={setFormAbierto}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{editando ? "Editar contacto" : "Nuevo contacto"}</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div className="col-span-2"><Label>Nombre y apellido *</Label><Input value={form.nombre} onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))} /></div>
+            <div className="col-span-2"><Label>Cargo</Label><Input value={form.cargo} onChange={(e) => setForm((f) => ({ ...f, cargo: e.target.value }))} placeholder="Compras, Administración…" /></div>
+            <div className="col-span-2"><Label>Correo (será su usuario del portal)</Label><Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} /></div>
+            <div><Label>Teléfono</Label><Input value={form.telefono} onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))} /></div>
+            <div><Label>Celular</Label><Input value={form.celular} onChange={(e) => setForm((f) => ({ ...f, celular: e.target.value }))} /></div>
+            <div className="col-span-2 flex items-center justify-between rounded-lg border border-border p-3">
+              <Label className="cursor-pointer">Contacto principal</Label>
+              <Switch checked={form.es_principal} onCheckedChange={(v) => setForm((f) => ({ ...f, es_principal: v }))} />
             </div>
           </div>
-        </SheetContent>
-      </Sheet>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFormAbierto(false)} disabled={guardando}>Cancelar</Button>
+            <Button onClick={guardar} disabled={guardando}>{guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Edit User Sheet */}
-      <Sheet open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>Editar Usuario</SheetTitle>
-            <SheetDescription>Modifica los datos del usuario</SheetDescription>
-          </SheetHeader>
-          <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Nombre *</Label>
-                <Input
-                  value={formData.nombre}
-                  onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                />
+      <Dialog open={!!credenciales} onOpenChange={(o) => { if (!o) setCredenciales(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{credenciales?.titulo}</DialogTitle>
+            <DialogDescription>Compártela por un canal privado. Solo se muestra ahora; al entrar, el contacto deberá crear su propia contraseña.</DialogDescription>
+          </DialogHeader>
+          {credenciales && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border p-3 text-sm">
+                <p className="text-xs text-muted-foreground">Usuario</p>
+                <p className="flex items-center justify-between gap-2 font-mono">{credenciales.email}<Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => copiar(credenciales.email)}><Copy className="h-3.5 w-3.5" /></Button></p>
+                <p className="mt-2 text-xs text-muted-foreground">Contraseña temporal</p>
+                <p className="flex items-center justify-between gap-2 font-mono text-lg">{credenciales.password}<Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => copiar(credenciales.password)}><Copy className="h-3.5 w-3.5" /></Button></p>
               </div>
-              <div className="space-y-2">
-                <Label>Apellido</Label>
-                <Input
-                  value={formData.apellido}
-                  onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
-                />
-              </div>
+              <Button variant="outline" className="w-full gap-2" onClick={() => copiar(mensaje)}><Copy className="h-4 w-4" /> Copiar mensaje para enviar</Button>
             </div>
-            <div className="space-y-2">
-              <Label>Email *</Label>
-              <Input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Teléfono</Label>
-              <Input
-                value={formData.telefono}
-                onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-              />
-            </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <Label>Usuario Activo</Label>
-              <Switch
-                checked={formData.activo}
-                onCheckedChange={(checked) => setFormData({ ...formData, activo: checked })}
-              />
-            </div>
-            <div className="flex gap-2 pt-4">
-              <Button variant="outline" className="flex-1" onClick={() => setIsEditOpen(false)}>
-                Cancelar
-              </Button>
-              <Button className="flex-1 gap-2" onClick={handleEdit} disabled={saving}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Guardar Cambios
-              </Button>
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
+          )}
+          <DialogFooter><Button onClick={() => setCredenciales(null)}>Listo</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Delete Confirmation */}
-      <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+      <AlertDialog open={!!aBorrar} onOpenChange={(o) => { if (!o) setABorrar(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar usuario?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción no se puede deshacer. El usuario "{selectedUsuario?.nombre} {selectedUsuario?.apellido}" será eliminado permanentemente y no podrá acceder al portal.
-            </AlertDialogDescription>
+            <AlertDialogTitle>¿Eliminar a {aBorrar?.nombre}?</AlertDialogTitle>
+            <AlertDialogDescription>Se elimina el contacto del cliente.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Eliminar
-            </AlertDialogAction>
+            <AlertDialogAction onClick={borrar} className="bg-destructive hover:bg-destructive/90">Eliminar</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

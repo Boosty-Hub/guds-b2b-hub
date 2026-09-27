@@ -39,7 +39,7 @@ export function RecentOrders() {
       .from('ordenes')
       .select('id, numero, total, estado, created_at, cliente:clientes(nombre_negocio)')
       .order('created_at', { ascending: false })
-      .limit(5);
+      .limit(10);
     
     if (data) {
       // Transform data to match interface (cliente comes as object, not array)
@@ -64,11 +64,11 @@ export function RecentOrders() {
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
-        <div className="border-b border-border p-4">
-          <h3 className="text-lg font-semibold text-foreground">Órdenes Recientes</h3>
+      <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card">
+        <div className="border-b border-border bg-muted/30 px-3 py-1.5">
+          <h3 className="text-[13px] font-semibold text-foreground">Órdenes Recientes</h3>
         </div>
-        <div className="flex items-center justify-center py-12">
+        <div className="flex items-center justify-center py-6">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       </div>
@@ -76,33 +76,27 @@ export function RecentOrders() {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
-      <div className="border-b border-border p-4 flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-foreground">Órdenes Recientes</h3>
-        <Link to="/admin/ordenes" className="text-sm text-primary hover:underline">Ver todas</Link>
+    <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card">
+      <div className="border-b border-border bg-muted/30 px-3 py-1.5 flex items-center justify-between">
+        <h3 className="text-[13px] font-semibold text-foreground">Órdenes Recientes</h3>
+        <Link to="/admin/ordenes" className="text-xs text-primary hover:underline">Ver todas</Link>
       </div>
       <div className="divide-y divide-border">
         {orders.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">
+          <div className="p-4 text-center text-sm text-muted-foreground">
             No hay órdenes recientes
           </div>
         ) : (
           orders.map((order) => (
-            <div key={order.id} className="flex items-center justify-between p-4 transition-colors hover:bg-muted/50">
-              <div className="flex-1">
-                <p className="font-medium text-foreground">{order.numero}</p>
-                <p className="text-sm text-muted-foreground">{order.cliente?.nombre_negocio || 'Sin cliente'}</p>
-              </div>
-              <div className="text-right">
-                <p className="font-semibold text-foreground">{formatPrice(order.total)}</p>
-                <p className="text-xs text-muted-foreground">{formatDate(order.created_at)}</p>
-              </div>
-              <div className="ml-4">
-                <Badge variant={statusConfig[order.estado]?.variant || "secondary"}>
-                  {statusConfig[order.estado]?.label || order.estado}
-                </Badge>
-              </div>
-            </div>
+            <Link key={order.id} to={`/admin/ordenes?orden=${order.id}`} className="flex items-center gap-2 px-3 py-1 text-[13px] transition-colors hover:bg-muted/50">
+              <span className="w-14 shrink-0 font-medium text-primary">{order.numero}</span>
+              <span className="min-w-0 flex-1 truncate" title={order.cliente?.nombre_negocio || undefined}>{order.cliente?.nombre_negocio || 'Sin cliente'}</span>
+              <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">{formatDate(order.created_at)}</span>
+              <span className="w-20 shrink-0 text-right font-semibold tabular-nums">{formatPrice(order.total)}</span>
+              <Badge variant={statusConfig[order.estado]?.variant || "secondary"} className="shrink-0">
+                {statusConfig[order.estado]?.label || order.estado}
+              </Badge>
+            </Link>
           ))
         )}
       </div>

@@ -188,8 +188,22 @@ const PortalCatalogo = () => {
     }
   };
 
+  // Disponible para vender (unidades): existencia − lo comprometido en pedidos y entregas. Sin control de stock: sin tope.
+  const disponibleDe = (p: ProductoConEmpaques) => (p.controla_stock === false ? Infinity : Number(p.stock_disponible ?? p.stock_actual ?? 0));
+  const unidadesEmpaque = (p: ProductoConEmpaques, tipoId: string | null) =>
+    Math.max(1, Number(p.producto_empaques?.find((pe) => pe.tipo_empaque_id === tipoId)?.tipo_empaque?.unidades ?? 1));
+  const unidadesEnCarrito = (p: ProductoConEmpaques) =>
+    cart.filter((i) => i.producto_id === p.id).reduce((s, i) => s + i.cantidad * unidadesEmpaque(p, i.tipo_empaque_id), 0);
+  const cabeEnStock = (p: ProductoConEmpaques, unidadesExtra: number) => {
+    const disp = disponibleDe(p);
+    if (unidadesEnCarrito(p) + unidadesExtra <= disp) return true;
+    toast({ title: "Sin disponible suficiente", description: `De ${p.nombre} quedan ${Math.max(0, Math.floor(disp))} unidades disponibles (el resto está comprometido en pedidos).`, variant: "destructive" });
+    return false;
+  };
+
   const addToCartWithEmpaque = async (product: ProductoConEmpaques, empaque: TipoEmpaque | null) => {
     if (!user?.id) return;
+    if (!cabeEnStock(product, unidadesEmpaque(product, empaque?.id || null))) return;
 
     // Precio efectivo autoritativo (lista de cliente / empaque / oferta / base).
     // Es la misma función que usa el checkout, así el carrito nunca miente.
@@ -260,6 +274,8 @@ const PortalCatalogo = () => {
     if (!item) return;
     
     const newCantidad = Math.max(0, item.cantidad + delta);
+    const prod = productos.find((p) => p.id === productId);
+    if (delta > 0 && prod && !cabeEnStock(prod, delta * unidadesEmpaque(prod, item.tipo_empaque_id))) return;
     
     if (newCantidad === 0) {
       // Remove from cart
@@ -393,7 +409,8 @@ const PortalCatalogo = () => {
               const quantity = getCartQuantity(product.id);
               const isFavorite = favorites.includes(product.id);
               const precio = getProductPrice(product);
-              const inStock = product.stock_actual > 0;
+              const disponible = disponibleDe(product);
+              const inStock = disponible > 0;
 
               return (
                 <div
@@ -440,7 +457,10 @@ const PortalCatalogo = () => {
                     <p className="text-sm font-medium text-foreground line-clamp-2 h-10 mb-1">
                       {product.nombre}
                     </p>
-                    <p className="text-xs text-muted-foreground mb-2">por {product.unidad}</p>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      por {product.unidad}
+                      {Number.isFinite(disponible) && inStock && <span className={disponible < 20 ? "text-warning" : ""}> · {Math.floor(disponible).toLocaleString("es-VE")} disp.</span>}
+                    </p>
                     
                     <div className="flex items-end justify-between">
                       <div>

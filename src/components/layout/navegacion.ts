@@ -1,0 +1,94 @@
+// Módulos de administración (sidebar y "Ir a…" del buscador global)
+import {
+  LayoutDashboard,
+  ShoppingCart,
+  Users,
+  Package,
+  Warehouse,
+  Boxes,
+  Tags,
+  CreditCard,
+  Truck,
+  Building2,
+  Wallet,
+  ArrowLeftRight,
+  Ticket,
+  Image,
+  FolderOpen,
+  UserPlus,
+  HandCoins,
+  Landmark,
+  FileText,
+  FileMinus,
+  PackageCheck,
+  Receipt,
+  UserCog,
+  ListChecks,
+  BarChart3,
+} from "lucide-react";
+import type { ComponentType } from "react";
+
+export type NavItem = { icon: ComponentType<{ className?: string }>; label: string; path: string; modulo: string };
+export type NavSection = { title: string; items: NavItem[] };
+
+export const navSections: NavSection[] = [
+  {
+    title: "Principal",
+    items: [
+      { icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard", modulo: "dashboard" },
+      { icon: BarChart3, label: "Reportes", path: "/admin/reportes", modulo: "reportes" },
+    ],
+  },
+  {
+    title: "Ventas",
+    items: [
+      { icon: ShoppingCart, label: "Órdenes", path: "/admin/ordenes", modulo: "ordenes" },
+      { icon: Users, label: "Clientes", path: "/admin/clientes", modulo: "clientes" },
+      { icon: UserCog, label: "Vendedores", path: "/admin/vendedores", modulo: "usuarios" },
+      { icon: UserPlus, label: "Registros", path: "/admin/registros", modulo: "registros" },
+    ],
+  },
+  {
+    title: "Catálogo",
+    items: [
+      { icon: Package, label: "Productos", path: "/admin/productos", modulo: "productos" },
+      { icon: FolderOpen, label: "Categorías", path: "/admin/categorias", modulo: "categorias" },
+      { icon: Tags, label: "Precios", path: "/admin/precios", modulo: "precios" },
+      { icon: Ticket, label: "Cupones", path: "/admin/cupones", modulo: "cupones" },
+      { icon: Image, label: "Banners", path: "/admin/banners", modulo: "banners" },
+    ],
+  },
+  {
+    title: "Inventario",
+    items: [
+      { icon: Warehouse, label: "Inventario", path: "/admin/inventario", modulo: "inventario" },
+      { icon: Boxes, label: "Almacenes", path: "/admin/almacenes", modulo: "inventario" },
+      { icon: ArrowLeftRight, label: "Transferencias", path: "/admin/transferencias", modulo: "inventario" },
+      { icon: PackageCheck, label: "Consignación", path: "/admin/consignacion", modulo: "inventario" },
+    ],
+  },
+  {
+    title: "Compras",
+    items: [
+      { icon: Building2, label: "Proveedores", path: "/admin/proveedores", modulo: "compras" },
+      { icon: Wallet, label: "Cuentas por Pagar", path: "/admin/cuentas-por-pagar", modulo: "compras" },
+    ],
+  },
+  {
+    title: "Finanzas",
+    items: [
+      { icon: CreditCard, label: "Cuentas", path: "/admin/cuentas", modulo: "cuentas" },
+      { icon: HandCoins, label: "Cuentas por Cobrar", path: "/admin/cuentas-por-cobrar", modulo: "cuentas" },
+      { icon: FileText, label: "Facturas", path: "/admin/facturas", modulo: "cuentas" },
+      { icon: FileMinus, label: "Notas de Crédito", path: "/admin/notas-credito", modulo: "cuentas" },
+      { icon: Receipt, label: "Retenciones", path: "/admin/retenciones", modulo: "cuentas" },
+      { icon: Landmark, label: "Bancos", path: "/admin/bancos", modulo: "bancos" },
+      { icon: ListChecks, label: "Conciliación", path: "/admin/conciliacion", modulo: "bancos" },
+    ],
+  },
+  {
+    title: "Logística",
+    items: [{ icon: Truck, label: "Delivery", path: "/admin/delivery", modulo: "delivery" }],
+  },
+];
+

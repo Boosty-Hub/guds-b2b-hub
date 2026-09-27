@@ -38,8 +38,8 @@ const PortalSeguridad = () => {
       return;
     }
 
-    if (formData.newPassword.length < 6) {
-      toast({ title: "Error", description: "La contraseña debe tener al menos 6 caracteres", variant: "destructive" });
+    if (formData.newPassword.length < 8 || !/[A-Za-z]/.test(formData.newPassword) || !/\d/.test(formData.newPassword)) {
+      toast({ title: "Error", description: "La contraseña debe tener al menos 8 caracteres, con letras y números", variant: "destructive" });
       return;
     }
 
@@ -98,7 +98,7 @@ const PortalSeguridad = () => {
                   type={showPassword ? "text" : "password"}
                   value={formData.newPassword}
                   onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder="Mínimo 8 caracteres, letras y números"
                 />
                 <button
                   type="button"

@@ -44,7 +44,7 @@ const Login = () => {
     } else {
       toast({
         title: "Revisa tu correo",
-        description: `Si ${email} tiene una cuenta, te enviamos un enlace para restablecer la contraseña.`,
+        description: `Si ${email} tiene una cuenta, te enviamos un enlace para restablecer la contraseña. Si no te llega en unos minutos, pide a tu asesor de GUDS que te genere una contraseña temporal.`,
       });
     }
   };

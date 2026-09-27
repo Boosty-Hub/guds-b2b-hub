@@ -13,12 +13,14 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Truck, Package, Clock, CheckCircle, Loader2, UserPlus } from "lucide-react";
+import { Loader2, UserPlus } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
 
 interface Repartidor { id: string; nombre: string; apellido: string | null; }
 interface Orden {
@@ -43,6 +45,9 @@ const Delivery = () => {
   const { toast } = useToast();
   const [repartidores, setRepartidores] = useState<Repartidor[]>([]);
   const [ordenes, setOrdenes] = useState<Orden[]>([]);
+  // Estado del despacho en Odoo (transferencia de entrega de cada orden)
+  const [despacho, setDespacho] = useState<Record<string, { estado: string; numero: string }>>({});
+  const [soloListas, setSoloListas] = useState(false);
   const [entregas, setEntregas] = useState<Entrega[]>([]);
   const [loading, setLoading] = useState(true);
   const [asignarOrden, setAsignarOrden] = useState<Orden | null>(null);
@@ -63,9 +68,21 @@ const Delivery = () => {
     if (eRes.data) setEntregas(eRes.data as unknown as Entrega[]);
     // Órdenes que ya tienen una entrega activa (no fallida) — se excluyen de "por asignar"
     const activeOrdenNums = new Set(
-      (eRes.data || []).filter((e: { estado: string }) => e.estado !== "fallida").map((e: { orden?: { numero: string } | null }) => e.orden?.numero)
+      ((eRes.data || []) as unknown as { estado: string; orden?: { numero: string } | null }[]).filter((e) => e.estado !== "fallida").map((e) => e.orden?.numero)
     );
-    if (oRes.data) setOrdenes((oRes.data as unknown as Orden[]).filter((o) => !activeOrdenNums.has(o.numero)));
+    const pendientes = ((oRes.data as unknown as Orden[]) ?? []).filter((o) => !activeOrdenNums.has(o.numero));
+    setOrdenes(pendientes);
+    if (pendientes.length) {
+      const { data: tr } = await supabase.from("transferencias").select("orden_id, estado, numero").eq("tipo", "entrega")
+        .in("orden_id", pendientes.map((o) => o.id)).neq("estado", "cancelada");
+      // Por orden, la transferencia más relevante: lista > en espera/parcial > hecha
+      const peso: Record<string, number> = { lista: 3, parcial: 2, en_espera: 2, borrador: 1, hecha: 0 };
+      const m: Record<string, { estado: string; numero: string }> = {};
+      for (const t of (tr as { orden_id: string; estado: string; numero: string }[] | null) ?? []) {
+        if (!m[t.orden_id] || (peso[t.estado] ?? 0) > (peso[m[t.orden_id].estado] ?? 0)) m[t.orden_id] = { estado: t.estado, numero: t.numero };
+      }
+      setDespacho(m);
+    }
     setLoading(false);
   };
 
@@ -88,52 +105,86 @@ const Delivery = () => {
   const entregadas = entregas.filter((e) => e.estado === "entregada").length;
   const fmt = (s: string | null) => (s ? new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }) : "—");
 
-  const pagination = usePagination(ordenes, 25);
-  const pagination2 = usePagination(entregas, 25);
+  const ordenesVista = soloListas ? ordenes.filter((o) => despacho[o.id]?.estado === "lista") : ordenes;
+  const pagination = usePagination(ordenesVista, 50);
+  const DESPACHO: Record<string, { label: string; cls: string }> = {
+    lista: { label: "Lista para despachar", cls: "border-primary/40 bg-primary/10 text-primary" },
+    en_espera: { label: "Esperando stock", cls: "border-warning/60 bg-warning/15" },
+    parcial: { label: "Parcialmente disponible", cls: "border-warning/60 bg-warning/15" },
+    borrador: { label: "Borrador en Odoo", cls: "text-muted-foreground" },
+    hecha: { label: "Despachada en Odoo", cls: "border-success/40 bg-success/10 text-success" },
+  };
+  const pagination2 = usePagination(entregas, 50);
 
-  const stat = (icon: React.ReactNode, n: number, label: string, cls: string) => (
-    <div className="rounded-lg border border-border bg-card p-4"><div className="flex items-center gap-3">
-      <div className={`rounded-lg p-2 ${cls}`}>{icon}</div>
-      <div><p className="text-2xl font-bold">{n}</p><p className="text-sm text-muted-foreground">{label}</p></div>
-    </div></div>
+  const [tab, setTab] = useState<string>("por-asignar");
+  const pestanas = (
+    <TabsList>
+      <TabsTrigger value="por-asignar">Por asignar ({ordenes.length})</TabsTrigger>
+      <TabsTrigger value="entregas">Envíos ({entregas.length})</TabsTrigger>
+    </TabsList>
   );
 
   return (
     <MainLayout title="Gestión de Envíos">
-      <div className="mb-6 grid gap-4 md:grid-cols-4">
-        {stat(<Package className="h-5 w-5 text-primary" />, total, "Total Envíos", "bg-primary/10")}
-        {stat(<Clock className="h-5 w-5 text-muted-foreground" />, asignadas, "Asignados", "bg-muted")}
-        {stat(<Truck className="h-5 w-5 text-amber-600" />, enCamino, "En Ruta", "bg-amber-500/10")}
-        {stat(<CheckCircle className="h-5 w-5 text-green-600" />, entregadas, "Entregados", "bg-green-500/10")}
-      </div>
+      <KpiStrip
+        items={[
+          { label: "Total Envíos", valor: total, tono: "primario" },
+          { label: "Asignados", valor: asignadas },
+          { label: "En Ruta", valor: enCamino, tono: "alerta" },
+          { label: "Entregados", valor: entregadas, tono: "positivo" },
+        ]}
+      />
 
-      <Tabs defaultValue="por-asignar" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="por-asignar">Por asignar ({ordenes.length})</TabsTrigger>
-          <TabsTrigger value="entregas">Envíos ({entregas.length})</TabsTrigger>
-        </TabsList>
+      <Tabs value={tab} onValueChange={setTab}>
+        {/* Pestañas, búsqueda, filtros y acciones de la pestaña activa en una sola fila */}
+        {tab === "por-asignar" ? (
+          <BarraLista
+            pestanas={pestanas}
+            filtros={
+              <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+                <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={soloListas} onChange={(e) => setSoloListas(e.target.checked)} />
+                Solo las listas para despachar en Odoo ({ordenes.filter((o) => despacho[o.id]?.estado === "lista").length})
+              </label>
+            }
+            contador={loading ? undefined : `${ordenesVista.length} registros`}
+          />
+        ) : (
+          <BarraLista pestanas={pestanas} contador={loading ? undefined : `${entregas.length} registros`} />
+        )}
 
         <TabsContent value="por-asignar">
-          <div className="rounded-xl border border-border bg-card">
-            {loading ? <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
-            : ordenes.length === 0 ? <div className="py-16 text-center text-muted-foreground">No hay órdenes listas para asignar a delivery</div>
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+            : ordenes.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No hay órdenes listas para asignar a delivery</div>
             : (
               <Table>
                 <TableHeader><TableRow>
                   <TableHead>Orden</TableHead><TableHead>Cliente</TableHead><TableHead>Dirección</TableHead>
-                  <TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead><TableHead className="text-right">Acción</TableHead>
+                  <TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead><TableHead>Despacho (Odoo)</TableHead><TableHead className="text-right">Acción</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {pagination.pageItems.map((o) => (
-                    <TableRow key={o.id} className="hover:bg-muted/50">
-                      <TableCell className="font-medium text-primary">{o.numero}</TableCell>
-                      <TableCell>{o.cliente?.nombre_negocio || "—"}</TableCell>
-                      <TableCell className="text-muted-foreground max-w-[220px] truncate">{o.cliente?.direccion || o.direccion_entrega || "—"}</TableCell>
-                      <TableCell className="text-right font-semibold">{formatPrice(Number(o.total))}</TableCell>
-                      <TableCell><Badge variant="secondary" className="capitalize">{o.estado}</Badge></TableCell>
-                      <TableCell className="text-right">
-                        <Button size="sm" variant="outline" onClick={() => { setAsignarOrden(o); setRepSel(""); setPrioridad("normal"); }}>
-                          <UserPlus className="h-4 w-4 mr-1" />Asignar
+                    <TableRow key={o.id}>
+                      <TableCell className="whitespace-nowrap font-medium text-primary">{o.numero}</TableCell>
+                      <TableCell>
+                        <span className="block max-w-[260px] truncate" title={o.cliente?.nombre_negocio || undefined}>{o.cliente?.nombre_negocio || "—"}</span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        <span className="block max-w-[240px] truncate" title={o.cliente?.direccion || o.direccion_entrega || undefined}>{o.cliente?.direccion || o.direccion_entrega || "—"}</span>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(Number(o.total))}</TableCell>
+                      <TableCell className="whitespace-nowrap"><Badge variant="secondary" className="capitalize">{o.estado}</Badge></TableCell>
+                      <TableCell>
+                        {despacho[o.id] ? (
+                          <span className="flex items-center gap-1.5 whitespace-nowrap">
+                            <Badge variant="outline" className={`whitespace-nowrap font-normal ${DESPACHO[despacho[o.id].estado]?.cls ?? ""}`}>{DESPACHO[despacho[o.id].estado]?.label ?? despacho[o.id].estado}</Badge>
+                            <span className="font-mono text-xs text-muted-foreground">{despacho[o.id].numero}</span>
+                          </span>
+                        ) : <span className="whitespace-nowrap text-xs text-muted-foreground">Sin transferencia</span>}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right">
+                        <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => { setAsignarOrden(o); setRepSel(""); setPrioridad("normal"); }}>
+                          <UserPlus className="h-3.5 w-3.5" />Asignar
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -146,9 +197,9 @@ const Delivery = () => {
         </TabsContent>
 
         <TabsContent value="entregas">
-          <div className="rounded-xl border border-border bg-card">
-            {loading ? <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
-            : entregas.length === 0 ? <div className="py-16 text-center text-muted-foreground">Aún no hay envíos</div>
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+            : entregas.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay envíos</div>
             : (
               <Table>
                 <TableHeader><TableRow>
@@ -157,13 +208,15 @@ const Delivery = () => {
                 </TableRow></TableHeader>
                 <TableBody>
                   {pagination2.pageItems.map((e) => (
-                    <TableRow key={e.id} className="hover:bg-muted/50">
-                      <TableCell className="font-medium text-primary">{e.orden?.numero || "—"}</TableCell>
-                      <TableCell>{e.orden?.cliente?.nombre_negocio || "—"}</TableCell>
-                      <TableCell>{e.repartidor ? `${e.repartidor.nombre} ${e.repartidor.apellido || ""}` : "—"}</TableCell>
-                      <TableCell className="text-muted-foreground">{fmt(e.fecha_asignacion)}</TableCell>
-                      <TableCell className="text-right font-semibold">{formatPrice(Number(e.orden?.total || 0))}</TableCell>
-                      <TableCell><Badge variant={estadoConfig[e.estado]?.variant || "outline"}>{estadoConfig[e.estado]?.label || e.estado}</Badge></TableCell>
+                    <TableRow key={e.id}>
+                      <TableCell className="whitespace-nowrap font-medium text-primary">{e.orden?.numero || "—"}</TableCell>
+                      <TableCell>
+                        <span className="block max-w-[260px] truncate" title={e.orden?.cliente?.nombre_negocio || undefined}>{e.orden?.cliente?.nombre_negocio || "—"}</span>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">{e.repartidor ? `${e.repartidor.nombre} ${e.repartidor.apellido || ""}` : "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{fmt(e.fecha_asignacion)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(Number(e.orden?.total || 0))}</TableCell>
+                      <TableCell className="whitespace-nowrap"><Badge variant={estadoConfig[e.estado]?.variant || "outline"}>{estadoConfig[e.estado]?.label || e.estado}</Badge></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

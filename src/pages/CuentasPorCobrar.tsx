@@ -16,21 +16,33 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Search, Loader2, HandCoins, Wallet, Users, FilePlus, Eye, ShieldCheck, PiggyBank } from "lucide-react";
+import { Loader2, HandCoins, FilePlus, Eye, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { SelectorFacturas, type FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
+import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
+import { useColumnas } from "@/components/datos/columnas";
 
-interface FacturaRow { id: string; numero: string; cliente_id: string; tipo: string; fecha_emision: string | null; saldo_usd: number; }
+interface FacturaRow { id: string; numero: string; cliente_id: string; tipo: string; fecha_emision: string | null; fecha_vencimiento: string | null; saldo_usd: number; }
 interface Banco { id: string; nombre: string; moneda: string; metodo_pago: string; metodos: string[] | null; }
 
 const metodoLabel: Record<string, string> = {
   transferencia: "Transferencia", efectivo: "Efectivo", pago_movil: "Pago Móvil", credito: "Crédito", tarjeta: "Tarjeta",
 };
-interface Deudor { cliente_id: string; nombre: string; docs: number; saldo: number; }
+// Antigüedad por días de vencimiento; "aFavor" = saldos negativos (notas de crédito sin aplicar); neto = saldo + aFavor
+interface Deudor {
+  cliente_id: string; nombre: string; docs: number; saldo: number;
+  porVencer: number; d30: number; d60: number; d90: number; mas90: number; aFavor: number; neto: number;
+}
+const TRAMOS = [
+  { k: "porVencer", label: "Por vencer" }, { k: "d30", label: "1–30 días" }, { k: "d60", label: "31–60 días" },
+  { k: "d90", label: "61–90 días" }, { k: "mas90", label: "+90 días" },
+] as const;
 interface Cobro { id: string; numero: string; monto: number; monto_moneda: number; moneda: string; created_at: string; cliente?: { nombre_negocio: string } | null; banco?: { nombre: string } | null; }
 interface CuentaManual { id: string; numero: string; cliente_id: string; concepto: string; monto: number; monto_pagado: number; estado_pago: string; fecha: string; }
 interface PagoPendiente { id: string; numero: string; cliente_id: string; monto: number; monto_moneda: number | null; moneda: string; metodo: string; referencia: string | null; comprobante_url: string | null; banco_id: string | null; created_at: string; cliente?: { nombre_negocio: string } | null; orden?: { numero: string } | null; }
@@ -73,7 +85,7 @@ const CuentasPorCobrar = () => {
   const fetchAll = async () => {
     setLoading(true);
     const [{ data: facs }, { data: clis }, { data: bcs }, { data: cbs }, { data: cxc }, { data: pend }, { data: ants }] = await Promise.all([
-      supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, saldo_usd").eq("estado", "posted"),
+      supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, fecha_vencimiento, saldo_usd").eq("estado", "posted"),
       supabase.from("clientes").select("id, nombre_negocio").order("nombre_negocio"),
       supabase.from("bancos").select("id, nombre, moneda, metodo_pago, metodos").eq("activo", true).order("nombre"),
       supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("created_at", { ascending: false }).limit(5000),
@@ -84,9 +96,9 @@ const CuentasPorCobrar = () => {
     setFacturas((facs as FacturaRow[]) ?? []);
     setClientes(Object.fromEntries(((clis as { id: string; nombre_negocio: string }[]) ?? []).map((c) => [c.id, c.nombre_negocio])));
     setBancos((bcs as Banco[]) ?? []);
-    setCobros((cbs as Cobro[]) ?? []);
+    setCobros((cbs as unknown as Cobro[]) ?? []);
     setCuentas((cxc as CuentaManual[]) ?? []);
-    setPendientes((pend as PagoPendiente[]) ?? []);
+    setPendientes((pend as unknown as PagoPendiente[]) ?? []);
     setAnticipos(((ants as Anticipo[]) ?? []).filter((a) => Number(a.disponible) > 0.009));
     setLoading(false);
   };
@@ -95,14 +107,27 @@ const CuentasPorCobrar = () => {
   const facturasNormales = useMemo(() => facturas.filter((f) => f.tipo === "factura" && f.saldo_usd > 0.009), [facturas]);
 
   const deudores = useMemo(() => {
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
     const m = new Map<string, Deudor>();
-    for (const f of facturasNormales) {
-      const d = m.get(f.cliente_id) || { cliente_id: f.cliente_id, nombre: clientes[f.cliente_id] || "—", docs: 0, saldo: 0 };
-      d.docs += 1; d.saldo += Number(f.saldo_usd);
+    const de = (id: string) => m.get(id) || { cliente_id: id, nombre: clientes[id] || "—", docs: 0, saldo: 0,
+      porVencer: 0, d30: 0, d60: 0, d90: 0, mas90: 0, aFavor: 0, neto: 0 };
+    for (const f of facturas) {
+      const saldo = Number(f.saldo_usd);
+      if (Math.abs(saldo) <= 0.009) continue;
+      const d = de(f.cliente_id);
+      if (saldo < 0) { d.aFavor += saldo; }
+      else {
+        d.docs += 1; d.saldo += saldo;
+        const vence = f.fecha_vencimiento || f.fecha_emision;
+        const dias = vence ? Math.floor((hoy.getTime() - new Date(`${vence}T00:00:00`).getTime()) / 86400000) : 0;
+        if (dias <= 0) d.porVencer += saldo; else if (dias <= 30) d.d30 += saldo; else if (dias <= 60) d.d60 += saldo;
+        else if (dias <= 90) d.d90 += saldo; else d.mas90 += saldo;
+      }
+      d.neto = d.saldo + d.aFavor;
       m.set(f.cliente_id, d);
     }
-    return [...m.values()].sort((a, b) => b.saldo - a.saldo);
-  }, [facturasNormales, clientes]);
+    return [...m.values()].filter((d) => d.saldo > 0.009).sort((a, b) => b.saldo - a.saldo);
+  }, [facturas, clientes]);
 
   const clientesLista = useMemo(() => Object.entries(clientes).map(([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre)), [clientes]);
 
@@ -124,11 +149,26 @@ const CuentasPorCobrar = () => {
   };
 
   const totalPorCobrar = deudores.reduce((s, d) => s + d.saldo, 0);
+  // Neto como en Odoo: facturas pendientes menos saldos a favor (notas de crédito sin aplicar) de todos los clientes
+  const totalAFavor = facturas.reduce((s, f) => s + (Number(f.saldo_usd) < -0.009 ? Number(f.saldo_usd) : 0), 0);
+  const totalNeto = totalPorCobrar + totalAFavor;
+  const totalesTramo = TRAMOS.map((t) => ({ ...t, monto: deudores.reduce((s, d) => s + d[t.k], 0) }));
   const filtrados = deudores.filter((d) => d.nombre.toLowerCase().includes(q.toLowerCase()));
-  const pgDeud = usePagination(filtrados, 25);
-  const pgCobros = usePagination(cobros, 25);
-  const pgCuentas = usePagination(cuentas, 25);
-  const pgAnt = usePagination(anticipos, 25);
+  const { ordenadas: deudOrdenados, orden: ordenDeud, alternar: alternarDeud } = useOrdenTabla(filtrados, {
+    nombre: (d) => d.nombre, docs: (d) => d.docs, porVencer: (d) => d.porVencer, d30: (d) => d.d30, d60: (d) => d.d60,
+    d90: (d) => d.d90, mas90: (d) => d.mas90, saldo: (d) => d.saldo, aFavor: (d) => Math.abs(d.aFavor), neto: (d) => d.neto,
+  });
+  const pgDeud = usePagination(deudOrdenados, 50);
+  const exportarDeudores = () => exportarCSV("cuentas-por-cobrar", deudOrdenados, [
+    { titulo: "Cliente", valor: (d) => d.nombre }, { titulo: "Facturas", valor: (d) => d.docs },
+    ...TRAMOS.map((t) => ({ titulo: t.label, valor: (d: Deudor) => Number(d[t.k].toFixed(2)) })),
+    { titulo: "Saldo", valor: (d) => Number(d.saldo.toFixed(2)) }, { titulo: "A favor", valor: (d) => Number(Math.abs(d.aFavor).toFixed(2)) },
+    { titulo: "Neto", valor: (d) => Number(d.neto.toFixed(2)) },
+  ]);
+  const [tabCxc, setTabCxc] = useState("cobrar");
+  const pgCobros = usePagination(cobros, 50);
+  const pgCuentas = usePagination(cuentas, 50);
+  const pgAnt = usePagination(anticipos, 50);
 
   const bancoSel = bancos.find((b) => b.id === form.banco_id);
   const esBs = bancoSel?.moneda === "BS";
@@ -197,7 +237,7 @@ const CuentasPorCobrar = () => {
     fetchAll();
   };
 
-  const pgPend = usePagination(pendientes, 25);
+  const pgPend = usePagination(pendientes, 50);
 
   const abrirVerif = (p: PagoPendiente) => {
     setVerif(p);
@@ -261,67 +301,59 @@ const CuentasPorCobrar = () => {
     fetchAll();
   };
 
+  const cols = useColumnas("cxc-antiguedad", [{ etiqueta: "Cliente", fija: true }, { etiqueta: "Facturas" }, ...["Por vencer", "1–30 días", "31–60 días", "61–90 días", "+90 días"].map((etiqueta) => ({ etiqueta })), { etiqueta: "Saldo" }, { etiqueta: "A favor" }, { etiqueta: "Neto" }, { etiqueta: "Acción", fija: true }]);
   return (
     <MainLayout title="Cuentas por Cobrar">
-      <div className="mb-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-destructive/10 p-2"><Wallet className="h-5 w-5 text-destructive" /></div>
-            <div><p className="text-2xl font-bold">{formatPrice(totalPorCobrar)}</p><p className="text-sm text-muted-foreground">Total por cobrar</p></div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-warning/10 p-2"><Users className="h-5 w-5 text-warning" /></div>
-            <div><p className="text-2xl font-bold">{deudores.length}</p><p className="text-sm text-muted-foreground">Clientes con deuda</p></div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-success/10 p-2"><HandCoins className="h-5 w-5 text-success" /></div>
-            <div><p className="text-2xl font-bold">{cobros.length}</p><p className="text-sm text-muted-foreground">Cobros registrados</p></div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2"><PiggyBank className="h-5 w-5 text-primary" /></div>
-            <div><p className="text-2xl font-bold">{formatPrice(anticipos.reduce((s, a) => s + Number(a.disponible), 0))}</p><p className="text-sm text-muted-foreground">Anticipos sin aplicar</p></div>
-          </div>
-        </div>
-      </div>
+      {cols.estilo}
+      <KpiStrip items={[
+        {
+          label: "Por cobrar (neto)",
+          valor: formatPrice(totalNeto),
+          tono: "negativo",
+          detalle: Math.abs(totalAFavor) > 0.009 ? `Facturas ${formatPrice(totalPorCobrar)} · a favor ${formatPrice(totalAFavor)}` : undefined,
+        },
+        { label: "Clientes con deuda", valor: deudores.length, tono: "alerta" },
+        { label: "Cobros registrados", valor: cobros.length, tono: "positivo" },
+        { label: "Anticipos sin aplicar", valor: formatPrice(anticipos.reduce((s, a) => s + Number(a.disponible), 0)), tono: "primario" },
+      ]} />
 
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative max-w-md flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Buscar cliente..." className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" className="gap-2" onClick={() => { setCxcForm({ cliente_id: "", concepto: "", monto: 0, fecha: "" }); setOpenCxc(true); }}>
-            <FilePlus className="h-4 w-4" /> Nueva cuenta por cobrar
-          </Button>
-          <Button className="gap-2" onClick={() => abrirCobro()}><HandCoins className="h-4 w-4" /> Registrar Cobro</Button>
-        </div>
-      </div>
+      {/* Búsqueda, pestañas y acciones en una sola fila */}
+      <Tabs value={tabCxc} onValueChange={setTabCxc}>
+        <BarraLista
+          busqueda={q}
+          onBusqueda={setQ}
+          placeholder="Buscar cliente..."
+          pestanas={
+            <TabsList className="h-auto flex-wrap justify-start">
+              <TabsTrigger value="cobrar">Por cobrar ({deudores.length})</TabsTrigger>
+              <TabsTrigger value="manuales">Cuentas manuales ({cuentas.length})</TabsTrigger>
+              <TabsTrigger value="cobros">Recibos ({cobros.length})</TabsTrigger>
+              <TabsTrigger value="anticipos">Anticipos ({anticipos.length})</TabsTrigger>
+              <TabsTrigger value="verificar" className="gap-1.5">
+                <ShieldCheck className="h-3.5 w-3.5" /> Por verificar
+                {pendientes.length > 0 && <Badge variant="destructive" className="ml-1 px-1.5">{pendientes.length}</Badge>}
+              </TabsTrigger>
+            </TabsList>
+          }
+          acciones={
+            <>
+              <Button size="sm" variant="outline" className="gap-1.5" title="Nueva cuenta por cobrar manual" onClick={() => { setCxcForm({ cliente_id: "", concepto: "", monto: 0, fecha: "" }); setOpenCxc(true); }}>
+                <FilePlus className="h-3.5 w-3.5" /> Nueva CxC
+              </Button>
+              <Button size="sm" className="gap-1.5" onClick={() => abrirCobro()}><HandCoins className="h-3.5 w-3.5" /> Registrar Cobro</Button>
+              {tabCxc === "cobrar" && <>{cols.selector}<BotonExportar soloIcono onClick={exportarDeudores} total={deudOrdenados.length} /></>}
+            </>
+          }
+        />
 
       {loading ? (
-        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
       ) : (
-        <Tabs defaultValue="cobrar">
-          <TabsList>
-            <TabsTrigger value="cobrar">Por cobrar ({deudores.length})</TabsTrigger>
-            <TabsTrigger value="manuales">Cuentas manuales ({cuentas.length})</TabsTrigger>
-            <TabsTrigger value="cobros">Recibos ({cobros.length})</TabsTrigger>
-            <TabsTrigger value="anticipos">Anticipos ({anticipos.length})</TabsTrigger>
-            <TabsTrigger value="verificar" className="gap-1.5">
-              <ShieldCheck className="h-3.5 w-3.5" /> Por verificar
-              {pendientes.length > 0 && <Badge variant="destructive" className="ml-1 px-1.5">{pendientes.length}</Badge>}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="verificar" className="mt-4">
-            <div className="rounded-xl border border-border bg-card shadow-sm">
+        <>
+          <TabsContent value="verificar">
+            <div className="rounded-lg border border-border bg-card">
               {pendientes.length === 0 ? (
-                <p className="p-8 text-center text-muted-foreground">No hay pagos por verificar. Los pagos reportados por clientes y vendedores aparecen aquí.</p>
+                <p className="p-6 text-center text-muted-foreground">No hay pagos por verificar. Los pagos reportados por clientes y vendedores aparecen aquí.</p>
               ) : (
                 <>
                   <Table>
@@ -336,15 +368,15 @@ const CuentasPorCobrar = () => {
                     <TableBody>
                       {pgPend.pageItems.map((p) => (
                         <TableRow key={p.id}>
-                          <TableCell className="font-mono text-sm text-primary">{p.numero}</TableCell>
-                          <TableCell className="font-medium">{p.cliente?.nombre_negocio || "—"}</TableCell>
-                          <TableCell className="text-muted-foreground">{p.orden?.numero || "—"}</TableCell>
-                          <TableCell>{metodoLabel[p.metodo] || p.metodo}</TableCell>
-                          <TableCell className="font-mono text-sm text-muted-foreground">{p.referencia || "—"}</TableCell>
-                          <TableCell className="text-right font-semibold">{formatPrice(p.monto)}</TableCell>
-                          <TableCell className="text-muted-foreground">{new Date(p.created_at).toLocaleDateString("es-VE")}</TableCell>
+                          <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{p.numero}</TableCell>
+                          <TableCell className="font-medium"><span className="block max-w-[260px] truncate" title={p.cliente?.nombre_negocio || undefined}>{p.cliente?.nombre_negocio || "—"}</span></TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">{p.orden?.numero || "—"}</TableCell>
+                          <TableCell className="whitespace-nowrap">{metodoLabel[p.metodo] || p.metodo}</TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground"><span className="block max-w-[160px] truncate" title={p.referencia || undefined}>{p.referencia || "—"}</span></TableCell>
+                          <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(p.monto)}</TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(p.created_at).toLocaleDateString("es-VE")}</TableCell>
                           <TableCell className="text-right">
-                            <Button size="sm" onClick={() => abrirVerif(p)}>Verificar</Button>
+                            <Button size="sm" className="h-7 px-2 text-xs" onClick={() => abrirVerif(p)}>Verificar</Button>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -356,25 +388,43 @@ const CuentasPorCobrar = () => {
             </div>
           </TabsContent>
 
-          <TabsContent value="cobrar" className="mt-4">
-            <div className="rounded-xl border border-border bg-card shadow-sm">
-              <Table>
+          <TabsContent value="cobrar">
+            <KpiStrip
+              className="mb-2"
+              items={totalesTramo.map((t) => ({
+                label: t.label,
+                valor: formatPrice(t.monto),
+                tono: t.k === "mas90" && t.monto > 0.009 ? "negativo" as const : undefined,
+              }))}
+            />
+            <div className="rounded-lg border border-border bg-card">
+              <Table data-tabla="cxc-antiguedad">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead className="text-center">Facturas</TableHead>
-                    <TableHead className="text-right">Saldo</TableHead>
+                    <EncabezadoOrdenable clave="nombre" orden={ordenDeud} onOrdenar={alternarDeud}>Cliente</EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="docs" orden={ordenDeud} onOrdenar={alternarDeud} alinear="centro">Facturas</EncabezadoOrdenable>
+                    {TRAMOS.map((t) => <EncabezadoOrdenable key={t.k} clave={t.k} orden={ordenDeud} onOrdenar={alternarDeud} alinear="derecha" className="hidden lg:table-cell">{t.label}</EncabezadoOrdenable>)}
+                    <EncabezadoOrdenable clave="saldo" orden={ordenDeud} onOrdenar={alternarDeud} alinear="derecha">Saldo</EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="aFavor" orden={ordenDeud} onOrdenar={alternarDeud} alinear="derecha">A favor</EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="neto" orden={ordenDeud} onOrdenar={alternarDeud} alinear="derecha">Neto</EncabezadoOrdenable>
                     <TableHead className="text-right">Acción</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pgDeud.pageItems.map((d) => (
                     <TableRow key={d.cliente_id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/cuentas/${d.cliente_id}`)}>
-                      <TableCell className="font-medium">{d.nombre}</TableCell>
+                      <TableCell className="font-medium"><span className="block max-w-[260px] truncate" title={d.nombre}>{d.nombre}</span></TableCell>
                       <TableCell className="text-center">{d.docs}</TableCell>
-                      <TableCell className="text-right font-semibold text-destructive">{formatPrice(d.saldo)}</TableCell>
+                      {TRAMOS.map((t) => (
+                        <TableCell key={t.k} className={`hidden whitespace-nowrap text-right lg:table-cell ${d[t.k] > 0.009 ? (t.k === "mas90" ? "text-destructive" : "") : "text-muted-foreground"}`}>
+                          {d[t.k] > 0.009 ? formatPrice(d[t.k]) : "—"}
+                        </TableCell>
+                      ))}
+                      <TableCell className="whitespace-nowrap text-right font-semibold text-destructive">{formatPrice(d.saldo)}</TableCell>
+                      <TableCell className={`whitespace-nowrap text-right ${d.aFavor < -0.009 ? "text-success" : "text-muted-foreground"}`}>{d.aFavor < -0.009 ? formatPrice(Math.abs(d.aFavor)) : "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(d.neto)}</TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); abrirCobro(d.cliente_id); }}>Registrar cobro</Button>
+                        <Button size="sm" variant="outline" className="h-7 whitespace-nowrap px-2 text-xs" onClick={(e) => { e.stopPropagation(); abrirCobro(d.cliente_id); }}>Registrar cobro</Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -384,10 +434,10 @@ const CuentasPorCobrar = () => {
             </div>
           </TabsContent>
 
-          <TabsContent value="manuales" className="mt-4">
-            <div className="rounded-xl border border-border bg-card shadow-sm">
+          <TabsContent value="manuales">
+            <div className="rounded-lg border border-border bg-card">
               {cuentas.length === 0 ? (
-                <p className="p-8 text-center text-muted-foreground">No hay cuentas por cobrar manuales. Creá una con "Nueva cuenta por cobrar".</p>
+                <p className="p-6 text-center text-muted-foreground">No hay cuentas por cobrar manuales. Creá una con "Nueva cuenta por cobrar".</p>
               ) : (
                 <>
                   <Table>
@@ -401,15 +451,15 @@ const CuentasPorCobrar = () => {
                     <TableBody>
                       {pgCuentas.pageItems.map((c) => (
                         <TableRow key={c.id}>
-                          <TableCell className="font-mono text-sm text-primary">{c.numero}</TableCell>
-                          <TableCell className="font-medium">{clientes[c.cliente_id] || "—"}</TableCell>
-                          <TableCell className="text-muted-foreground">{c.concepto}</TableCell>
-                          <TableCell className="text-muted-foreground">{new Date(c.fecha).toLocaleDateString("es-VE")}</TableCell>
+                          <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{c.numero}</TableCell>
+                          <TableCell className="font-medium"><span className="block max-w-[260px] truncate" title={clientes[c.cliente_id] || undefined}>{clientes[c.cliente_id] || "—"}</span></TableCell>
+                          <TableCell className="text-muted-foreground"><span className="block max-w-[280px] truncate" title={c.concepto}>{c.concepto}</span></TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(c.fecha).toLocaleDateString("es-VE")}</TableCell>
                           <TableCell>
                             <Badge variant={c.estado_pago === "pagado" ? "default" : c.estado_pago === "parcial" ? "outline" : "secondary"}>{c.estado_pago}</Badge>
                           </TableCell>
-                          <TableCell className="text-right">{formatPrice(c.monto)}</TableCell>
-                          <TableCell className="text-right font-semibold text-destructive">{formatPrice(Number(c.monto) - Number(c.monto_pagado || 0))}</TableCell>
+                          <TableCell className="whitespace-nowrap text-right">{formatPrice(c.monto)}</TableCell>
+                          <TableCell className="whitespace-nowrap text-right font-semibold text-destructive">{formatPrice(Number(c.monto) - Number(c.monto_pagado || 0))}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -420,8 +470,8 @@ const CuentasPorCobrar = () => {
             </div>
           </TabsContent>
 
-          <TabsContent value="cobros" className="mt-4">
-            <div className="rounded-xl border border-border bg-card shadow-sm">
+          <TabsContent value="cobros">
+            <div className="rounded-lg border border-border bg-card">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -436,12 +486,12 @@ const CuentasPorCobrar = () => {
                 <TableBody>
                   {pgCobros.pageItems.map((c) => (
                     <TableRow key={c.id}>
-                      <TableCell className="font-mono text-sm text-primary">{c.numero}</TableCell>
-                      <TableCell className="font-medium">{c.cliente?.nombre_negocio || "—"}</TableCell>
-                      <TableCell className="text-muted-foreground">{c.banco?.nombre || "—"}</TableCell>
-                      <TableCell className="text-right">{Number(c.monto_moneda).toLocaleString("es-VE")} {c.moneda}</TableCell>
-                      <TableCell className="text-right font-semibold">{formatPrice(c.monto)}</TableCell>
-                      <TableCell className="text-muted-foreground">{new Date(c.created_at).toLocaleDateString("es-VE")}</TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{c.numero}</TableCell>
+                      <TableCell className="font-medium"><span className="block max-w-[260px] truncate" title={c.cliente?.nombre_negocio || undefined}>{c.cliente?.nombre_negocio || "—"}</span></TableCell>
+                      <TableCell className="text-muted-foreground"><span className="block max-w-[180px] truncate" title={c.banco?.nombre || undefined}>{c.banco?.nombre || "—"}</span></TableCell>
+                      <TableCell className="whitespace-nowrap text-right">{Number(c.monto_moneda).toLocaleString("es-VE")} {c.moneda}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(c.monto)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(c.created_at).toLocaleDateString("es-VE")}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -450,10 +500,10 @@ const CuentasPorCobrar = () => {
             </div>
           </TabsContent>
 
-          <TabsContent value="anticipos" className="mt-4">
-            <div className="rounded-xl border border-border bg-card shadow-sm">
+          <TabsContent value="anticipos">
+            <div className="rounded-lg border border-border bg-card">
               {anticipos.length === 0 ? (
-                <p className="p-8 text-center text-muted-foreground">No hay anticipos sin aplicar. Un pago con sobrante queda acá.</p>
+                <p className="p-6 text-center text-muted-foreground">No hay anticipos sin aplicar. Un pago con sobrante queda acá.</p>
               ) : (
                 <>
                   <Table>
@@ -467,13 +517,13 @@ const CuentasPorCobrar = () => {
                     <TableBody>
                       {pgAnt.pageItems.map((a) => (
                         <TableRow key={a.pago_id}>
-                          <TableCell className="font-mono text-sm text-primary">{a.numero}</TableCell>
-                          <TableCell className="font-medium">{clientes[a.cliente_id] || "—"}</TableCell>
-                          <TableCell className="text-muted-foreground">{new Date(a.created_at).toLocaleDateString("es-VE")}</TableCell>
-                          <TableCell className="text-right">{formatPrice(a.monto_usd)}</TableCell>
-                          <TableCell className="text-right font-semibold text-success">{formatPrice(a.disponible)}</TableCell>
+                          <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{a.numero}</TableCell>
+                          <TableCell className="font-medium"><span className="block max-w-[260px] truncate" title={clientes[a.cliente_id] || undefined}>{clientes[a.cliente_id] || "—"}</span></TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(a.created_at).toLocaleDateString("es-VE")}</TableCell>
+                          <TableCell className="whitespace-nowrap text-right">{formatPrice(a.monto_usd)}</TableCell>
+                          <TableCell className="whitespace-nowrap text-right font-semibold text-success">{formatPrice(a.disponible)}</TableCell>
                           <TableCell className="text-right">
-                            <Button size="sm" variant="outline" onClick={() => abrirAplicarAnticipo(a)}>Aplicar a facturas</Button>
+                            <Button size="sm" variant="outline" className="h-7 whitespace-nowrap px-2 text-xs" onClick={() => abrirAplicarAnticipo(a)}>Aplicar a facturas</Button>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -484,8 +534,9 @@ const CuentasPorCobrar = () => {
               )}
             </div>
           </TabsContent>
-        </Tabs>
+        </>
       )}
+      </Tabs>
 
       {/* Registrar cobro */}
       <Dialog open={open} onOpenChange={setOpen}>

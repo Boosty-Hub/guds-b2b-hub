@@ -1,4 +1,7 @@
-import { Bell, Search, User, LogOut, Settings } from "lucide-react";
+import { Bell, User, LogOut, Settings, Rows3, Rows4 } from "lucide-react";
+import { useState } from "react";
+import { leerDensidad, guardarDensidad, type Densidad } from "@/lib/densidad";
+import { BuscadorGlobal } from "@/components/BuscadorGlobal";
 import { useNotifications } from "@/contexts/NotificationsContext";
 import { useControlTower } from "@/contexts/ControlTowerContext";
 import { usePendingActions } from "@/hooks/use-pending-actions";
@@ -17,7 +20,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { TasaBcv } from "@/components/TasaBcv";
+import { EstadoSyncOdoo } from "@/components/EstadoSyncOdoo";
 import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
+import { EmpresaSelector } from "@/components/EmpresaSelector";
 
 interface HeaderProps {
   title: string;
@@ -31,6 +36,9 @@ export function Header({ title }: HeaderProps) {
   const { total: totalPendientes } = usePendingActions();
   const totalBadge = unreadCount + totalPendientes;
 
+  const [densidad, setDensidad] = useState<Densidad>(leerDensidad);
+  const alternarDensidad = () => { const d: Densidad = densidad === "compacta" ? "comoda" : "compacta"; guardarDensidad(d); setDensidad(d); };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate("/login");
@@ -41,18 +49,18 @@ export function Header({ title }: HeaderProps) {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card px-6">
-      <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+    <header className="sticky top-0 z-30 flex h-12 items-center justify-between gap-4 border-b border-border bg-card px-4">
+      <h1 className="truncate text-base font-semibold text-foreground">{title}</h1>
 
-      <div className="flex items-center gap-4">
-        {/* Search */}
-        <div className="relative hidden md:block">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Buscar..."
-            className="w-64 pl-9"
-          />
-        </div>
+      <div className="flex items-center gap-2">
+        {/* Buscador global (Ctrl/⌘ + K) */}
+        <BuscadorGlobal className="hidden md:flex" />
+
+        {/* Empresa activa */}
+        <EmpresaSelector />
+
+        {/* Sincronización con Odoo */}
+        <EstadoSyncOdoo className="hidden xl:flex" />
 
         {/* Tasa BCV */}
         <TasaBcv />
@@ -105,6 +113,11 @@ export function Header({ title }: HeaderProps) {
             <DropdownMenuItem onClick={() => navigate("/admin/configuracion")}>
               <Settings className="mr-2 h-4 w-4" />
               Configuración
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); alternarDensidad(); }}>
+              {densidad === "compacta" ? <Rows4 className="mr-2 h-4 w-4" /> : <Rows3 className="mr-2 h-4 w-4" />}
+              Vista {densidad === "compacta" ? "compacta" : "cómoda"}
+              <span className="ml-auto text-[10px] text-muted-foreground">cambiar</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive" onClick={handleLogout}>

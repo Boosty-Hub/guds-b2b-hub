@@ -87,15 +87,15 @@ const VendedorConsignacion = () => {
 
           {clienteSel && (
             <>
-              <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-                <h2 className="mb-3 font-semibold">Declarar venta — {clienteSel.nombre} ({clienteSel.almacen_nombre})</h2>
+              <div className="rounded-lg border border-border bg-card p-3">
+                <h2 className="mb-2 text-[13px] font-semibold">Declarar venta — {clienteSel.nombre} ({clienteSel.almacen_nombre})</h2>
                 <DeclararVentaForm almacenId={clienteSel.almacen_id} stock={stock} onDeclarado={() => cargarDetalle(clienteId)} />
               </div>
 
-              <div className="rounded-xl border border-border bg-card shadow-sm">
-                <div className="border-b border-border p-5"><h2 className="font-semibold">Declaraciones de {clienteSel.nombre} ({declaraciones.length})</h2></div>
+              <div className="rounded-lg border border-border bg-card">
+                <div className="border-b border-border bg-muted/30 px-3 py-1.5"><h2 className="text-[13px] font-semibold">Declaraciones de {clienteSel.nombre} ({declaraciones.length})</h2></div>
                 {declaraciones.length === 0 ? (
-                  <p className="p-8 text-center text-muted-foreground">Sin declaraciones todavía.</p>
+                  <p className="p-5 text-center text-sm text-muted-foreground">Sin declaraciones todavía.</p>
                 ) : (
                   <Table>
                     <TableHeader>

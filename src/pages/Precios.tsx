@@ -36,6 +36,8 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { KpiStrip } from "@/components/datos/KpiStrip";
+import { BarraLista } from "@/components/datos/BarraLista";
 
 interface ListaConClientes extends ListaPrecios {
   clientes_count?: number;
@@ -386,8 +388,8 @@ const Precios = () => {
     l.nombre.toLowerCase().includes(listSearchTerm.toLowerCase())
   );
 
-  const pagination = usePagination(filteredProductos, 25);
-  const pagination2 = usePagination(filteredProductosPrecios, 25);
+  const pagination = usePagination(filteredProductos, 50);
+  const pagination2 = usePagination(filteredProductosPrecios, 50);
 
   const stats = {
     total: listas.length,
@@ -397,167 +399,122 @@ const Precios = () => {
 
   return (
     <MainLayout title="Listas de Precios">
-      {/* Stats */}
-      <div className="mb-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2">
-              <Tags className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.total}</p>
-              <p className="text-sm text-muted-foreground">Listas de Precios</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-success/10 p-2">
-              <Tags className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.activas}</p>
-              <p className="text-sm text-muted-foreground">Activas</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2">
-              <Users className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.clientesAsignados}</p>
-              <p className="text-sm text-muted-foreground">Clientes Asignados</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2">
-              <Percent className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{productos.length}</p>
-              <p className="text-sm text-muted-foreground">Productos</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <KpiStrip items={[
+        { label: "Listas de Precios", valor: stats.total, tono: "primario" },
+        { label: "Activas", valor: stats.activas, tono: "positivo" },
+        { label: "Clientes Asignados", valor: stats.clientesAsignados },
+        { label: "Productos", valor: productos.length },
+      ]} />
 
-      <Tabs defaultValue="lists" className="space-y-6">
+      <Tabs defaultValue="lists">
         <TabsList>
           <TabsTrigger value="lists">Listas de Precios</TabsTrigger>
           <TabsTrigger value="products">Productos y Precios</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="lists" className="space-y-4">
-          {/* Header Actions */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input 
-                placeholder="Buscar lista de precios..." 
-                className="pl-9"
-                value={listSearchTerm}
-                onChange={(e) => setListSearchTerm(e.target.value)}
-              />
-            </div>
-            <Button className="gap-2" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
-              <Plus className="h-4 w-4" />
-              Nueva Lista
-            </Button>
-          </div>
-
-          {/* Price Lists Grid */}
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-          ) : filteredListas.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <Tags className="h-12 w-12 mb-4 opacity-50" />
-              <p>No hay listas de precios</p>
-              <Button className="mt-4 gap-2" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
-                <Plus className="h-4 w-4" />
-                Crear Primera Lista
+        <TabsContent value="lists">
+          <BarraLista
+            busqueda={listSearchTerm}
+            onBusqueda={setListSearchTerm}
+            placeholder="Buscar lista de precios..."
+            contador={`${filteredListas.length} registros`}
+            acciones={
+              <Button size="sm" className="gap-1.5" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
+                <Plus className="h-3.5 w-3.5" />
+                Nueva Lista
               </Button>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredListas.map((lista) => (
-                <div key={lista.id} className="rounded-xl border border-border bg-card p-6 shadow-sm transition-all duration-200 hover:shadow-md animate-fade-in">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-semibold text-foreground">{lista.nombre}</h3>
+            }
+          />
+
+          <div className="rounded-lg border border-border bg-card">
+            {loading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : filteredListas.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-sm text-muted-foreground">
+                <Tags className="mb-2 h-8 w-8 opacity-50" />
+                <p>No hay listas de precios</p>
+                <Button size="sm" className="mt-3 gap-1.5" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
+                  <Plus className="h-3.5 w-3.5" />
+                  Crear Primera Lista
+                </Button>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Lista</TableHead>
+                    <TableHead>Descripción</TableHead>
+                    <TableHead className="text-right">Clientes</TableHead>
+                    <TableHead className="text-right">Descuento</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredListas.map((lista) => (
+                    <TableRow key={lista.id} className="hover:bg-muted/50">
+                      <TableCell className="max-w-[240px] truncate font-medium" title={lista.nombre}>
+                        {lista.nombre}
                         {lista.es_default && (
-                          <Badge variant="outline" className="text-xs">Default</Badge>
+                          <Badge variant="outline" className="ml-1.5">Default</Badge>
                         )}
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">{lista.descripcion || 'Sin descripción'}</p>
-                    </div>
-                    <Badge variant={lista.activo ? "default" : "secondary"}>
-                      {lista.activo ? "Activo" : "Inactivo"}
-                    </Badge>
-                  </div>
-                  <div className="mt-4 grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-2xl font-bold text-foreground">{lista.clientes_count || 0}</p>
-                      <p className="text-xs text-muted-foreground">Clientes</p>
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold text-primary">{lista.porcentaje_descuento}%</p>
-                      <p className="text-xs text-muted-foreground">Descuento</p>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" className="gap-1" onClick={() => openEditDialog(lista)}>
-                      <Edit className="h-4 w-4" />
-                      Editar
-                    </Button>
-                    <Button variant="outline" size="sm" className="gap-1" onClick={() => openPreciosSheet(lista)}>
-                      <Percent className="h-4 w-4" />
-                      Precios
-                    </Button>
-                    <Button variant="outline" size="sm" className="gap-1" onClick={() => openClientesSheet(lista)}>
-                      <Users className="h-4 w-4" />
-                      Clientes
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => { setSelectedLista(lista); setIsDeleteOpen(true); }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                      </TableCell>
+                      <TableCell className="max-w-[320px] truncate text-muted-foreground" title={lista.descripcion || undefined}>{lista.descripcion || 'Sin descripción'}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right">{lista.clientes_count || 0}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-semibold text-primary">{lista.porcentaje_descuento}%</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <Badge variant={lista.activo ? "default" : "secondary"}>
+                          {lista.activo ? "Activo" : "Inactivo"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" aria-label="Editar" onClick={() => openEditDialog(lista)}>
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => openPreciosSheet(lista)}>
+                            <Percent className="h-3.5 w-3.5" />
+                            Precios
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => openClientesSheet(lista)}>
+                            <Users className="h-3.5 w-3.5" />
+                            Clientes
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            title="Eliminar"
+                            aria-label="Eliminar"
+                            onClick={() => { setSelectedLista(lista); setIsDeleteOpen(true); }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
         </TabsContent>
 
-        <TabsContent value="products" className="space-y-4">
-          {/* Header Actions */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input 
-                placeholder="Buscar producto..." 
-                className="pl-9" 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-          </div>
+        <TabsContent value="products">
+          <BarraLista
+            busqueda={searchTerm}
+            onBusqueda={setSearchTerm}
+            placeholder="Buscar producto..."
+            contador={`${filteredProductos.length} registros`}
+          />
 
           {/* Products Table */}
-          <div className="rounded-xl border border-border bg-card shadow-sm animate-fade-in">
+          <div className="rounded-lg border border-border bg-card">
             {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
               </div>
             ) : (
               <Table>
@@ -573,18 +530,16 @@ const Precios = () => {
                 <TableBody>
                   {pagination.pageItems.map((producto) => (
                     <TableRow key={producto.id} className="hover:bg-muted/50">
-                      <TableCell className="font-mono text-sm text-primary">{producto.sku}</TableCell>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          {producto.imagen_emoji && <span>{producto.imagen_emoji}</span>}
-                          {producto.nombre}
-                        </div>
+                      <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{producto.sku}</TableCell>
+                      <TableCell className="max-w-[360px] truncate font-medium" title={producto.nombre}>
+                        {producto.imagen_emoji && <span className="mr-1.5">{producto.imagen_emoji}</span>}
+                        {producto.nombre}
                       </TableCell>
-                      <TableCell className="text-right font-medium">{formatPrice(producto.precio_base)}</TableCell>
-                      <TableCell className="text-right font-medium text-success">
+                      <TableCell className="whitespace-nowrap text-right font-medium">{formatPrice(producto.precio_base)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-medium text-success">
                         {producto.precio_oferta ? formatPrice(producto.precio_oferta) : '-'}
                       </TableCell>
-                      <TableCell className="text-center">
+                      <TableCell className="whitespace-nowrap text-center">
                         <Badge variant={producto.en_oferta ? "default" : "secondary"}>
                           {producto.en_oferta ? "Sí" : "No"}
                         </Badge>
@@ -868,19 +823,15 @@ const Precios = () => {
                     
                     return (
                       <TableRow key={producto.id} className={tieneManual ? "bg-primary/5" : ""}>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {producto.imagen_emoji && <span>{producto.imagen_emoji}</span>}
-                            <div>
-                              <p className="font-medium text-sm">{producto.nombre}</p>
-                              <p className="text-xs text-muted-foreground">{producto.sku}</p>
-                            </div>
-                          </div>
+                        <TableCell className="max-w-[240px] truncate" title={producto.nombre}>
+                          {producto.imagen_emoji && <span className="mr-1.5">{producto.imagen_emoji}</span>}
+                          <span className="font-medium">{producto.nombre}</span>
+                          <span className="ml-1.5 text-xs text-muted-foreground">{producto.sku}</span>
                         </TableCell>
-                        <TableCell className="text-right text-muted-foreground">
+                        <TableCell className="whitespace-nowrap text-right text-muted-foreground">
                           {formatPrice(producto.precio_base)}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="whitespace-nowrap text-right">
                           <span className={tieneManual ? "line-through text-muted-foreground" : "font-medium"}>
                             {formatPrice(precioConDescuento)}
                           </span>
@@ -892,7 +843,7 @@ const Precios = () => {
                               step="0.01"
                               min="0"
                               placeholder={formatPrice(precioConDescuento)}
-                              className="w-24 text-right h-8"
+                              className="h-7 w-24 text-right text-[13px]"
                               value={
                                 preciosModificados[producto.id] !== undefined 
                                   ? (preciosModificados[producto.id] ?? '') 
@@ -904,11 +855,11 @@ const Precios = () => {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8 text-destructive"
+                                className="h-7 w-7 text-destructive"
                                 onClick={() => handlePrecioChange(producto.id, '')}
                                 title="Quitar precio manual"
                               >
-                                <Trash2 className="h-3 w-3" />
+                                <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             )}
                           </div>

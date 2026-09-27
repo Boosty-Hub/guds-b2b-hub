@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useCallback, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 
 export type UserRole = "admin" | "cliente" | "vendedor" | "delivery";
@@ -12,6 +12,7 @@ export interface User {
   avatar?: string;
   cliente_id?: string;
   telefono?: string;
+  debe_cambiar_clave?: boolean;
 }
 
 export interface RegistroCliente {
@@ -28,6 +29,7 @@ export interface RegistroCliente {
   contribuyenteEspecial: boolean;
   rifDocumentoPath: string | null;
   tipoNegocio: string;
+  empresaId?: string | null;          // empresa con la que quiere comprar (GUDS / Quirutec)
   estado: "pendiente" | "aprobado" | "rechazado";
   fechaRegistro: string;
   notas?: string;
@@ -89,6 +91,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               avatar: userData.avatar_url || undefined,
               cliente_id: userData.cliente_id || undefined,
               telefono: userData.telefono || undefined,
+              debe_cambiar_clave: !!userData.debe_cambiar_clave,
             });
           } else {
             // Usuario autenticado pero sin registro en tabla usuarios - crear registro
@@ -164,6 +167,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         contribuyenteEspecial: r.contribuyente_especial,
         rifDocumentoPath: r.rif_documento_path,
         tipoNegocio: r.tipo_negocio,
+        empresaId: r.empresa_id ?? null,
         estado: r.estado,
         fechaRegistro: r.created_at?.split('T')[0] || '',
         notas: r.notas,
@@ -268,6 +272,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         avatar: userData.avatar_url || undefined,
         cliente_id: userData.cliente_id || undefined,
         telefono: userData.telefono || undefined,
+        debe_cambiar_clave: !!userData.debe_cambiar_clave,
       });
 
       console.log('Login exitoso, rol:', role);
@@ -283,9 +288,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
   };
 
-  const updateUser = (patch: Partial<User>) => {
+  const updateUser = useCallback((patch: Partial<User>) => {
     setUser((prev) => (prev ? { ...prev, ...patch } : prev));
-  };
+  }, []);
 
   const addRegistro = async (registro: Omit<RegistroCliente, "id" | "estado" | "fechaRegistro">): Promise<boolean> => {
     const { error } = await supabase
@@ -303,6 +308,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         contribuyente_especial: registro.contribuyenteEspecial,
         rif_documento_path: registro.rifDocumentoPath,
         tipo_negocio: registro.tipoNegocio,
+        empresa_id: registro.empresaId || null,
         estado: 'pendiente',
       });
     

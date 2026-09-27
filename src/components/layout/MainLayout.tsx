@@ -1,3 +1,4 @@
+import { BuscadorGlobal } from "@/components/BuscadorGlobal";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "./Sidebar";
@@ -28,6 +29,7 @@ import { ControlTower } from "./ControlTower";
 import { useControlTower } from "@/contexts/ControlTowerContext";
 import { useNotifications } from "@/contexts/NotificationsContext";
 import { usePendingActions } from "@/hooks/use-pending-actions";
+import { EmpresaSelector, ModoConsultaBanner } from "@/components/EmpresaSelector";
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -85,6 +87,8 @@ export function MainLayout({ children, title }: MainLayoutProps) {
           </button>
           <h1 className="font-semibold truncate">{title}</h1>
           <div className="flex items-center gap-2">
+            <BuscadorGlobal compacto atajo={false} className="border-white/30 bg-white/15 text-white hover:bg-white/25" />
+            <EmpresaSelector variant="header" compacto />
             <BoostySupportSlot media="(max-width: 1023.98px)" />
             <button onClick={toggleTorre} className="relative p-2" title="Torre de control">
               <Bell className="h-5 w-5" />
@@ -102,15 +106,19 @@ export function MainLayout({ children, title }: MainLayoutProps) {
           </div>
         </div>
       </header>
+      <div className="lg:hidden">
+        <ModoConsultaBanner />
+      </div>
 
       {/* Desktop Header */}
-      <div className={cn("hidden lg:block transition-[margin] duration-200", collapsed ? "lg:ml-16" : "lg:ml-64", margenTorre)}>
+      <div className={cn("hidden lg:block transition-[margin] duration-200", collapsed ? "lg:ml-14" : "lg:ml-56", margenTorre)}>
         <Header title={title} />
+        <ModoConsultaBanner />
       </div>
 
       {/* Main Content */}
-      <main className={cn("pb-20 lg:pb-0 transition-[margin] duration-200", collapsed ? "lg:ml-16" : "lg:ml-64", margenTorre)}>
-        <div className="p-4 lg:p-6">{children}</div>
+      <main className={cn("pb-20 lg:pb-0 transition-[margin] duration-200", collapsed ? "lg:ml-14" : "lg:ml-56", margenTorre)}>
+        <div className="p-3 lg:p-4">{children}</div>
       </main>
 
       {/* Torre de control (empuja en desktop, overlay completo en mobile/tablet) */}
@@ -173,9 +181,12 @@ export function MainLayout({ children, title }: MainLayoutProps) {
               { icon: Package, label: "Productos", path: "/admin/productos" },
               { label: "Categorías", path: "/admin/categorias" },
               { label: "Inventario", path: "/admin/inventario" },
+              { label: "Transferencias", path: "/admin/transferencias" },
               { label: "Precios", path: "/admin/precios" },
               { label: "Cupones", path: "/admin/cupones" },
               { label: "Banners", path: "/admin/banners" },
+              { label: "Proveedores", path: "/admin/proveedores" },
+              { label: "Cuentas por Pagar", path: "/admin/cuentas-por-pagar" },
               { label: "Cuentas", path: "/admin/cuentas" },
               { label: "Delivery", path: "/admin/delivery" },
               { icon: Settings, label: "Configuración", path: "/admin/configuracion" },

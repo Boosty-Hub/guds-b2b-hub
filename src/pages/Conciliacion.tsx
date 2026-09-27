@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { BarraLista } from "@/components/datos/BarraLista";
 
 interface Banco { id: string; nombre: string; moneda: string; }
 interface Extracto {
@@ -88,10 +89,10 @@ const Conciliacion = () => {
   const conciliadas = lineas.filter((l) => l.estado === "conciliado");
   const pendientes = lineas.filter((l) => l.estado === "pendiente");
   const descartadas = lineas.filter((l) => l.estado === "descartado");
-  const pgConc = usePagination(conciliadas, 25);
-  const pgPend = usePagination(pendientes, 25);
-  const pgDesc = usePagination(descartadas, 25);
-  const pgExtractos = usePagination(extractos, 25);
+  const pgConc = usePagination(conciliadas, 50);
+  const pgPend = usePagination(pendientes, 50);
+  const pgDesc = usePagination(descartadas, 50);
+  const pgExtractos = usePagination(extractos, 50);
 
   // ── Carga: parseo de archivo ──────────────────────────────────────────
   // Un CSV se parsea como texto plano, a mano: XLSX "adivina" fechas en formato inglés
@@ -248,17 +249,22 @@ const Conciliacion = () => {
   if (seleccionado) {
     return (
       <MainLayout title={`Extracto — ${seleccionado.nombre_archivo}`}>
-        <Button variant="ghost" className="mb-4 gap-2" onClick={() => setSeleccionado(null)}><ArrowLeft className="h-4 w-4" /> Volver a extractos</Button>
-
-        <div className="mb-4 flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">{seleccionado.banco?.nombre} · {seleccionado.total_lineas} línea(s)</p>
-          <Button variant="outline" className="gap-2" onClick={sugerirConIA} disabled={sugiriendoIA || pendientes.length === 0}>
-            {sugiriendoIA ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Sugerir con IA ({pendientes.length} pendientes)
-          </Button>
-        </div>
+        <BarraLista
+          filtros={
+            <>
+              <Button variant="ghost" size="sm" className="gap-1.5 px-2" onClick={() => setSeleccionado(null)}><ArrowLeft className="h-3.5 w-3.5" /> Volver a extractos</Button>
+              <span className="text-xs text-muted-foreground">{seleccionado.banco?.nombre} · {seleccionado.total_lineas} línea(s)</span>
+            </>
+          }
+          acciones={
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={sugerirConIA} disabled={sugiriendoIA || pendientes.length === 0}>
+              {sugiriendoIA ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Sugerir con IA ({pendientes.length} pendientes)
+            </Button>
+          }
+        />
 
         {cargandoLineas ? (
-          <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+          <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
         ) : (
           <Tabs defaultValue="pendientes">
             <TabsList>
@@ -267,39 +273,42 @@ const Conciliacion = () => {
               <TabsTrigger value="descartadas">Descartadas ({descartadas.length})</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="pendientes" className="mt-4">
-              <div className="rounded-xl border border-border bg-card shadow-sm">
+            <TabsContent value="pendientes">
+              <div className="overflow-hidden rounded-lg border border-border bg-card">
                 {pendientes.length === 0 ? (
-                  <p className="p-8 text-center text-muted-foreground">No hay líneas por conciliar.</p>
+                  <p className="p-6 text-center text-sm text-muted-foreground">No hay líneas por conciliar.</p>
                 ) : (
                   <>
                     <Table>
                       <TableHeader>
-                        <TableRow><TableHead>Fecha</TableHead><TableHead>Referencia</TableHead><TableHead className="text-right">Monto</TableHead><TableHead>Sugerencia IA</TableHead><TableHead className="text-right">Acción</TableHead></TableRow>
+                        <TableRow><TableHead>Fecha</TableHead><TableHead>Referencia</TableHead><TableHead>Descripción</TableHead><TableHead className="text-right">Monto</TableHead><TableHead>Sugerencia IA</TableHead><TableHead className="text-right">Acción</TableHead></TableRow>
                       </TableHeader>
                       <TableBody>
                         {pgPend.pageItems.map((l) => (
                           <TableRow key={l.id}>
-                            <TableCell className="text-muted-foreground">{new Date(l.fecha).toLocaleDateString("es-VE")}</TableCell>
-                            <TableCell><p className="font-mono text-sm">{l.referencia || "—"}</p><p className="text-xs text-muted-foreground">{l.descripcion}</p></TableCell>
-                            <TableCell className={`text-right font-semibold ${l.monto < 0 ? "text-destructive" : ""}`}>{formatPrice(l.monto)}</TableCell>
+                            <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(l.fecha).toLocaleDateString("es-VE")}</TableCell>
+                            <TableCell className="whitespace-nowrap font-mono text-xs">{l.referencia || "—"}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              <span className="block max-w-[260px] truncate" title={l.descripcion || undefined}>{l.descripcion || "—"}</span>
+                            </TableCell>
+                            <TableCell className={`whitespace-nowrap text-right font-semibold ${l.monto < 0 ? "text-destructive" : ""}`}>{formatPrice(l.monto)}</TableCell>
                             <TableCell>
                               {l.sugerencia_ia ? (
                                 l.sugerencia_ia.movimiento_bancario_id ? (
-                                  <div className="flex items-center gap-2">
-                                    <Badge variant="outline" className="gap-1"><Sparkles className="h-3 w-3" /> {l.sugerencia_ia.confianza}%</Badge>
-                                    <span className="text-xs text-muted-foreground max-w-xs truncate" title={l.sugerencia_ia.motivo}>{l.sugerencia_ia.motivo}</span>
+                                  <div className="flex items-center gap-1.5 whitespace-nowrap">
+                                    <Badge variant="outline" className="gap-1 px-1.5 py-0"><Sparkles className="h-3 w-3" /> {l.sugerencia_ia.confianza}%</Badge>
+                                    <span className="max-w-[220px] truncate text-xs text-muted-foreground" title={l.sugerencia_ia.motivo}>{l.sugerencia_ia.motivo}</span>
                                   </div>
-                                ) : <span className="text-xs text-muted-foreground">IA: sin candidato</span>
+                                ) : <span className="whitespace-nowrap text-xs text-muted-foreground">IA: sin candidato</span>
                               ) : <span className="text-xs text-muted-foreground">—</span>}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="whitespace-nowrap text-right">
                               <div className="flex justify-end gap-1">
                                 {l.sugerencia_ia?.movimiento_bancario_id && (
-                                  <Button size="sm" variant="outline" className="gap-1" onClick={() => aplicarSugerencia(l)}><Check className="h-3.5 w-3.5" /> Aplicar</Button>
+                                  <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => aplicarSugerencia(l)}><Check className="h-3.5 w-3.5" /> Aplicar</Button>
                                 )}
-                                <Button size="sm" variant="outline" className="gap-1" onClick={() => abrirBusquedaManual(l)}><Search className="h-3.5 w-3.5" /> Buscar</Button>
-                                <Button size="sm" variant="ghost" className="gap-1 text-destructive" onClick={() => descartar(l)}><X className="h-3.5 w-3.5" /> Descartar</Button>
+                                <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => abrirBusquedaManual(l)}><Search className="h-3.5 w-3.5" /> Buscar</Button>
+                                <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs text-destructive" onClick={() => descartar(l)}><X className="h-3.5 w-3.5" /> Descartar</Button>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -312,19 +321,19 @@ const Conciliacion = () => {
               </div>
             </TabsContent>
 
-            <TabsContent value="conciliadas" className="mt-4">
-              <div className="rounded-xl border border-border bg-card shadow-sm">
-                {conciliadas.length === 0 ? <p className="p-8 text-center text-muted-foreground">Nada conciliado todavía.</p> : (
+            <TabsContent value="conciliadas">
+              <div className="overflow-hidden rounded-lg border border-border bg-card">
+                {conciliadas.length === 0 ? <p className="p-6 text-center text-sm text-muted-foreground">Nada conciliado todavía.</p> : (
                   <>
                     <Table>
                       <TableHeader><TableRow><TableHead>Fecha</TableHead><TableHead>Referencia</TableHead><TableHead className="text-right">Monto</TableHead><TableHead>Método</TableHead></TableRow></TableHeader>
                       <TableBody>
                         {pgConc.pageItems.map((l) => (
                           <TableRow key={l.id}>
-                            <TableCell className="text-muted-foreground">{new Date(l.fecha).toLocaleDateString("es-VE")}</TableCell>
-                            <TableCell className="font-mono text-sm">{l.referencia || "—"}</TableCell>
-                            <TableCell className="text-right font-semibold">{formatPrice(l.monto)}</TableCell>
-                            <TableCell><Badge variant={l.metodo_match === "automatico" ? "default" : l.metodo_match === "ia" ? "outline" : "secondary"}>{l.metodo_match}{l.confianza != null ? ` · ${l.confianza}%` : ""}</Badge></TableCell>
+                            <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(l.fecha).toLocaleDateString("es-VE")}</TableCell>
+                            <TableCell className="whitespace-nowrap font-mono text-xs">{l.referencia || "—"}</TableCell>
+                            <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(l.monto)}</TableCell>
+                            <TableCell className="whitespace-nowrap"><Badge variant={l.metodo_match === "automatico" ? "default" : l.metodo_match === "ia" ? "outline" : "secondary"}>{l.metodo_match}{l.confianza != null ? ` · ${l.confianza}%` : ""}</Badge></TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -335,18 +344,18 @@ const Conciliacion = () => {
               </div>
             </TabsContent>
 
-            <TabsContent value="descartadas" className="mt-4">
-              <div className="rounded-xl border border-border bg-card shadow-sm">
-                {descartadas.length === 0 ? <p className="p-8 text-center text-muted-foreground">Nada descartado.</p> : (
+            <TabsContent value="descartadas">
+              <div className="overflow-hidden rounded-lg border border-border bg-card">
+                {descartadas.length === 0 ? <p className="p-6 text-center text-sm text-muted-foreground">Nada descartado.</p> : (
                   <>
                     <Table>
                       <TableHeader><TableRow><TableHead>Fecha</TableHead><TableHead>Referencia</TableHead><TableHead className="text-right">Monto</TableHead></TableRow></TableHeader>
                       <TableBody>
                         {pgDesc.pageItems.map((l) => (
                           <TableRow key={l.id}>
-                            <TableCell className="text-muted-foreground">{new Date(l.fecha).toLocaleDateString("es-VE")}</TableCell>
-                            <TableCell className="font-mono text-sm">{l.referencia || "—"}</TableCell>
-                            <TableCell className="text-right font-semibold">{formatPrice(l.monto)}</TableCell>
+                            <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(l.fecha).toLocaleDateString("es-VE")}</TableCell>
+                            <TableCell className="whitespace-nowrap font-mono text-xs">{l.referencia || "—"}</TableCell>
+                            <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(l.monto)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -379,10 +388,10 @@ const Conciliacion = () => {
                       <TableBody>
                         {candidatos.map((c) => (
                           <TableRow key={c.id}>
-                            <TableCell className="text-muted-foreground">{new Date(c.fecha).toLocaleDateString("es-VE")}</TableCell>
-                            <TableCell className="font-mono text-sm">{c.referencia || "—"}</TableCell>
-                            <TableCell className="text-right font-semibold">{formatPrice(c.monto)}</TableCell>
-                            <TableCell><Button size="sm" onClick={() => confirmarManual(c.id)}>Elegir</Button></TableCell>
+                            <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(c.fecha).toLocaleDateString("es-VE")}</TableCell>
+                            <TableCell className="whitespace-nowrap font-mono text-xs">{c.referencia || "—"}</TableCell>
+                            <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(c.monto)}</TableCell>
+                            <TableCell className="text-right"><Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => confirmarManual(c.id)}>Elegir</Button></TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -399,31 +408,36 @@ const Conciliacion = () => {
 
   return (
     <MainLayout title="Conciliación Bancaria">
-      <div className="mb-4 flex justify-end">
-        <Button className="gap-2" onClick={() => setOpenCarga(true)}><Upload className="h-4 w-4" /> Cargar extracto</Button>
-      </div>
+      <BarraLista
+        contador={loading ? undefined : `${extractos.length} registros`}
+        acciones={<Button size="sm" className="gap-1.5" onClick={() => setOpenCarga(true)}><Upload className="h-3.5 w-3.5" /> Cargar extracto</Button>}
+      />
 
       {loading ? (
-        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
       ) : extractos.length === 0 ? (
-        <div className="flex flex-col items-center py-16 text-center text-muted-foreground">
-          <ListChecks className="mb-3 h-10 w-10 opacity-50" />
+        <div className="flex flex-col items-center rounded-lg border border-border bg-card py-10 text-center text-sm text-muted-foreground">
+          <ListChecks className="mb-2 h-8 w-8 opacity-50" />
           <p>Todavía no cargaste ningún extracto bancario.</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-border bg-card shadow-sm">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
             <TableHeader>
-              <TableRow><TableHead>Archivo</TableHead><TableHead>Banco</TableHead><TableHead>Período</TableHead><TableHead className="text-center">Líneas</TableHead><TableHead>Cargado</TableHead></TableRow>
+              <TableRow><TableHead>Archivo</TableHead><TableHead>Banco</TableHead><TableHead>Período</TableHead><TableHead className="text-right">Líneas</TableHead><TableHead>Cargado</TableHead></TableRow>
             </TableHeader>
             <TableBody>
               {pgExtractos.pageItems.map((e) => (
-                <TableRow key={e.id} className="cursor-pointer hover:bg-muted/50" onClick={() => cargarLineas(e)}>
-                  <TableCell className="font-medium">{e.nombre_archivo}</TableCell>
-                  <TableCell className="text-muted-foreground">{e.banco?.nombre || "—"}</TableCell>
-                  <TableCell className="text-muted-foreground">{e.fecha_desde} — {e.fecha_hasta}</TableCell>
-                  <TableCell className="text-center">{e.total_lineas}</TableCell>
-                  <TableCell className="text-muted-foreground">{new Date(e.created_at).toLocaleDateString("es-VE")}</TableCell>
+                <TableRow key={e.id} className="cursor-pointer" onClick={() => cargarLineas(e)}>
+                  <TableCell className="font-medium">
+                    <span className="block max-w-[260px] truncate" title={e.nombre_archivo}>{e.nombre_archivo}</span>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    <span className="block max-w-[220px] truncate" title={e.banco?.nombre || undefined}>{e.banco?.nombre || "—"}</span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{e.fecha_desde} — {e.fecha_hasta}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right">{e.total_lineas}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(e.created_at).toLocaleDateString("es-VE")}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
