@@ -307,7 +307,8 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
       return;
     }
     const row = (Array.isArray(data) ? data[0] : data) as ResultadoEdicion | null;
-    onGuardado({ orden_id: row?.orden_id ?? orden.id, numero: row?.numero ?? orden.numero, total: Number(row?.total ?? total) });
+    onGuardado({ orden_id: row?.orden_id ?? orden.id, numero: row?.numero ?? orden.numero, total: Number(row?.total ?? total),
+      pagado: Number(row?.pagado ?? 0), falta: Number(row?.falta ?? 0), a_favor: Number(row?.a_favor ?? 0) });
   };
 
   if (cargando) {

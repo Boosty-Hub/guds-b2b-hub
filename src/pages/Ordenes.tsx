@@ -23,6 +23,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -40,6 +42,7 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { ResumenPagoPedido } from "@/components/portal/ResumenPagoPedido";
 import { OdooBadge } from "@/components/OdooBadge";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
@@ -58,6 +61,9 @@ interface OrdenDB {
   aprobado_at?: string | null;
   odoo_enviado_at?: string | null;
   editado_at?: string | null;       // editado por el cliente o el vendedor mientras estaba por aprobar (19p)
+  vendedor_id?: string | null;      // vendedor en GUDS (asignable si el pedido no tiene, 19x)
+  empresa_id?: string | null;
+  vendedor?: { nombre: string; apellido: string | null } | null;
   ediciones?: number | null;
   cliente_id: string;
   estado: string;
@@ -130,6 +136,31 @@ const Ordenes = () => {
   // Aprobación de pedidos de clientes y vendedores (Fase 9b): al aprobar se crean en Odoo como cotización
   const [soloPorAprobar, setSoloPorAprobar] = useState(params.get("aprobacion") === "pendiente");
   const [rechazo, setRechazo] = useState<{ id: string; numero: string } | null>(null);
+  // Asignar vendedor a un pedido que no tiene (19x)
+  const [asignarVend, setAsignarVend] = useState<OrdenDB | null>(null);
+  const [vendedores, setVendedores] = useState<{ id: string; nombre: string; empresas: string[] }[]>([]);
+  const [vendElegido, setVendElegido] = useState("");
+  const [asignando, setAsignando] = useState(false);
+  const nombreVendedor = (o: OrdenDB) => (o.vendedor ? `${o.vendedor.nombre} ${o.vendedor.apellido || ""}`.trim() : o.vendedor_odoo || null);
+  const abrirAsignarVendedor = async (o: OrdenDB) => {
+    setAsignarVend(o);
+    setVendElegido((o.cliente as { vendedor_asignado_id?: string | null } | undefined)?.vendedor_asignado_id || "");
+    if (vendedores.length === 0) {
+      const { data } = await supabase.from("usuarios").select("id, nombre, apellido, usuario_empresas(empresa_id)").eq("role", "vendedor").eq("activo", true).order("nombre");
+      setVendedores(((data as { id: string; nombre: string; apellido: string | null; usuario_empresas: { empresa_id: string }[] }[] | null) ?? [])
+        .map((u) => ({ id: u.id, nombre: `${u.nombre} ${u.apellido || ""}`.trim(), empresas: u.usuario_empresas.map((e) => e.empresa_id) })));
+    }
+  };
+  const confirmarVendedor = async () => {
+    if (!asignarVend || !vendElegido) return;
+    setAsignando(true);
+    const { error } = await supabase.rpc("asignar_vendedor_orden", { p_orden_id: asignarVend.id, p_vendedor_id: vendElegido });
+    setAsignando(false);
+    if (error) { toast({ title: "No se pudo asignar", description: error.message, variant: "destructive" }); return; }
+    toast({ title: `Vendedor asignado a ${asignarVend.numero}` });
+    setAsignarVend(null);
+    fetchOrdenes();
+  };
   const [motivoRechazo, setMotivoRechazo] = useState("");
   const [procesandoAprobacion, setProcesandoAprobacion] = useState(false);
 
@@ -178,7 +209,8 @@ const Ordenes = () => {
       .from('ordenes')
       .select(`
         *,
-        cliente:clientes(nombre_negocio, direccion, ciudad, telefono),
+        cliente:clientes(nombre_negocio, direccion, ciudad, telefono, vendedor_asignado_id),
+        vendedor:usuarios!ordenes_vendedor_id_fkey(nombre, apellido),
         items:orden_items(*, producto:productos(nombre, imagen_emoji, imagen_url))
       `)
       .order('created_at', { ascending: false })
@@ -344,7 +376,7 @@ const Ordenes = () => {
     { titulo: "Cliente", valor: (o) => o.cliente?.nombre_negocio }, { titulo: "Items", valor: (o) => o.items?.length ?? 0 },
     { titulo: "Total USD", valor: (o) => Number(o.total || 0) }, { titulo: "Estado", valor: (o) => statusConfig[o.estado]?.label || o.estado },
     { titulo: "Fecha", valor: (o) => fechaOrden(o)?.slice(0, 10) }, { titulo: "Método de pago", valor: (o) => o.metodo_pago },
-    { titulo: "Vendedor (Odoo)", valor: (o) => o.vendedor_odoo },
+    { titulo: "Vendedor", valor: (o) => nombreVendedor(o) },
   ]);
 
   const grupos = useMemo(() => {
@@ -370,6 +402,11 @@ const Ordenes = () => {
           {orden.odoo_id ? <OdooBadge /> : <Badge variant="outline" className="px-1 py-0 text-[10px]" title="Creado en GUDS · pendiente de enviar a Odoo">GUDS</Badge>}
           {orden.numero_guds && <Badge variant="secondary" className="px-1 py-0 text-[10px] font-normal" title={`Creado en GUDS como ${orden.numero_guds} y enviado a Odoo`}>{orden.numero_guds}</Badge>}
           {estadoEnvio(orden) && <Badge variant="outline" className={cn("px-1.5 py-0 text-[10px] font-medium", estadoEnvio(orden)!.cls)} title={orden.odoo_envio_error || orden.rechazo_motivo || undefined}>{estadoEnvio(orden)!.txt}</Badge>}
+          {!nombreVendedor(orden) && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); abrirAsignarVendedor(orden); }}
+              className="rounded border border-dashed border-amber-400 bg-amber-50 px-1 py-0 text-[10px] font-medium text-amber-900 hover:bg-amber-100"
+              title="Este pedido no tiene vendedor: asignar">Sin vendedor</button>
+          )}
           {!!orden.ediciones && orden.aprobacion === "pendiente" && (
             <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal" title={`Editado ${orden.ediciones} ${orden.ediciones === 1 ? "vez" : "veces"} antes de aprobar${orden.editado_at ? ` · último ${formatDate(orden.editado_at)}` : ""}`}>Editado</Badge>
           )}
@@ -590,7 +627,9 @@ const Ordenes = () => {
                     { label: "Fecha", valor: formatDate(selectedOrder.fecha_pedido || selectedOrder.created_at) },
                     ...(selectedOrder.numero_guds ? [{ label: "Pedido GUDS", valor: `${selectedOrder.numero_guds} · enviado ${selectedOrder.odoo_enviado_at ? formatDate(selectedOrder.odoo_enviado_at) : ""}` }] : []),
                     ...(selectedOrder.ediciones ? [{ label: "Editado", valor: `${selectedOrder.ediciones} ${selectedOrder.ediciones === 1 ? "vez" : "veces"}${selectedOrder.editado_at ? ` · último ${formatDate(selectedOrder.editado_at)}` : ""}` }] : []),
-                    { label: "Vendedor", valor: selectedOrder.vendedor_odoo },
+                    { label: "Vendedor", valor: nombreVendedor(selectedOrder) || (
+                      <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => abrirAsignarVendedor(selectedOrder)}>Asignar vendedor</Button>
+                    ) },
                     { label: "Método de pago", valor: selectedOrder.metodo_pago ? <span className="capitalize">{selectedOrder.metodo_pago.replace('_', ' ')}</span> : null },
                     { label: "Moneda", valor: selectedOrder.moneda_original },
                     ...(selectedOrder.referencia_pago ? [{ label: "Referencia", valor: selectedOrder.referencia_pago, mono: true }] : []),
@@ -600,6 +639,7 @@ const Ordenes = () => {
                     { label: "Dirección", valor: selectedOrder.cliente?.direccion, ancho: 3 as const },
                   ]}
                 />
+                {(!selectedOrder.odoo_id || selectedOrder.numero_guds) && <ResumenPagoPedido ordenId={selectedOrder.id} className="mt-2 max-w-sm" />}
               </div>
 
               {/* Productos + Resumen */}
@@ -909,6 +949,26 @@ const Ordenes = () => {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!asignarVend} onOpenChange={(o) => { if (!o) setAsignarVend(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Asignar vendedor · {asignarVend?.numero}</DialogTitle>
+            <DialogDescription>El pedido no tiene vendedor. Solo aparecen los vendedores de la empresa del pedido.</DialogDescription>
+          </DialogHeader>
+          <Select value={vendElegido} onValueChange={setVendElegido}>
+            <SelectTrigger aria-label="Vendedor"><SelectValue placeholder="Elige un vendedor" /></SelectTrigger>
+            <SelectContent>
+              {vendedores.filter((v) => !asignarVend?.empresa_id || v.empresas.includes(asignarVend.empresa_id)).map((v) => (
+                <SelectItem key={v.id} value={v.id}>{v.nombre}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAsignarVend(null)} disabled={asignando}>Cancelar</Button>
+            <Button onClick={confirmarVendedor} disabled={!vendElegido || asignando}>{asignando ? <Loader2 className="h-4 w-4 animate-spin" /> : "Asignar"}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </MainLayout>

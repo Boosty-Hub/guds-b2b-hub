@@ -1,6 +1,7 @@
 // Reglas compartidas de la edición de pedidos «Por aprobar» (portal del cliente y del vendedor).
 
-export interface ResultadoEdicion { orden_id: string; numero: string; total: number }
+// pagado / falta / a_favor: lo ya pagado frente al total nuevo (migración 19x)
+export interface ResultadoEdicion { orden_id: string; numero: string; total: number; pagado?: number; falta?: number; a_favor?: number }
 
 /** Mientras está por aprobar y no llegó a Odoo (misma condición que exige editar_pedido_pendiente en el servidor). */
 export const pedidoEditable = (o: { aprobacion?: string | null; estado: string; odoo_id?: number | null }) =>

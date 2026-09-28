@@ -27,6 +27,7 @@ import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
 import { useResumenVendedor, mesDe } from "@/components/vendedor/resumen";
 import { EditarPedidoDialog } from "@/components/vendedor/EditarPedidoDialog";
 import { pedidoEditable, type ResultadoEdicion } from "@/components/portal/pedidoEditable";
+import { textoPagoEdicion } from "@/components/portal/ResumenPagoPedido";
 
 interface Orden { id: string; numero: string; total: number; estado: string; created_at: string; fecha_pedido: string | null; odoo_id: number | null;
   aprobacion: "pendiente" | "aprobada" | "rechazada" | null; rechazo_motivo: string | null; cliente?: { nombre_negocio: string } | null;
@@ -217,7 +218,7 @@ const VendedorPedidos = () => {
   const puedeEditar = (o: Orden) => pedidoEditable(o) && asignados.includes(o.cliente_id);
   const alGuardarEdicion = (r: ResultadoEdicion) => {
     setEditar(null);
-    toast({ title: "Pedido actualizado", description: `${r.numero} · ${formatPrice(r.total)}. Sigue por aprobar.` });
+    toast({ title: "Pedido actualizado", description: `${r.numero} · ${formatPrice(r.total)}. Sigue por aprobar.${textoPagoEdicion(r, formatPrice)}` });
     fetchData(); recargarResumen();
   };
   const alBloquearEdicion = (mensaje: string) => {

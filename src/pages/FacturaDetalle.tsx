@@ -4,7 +4,11 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, Loader2, FileText, Building2 } from "lucide-react";
+import { ArrowLeft, Loader2, FileText, Building2, History, Ban } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { usePermissions } from "@/contexts/PermissionsContext";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { OdooBadge } from "@/components/OdooBadge";
@@ -17,7 +21,7 @@ interface FacturaFull {
   total_usd: number; saldo_usd: number; estado_cobro: string; estado_pago: string;
   referencia: string | null; nro_control: string | null; vendedor_odoo: string | null;
   orden_id: string | null; creada_en_guds: boolean; odoo_id: number | null;
-  es_nota_debito: boolean; factura_origen_id: string | null; motivo_anulacion: string | null; estado: string | null;
+  es_nota_debito: boolean; factura_origen_id: string | null; motivo_anulacion: string | null; estado: string | null; anulada_at?: string | null;
   cliente?: { nombre_negocio: string; codigo: string | null; rif: string | null } | null;
   orden?: { numero: string } | null;
   origen?: { id: string; numero: string; tipo: string } | null;
@@ -31,6 +35,13 @@ interface Aplicacion {
 }
 const TIPO_APLICACION: Record<string, string> = {
   pago: "Cobro", nota_credito: "Nota de crédito", retencion: "Retención", reintegro: "Reintegro", otro: "Asiento contable",
+};
+// Historial de la factura (migración 19x): alta, cambios y anulación, vengan de Odoo o de GUDS
+interface Historial { id: number; accion: string; cambios: Record<string, unknown>; origen: string; created_at: string; usuario?: { nombre: string; apellido: string | null } | null }
+const CAMPO: Record<string, string> = {
+  estado: "Estado", estado_pago: "Estado de pago", estado_cobro: "Cobro", total: "Total", total_usd: "Total USD", saldo_usd: "Saldo USD",
+  numero: "Número", fecha_emision: "Emisión", fecha_vencimiento: "Vencimiento", cliente_id: "Cliente", nro_control: "Nº de control",
+  motivo_anulacion: "Motivo de anulación", anulada_at: "Anulada el", subtotal: "Subtotal", impuesto: "Impuesto", moneda: "Moneda", tipo: "Tipo",
 };
 interface ItemRow { id: string; nombre_producto: string | null; sku_producto: string | null; cantidad: number; precio_unitario: number; descuento: number; subtotal: number; total: number; }
 interface PagoAplicado { pago_id: string; monto_aplicado: number; pago?: { numero: string; created_at: string; metodo: string } | null; }
@@ -54,6 +65,13 @@ const FacturaDetalle = () => {
   const [aplicaciones, setAplicaciones] = useState<Aplicacion[]>([]);
   const [aplicadaA, setAplicadaA] = useState<Aplicacion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [historial, setHistorial] = useState<Historial[]>([]);
+  const [anulando, setAnulando] = useState(false);
+  const [motivo, setMotivo] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [recarga, setRecarga] = useState(0);
+  const { toast } = useToast();
+  const { can } = usePermissions();
 
   useEffect(() => {
     let activo = true;
@@ -66,9 +84,10 @@ const FacturaDetalle = () => {
       const { data: pf } = await supabase.from("pago_facturas").select("pago_id, monto_aplicado, pago:pagos(numero, created_at, metodo)").eq("factura_id", facturaId);
       const { data: rf } = await supabase.from("retencion_items").select("retencion_id, monto_aplicado, retencion:retenciones(numero, tipo, fecha)").eq("factura_id", facturaId);
       const selApl = "id, tipo, monto_usd, fecha, descripcion, pago:pagos(id, numero, metodo), documento:facturas!factura_aplicaciones_documento_id_fkey(id, numero), factura:facturas!factura_aplicaciones_factura_id_fkey(id, numero)";
-      const [{ data: apl }, { data: aplA }] = await Promise.all([
+      const [{ data: apl }, { data: aplA }, { data: hist }] = await Promise.all([
         supabase.from("factura_aplicaciones").select(selApl).eq("factura_id", facturaId).order("fecha"),
         supabase.from("factura_aplicaciones").select(selApl).eq("documento_id", facturaId).order("fecha"),
+        supabase.from("facturas_historial").select("id, accion, cambios, origen, created_at, usuario:usuarios(nombre, apellido)").eq("factura_id", facturaId).order("created_at", { ascending: false }).limit(100),
       ]);
       if (activo) {
         setFactura((f as FacturaFull) ?? null);
@@ -77,11 +96,21 @@ const FacturaDetalle = () => {
         setRetencionesAplicadas((rf as unknown as RetencionAplicada[]) ?? []);
         setAplicaciones((apl as unknown as Aplicacion[]) ?? []);
         setAplicadaA((aplA as unknown as Aplicacion[]) ?? []);
+        setHistorial((hist as unknown as Historial[]) ?? []);
         setLoading(false);
       }
     })();
     return () => { activo = false; };
-  }, [facturaId]);
+  }, [facturaId, recarga]);
+
+  const anular = async () => {
+    setGuardando(true);
+    const { error } = await supabase.rpc("anular_factura", { p_factura_id: facturaId, p_motivo: motivo });
+    setGuardando(false);
+    if (error) { toast({ title: "No se pudo anular", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Factura anulada", description: "Queda registrada con su motivo y en el historial." });
+    setAnulando(false); setMotivo(""); setRecarga((n) => n + 1);
+  };
 
   const esNotaCredito = factura?.tipo === "nota_credito";
   // Montos del documento en su moneda (Bs. o USD); total y saldo se muestran siempre en USD
@@ -131,9 +160,15 @@ const FacturaDetalle = () => {
               </p>
             )}
             {factura.estado === "cancel" && (
-              <p className="mt-1 text-sm text-destructive">Anulada en Odoo{factura.motivo_anulacion ? `: ${factura.motivo_anulacion}` : ""}</p>
+              <p className="mt-1 text-sm text-destructive">
+                Anulada {factura.odoo_id ? "en Odoo" : "en GUDS"}
+                {factura.anulada_at ? ` el ${fmtFecha(factura.anulada_at)}` : ""}{factura.motivo_anulacion ? `: ${factura.motivo_anulacion}` : ""}
+              </p>
             )}
           </div>
+          {!factura.odoo_id && factura.estado !== "cancel" && can("cuentas", "editar") && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-destructive" onClick={() => setAnulando(true)}><Ban className="h-3.5 w-3.5" /> Anular</Button>
+          )}
           <Badge variant={ESTADO_COBRO[factura.estado_cobro]?.variant ?? "secondary"} className="text-sm">
             {ESTADO_COBRO[factura.estado_cobro]?.label ?? factura.estado_cobro}
           </Badge>
@@ -313,6 +348,51 @@ const FacturaDetalle = () => {
           </Table>
         )}
       </div>
+
+      <div className="mt-3 rounded-lg border border-border bg-card">
+        <div className="flex items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5">
+          <History className="h-3.5 w-3.5 text-muted-foreground" /><h2 className="text-[13px] font-semibold">Historial ({historial.length})</h2>
+        </div>
+        {historial.length === 0 ? (
+          <p className="p-4 text-center text-sm text-muted-foreground">Sin cambios registrados desde que se activó el historial.</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {historial.map((h) => (
+              <li key={h.id} className="px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <Badge variant={h.accion === "anulada" ? "destructive" : "outline"} className="text-[11px] capitalize">{h.accion}</Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(h.created_at).toLocaleString("es-VE", { dateStyle: "medium", timeStyle: "short" })} ·{" "}
+                    {h.origen === "odoo" ? "desde Odoo" : h.usuario ? `${h.usuario.nombre} ${h.usuario.apellido || ""}`.trim() : "GUDS"}
+                  </span>
+                </div>
+                {h.accion !== "creada" && (
+                  <p className="mt-0.5 break-words text-xs text-muted-foreground">
+                    {Object.entries(h.cambios || {}).map(([k, v]) => {
+                      const [antes, despues] = Array.isArray(v) ? v : [null, v];
+                      return `${CAMPO[k] || k}: ${antes ?? "—"} → ${despues ?? "—"}`;
+                    }).join(" · ")}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <Dialog open={anulando} onOpenChange={setAnulando}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Anular factura {factura.numero}</DialogTitle>
+            <DialogDescription>La factura no se elimina: queda anulada, con su motivo y en el historial, y deja de contar en cuentas por cobrar.</DialogDescription>
+          </DialogHeader>
+          <Textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Motivo de la anulación" rows={3} />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAnulando(false)} disabled={guardando}>Cancelar</Button>
+            <Button variant="destructive" onClick={anular} disabled={guardando || motivo.trim().length < 5}>{guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : "Anular factura"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 };

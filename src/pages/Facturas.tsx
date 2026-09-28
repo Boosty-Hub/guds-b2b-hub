@@ -18,6 +18,7 @@ interface FacturaRow {
   es_nota_debito?: boolean;
   id: string; numero: string; cliente_id: string; fecha_emision: string | null;
   moneda: string; total: number; total_usd: number; saldo_usd: number; estado_cobro: string;
+  estado: string; motivo_anulacion: string | null;
   cliente?: { nombre_negocio: string } | null;
 }
 
@@ -34,14 +35,15 @@ const Facturas = () => {
   const [facturas, setFacturas] = useState<FacturaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [estadoFilter, setEstadoFilter] = useState("all");
+  const [estadoFilter, setEstadoFilter] = useState("vigentes");
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       const { data } = await supabase.from("facturas")
-        .select("id, numero, cliente_id, fecha_emision, moneda, total, total_usd, saldo_usd, estado_cobro, es_nota_debito, cliente:clientes(nombre_negocio)")
-        .eq("tipo", "factura").eq("estado", "posted")
+        .select("id, numero, cliente_id, fecha_emision, moneda, total, total_usd, saldo_usd, estado_cobro, estado, motivo_anulacion, es_nota_debito, cliente:clientes(nombre_negocio)")
+        // Las facturas no se eliminan: las anuladas siguen aquí (filtro "Anuladas") con su motivo
+        .eq("tipo", "factura").in("estado", ["posted", "cancel"])
         .order("fecha_emision", { ascending: false })
         .limit(10000);
       setFacturas((data as unknown as FacturaRow[]) ?? []);
@@ -51,7 +53,9 @@ const Facturas = () => {
 
   const filtradas = useMemo(() => facturas.filter((f) => {
     const matchQ = f.numero.toLowerCase().includes(search.toLowerCase()) || (f.cliente?.nombre_negocio || "").toLowerCase().includes(search.toLowerCase());
-    const matchEstado = estadoFilter === "all" || f.estado_cobro === estadoFilter;
+    const anulada = f.estado === "cancel" || f.estado_cobro === "anulado";
+    const matchEstado = estadoFilter === "todas" || (estadoFilter === "anulado" ? anulada
+      : !anulada && (estadoFilter === "vigentes" || f.estado_cobro === estadoFilter));
     return matchQ && matchEstado;
   }), [facturas, search, estadoFilter]);
 
@@ -63,8 +67,11 @@ const Facturas = () => {
   const exportar = () => exportarCSV("facturas", ordenadas, [
     { titulo: "Número", valor: (f) => f.numero }, { titulo: "Cliente", valor: (f) => f.cliente?.nombre_negocio }, { titulo: "Emisión", valor: (f) => f.fecha_emision },
     { titulo: "Moneda", valor: (f) => f.moneda }, { titulo: "Total USD", valor: (f) => Number(f.total_usd || 0) }, { titulo: "Saldo USD", valor: (f) => Number(f.saldo_usd || 0) },
+    { titulo: "Estado", valor: (f) => (f.estado === "cancel" ? "Anulada" : ESTADO_COBRO[f.estado_cobro]?.label ?? f.estado_cobro) },
+    { titulo: "Motivo de anulación", valor: (f) => f.motivo_anulacion },
   ]);
-  const totalSaldo = filtradas.reduce((s, f) => s + Number(f.saldo_usd || 0), 0);
+  const vigentes = facturas.filter((f) => f.estado !== "cancel");
+  const totalSaldo = filtradas.filter((f) => f.estado !== "cancel").reduce((s, f) => s + Number(f.saldo_usd || 0), 0);
   const fmtFecha = (d: string | null) => (d ? new Date(d).toLocaleDateString("es-VE", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 
   const cols = useColumnas("facturas", [{ etiqueta: "Nº", fija: true }, { etiqueta: "Cliente" }, { etiqueta: "Emisión" }, { etiqueta: "Moneda" }, { etiqueta: "Total" }, { etiqueta: "Saldo" }, { etiqueta: "Estado" }]);
@@ -72,9 +79,10 @@ const Facturas = () => {
     <MainLayout title="Facturas">
       {cols.estilo}
       <KpiStrip items={[
-        { label: "Facturas", valor: facturas.length },
+        { label: "Facturas vigentes", valor: vigentes.length },
         { label: "Saldo pendiente (filtro actual)", valor: formatPrice(totalSaldo), tono: "negativo" },
-        { label: "Pagadas", valor: facturas.filter((f) => f.estado_cobro === "pagado").length, tono: "positivo" },
+        { label: "Pagadas", valor: vigentes.filter((f) => f.estado_cobro === "pagado").length, tono: "positivo" },
+        { label: "Anuladas", valor: facturas.length - vigentes.length, detalle: "Se conservan con su motivo", onClick: () => setEstadoFilter("anulado") },
       ]} />
 
       <BarraLista
@@ -85,7 +93,8 @@ const Facturas = () => {
           <Select value={estadoFilter} onValueChange={setEstadoFilter}>
             <SelectTrigger className="h-8 w-40 text-[13px]"><SelectValue placeholder="Estado" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="vigentes">Vigentes</SelectItem>
+              <SelectItem value="todas">Todas (con anuladas)</SelectItem>
               <SelectItem value="pendiente">Pendiente</SelectItem>
               <SelectItem value="parcial">Parcial</SelectItem>
               <SelectItem value="pagado">Pagada</SelectItem>
@@ -121,8 +130,12 @@ const Facturas = () => {
                   <TableCell className="whitespace-nowrap text-muted-foreground">{fmtFecha(f.fecha_emision)}</TableCell>
                   <TableCell className="text-muted-foreground">{f.moneda}</TableCell>
                   <TableCell className="whitespace-nowrap text-right">{formatPrice(f.total_usd)}</TableCell>
-                  <TableCell className={`whitespace-nowrap text-right font-semibold ${f.saldo_usd > 0.009 ? "text-destructive" : ""}`}>{formatPrice(f.saldo_usd)}</TableCell>
-                  <TableCell><Badge variant={ESTADO_COBRO[f.estado_cobro]?.variant ?? "secondary"}>{ESTADO_COBRO[f.estado_cobro]?.label ?? f.estado_cobro}</Badge></TableCell>
+                  <TableCell className={`whitespace-nowrap text-right font-semibold ${f.estado !== "cancel" && f.saldo_usd > 0.009 ? "text-destructive" : ""}`}>{f.estado === "cancel" ? "—" : formatPrice(f.saldo_usd)}</TableCell>
+                  <TableCell>
+                    {f.estado === "cancel"
+                      ? <Badge variant="destructive" title={f.motivo_anulacion || undefined}>Anulada</Badge>
+                      : <Badge variant={ESTADO_COBRO[f.estado_cobro]?.variant ?? "secondary"}>{ESTADO_COBRO[f.estado_cobro]?.label ?? f.estado_cobro}</Badge>}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

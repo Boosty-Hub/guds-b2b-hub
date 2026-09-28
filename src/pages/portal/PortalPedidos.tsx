@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { EditorPedidoPendiente } from "@/components/portal/EditorPedidoPendiente";
 import { pedidoEditable, type ResultadoEdicion } from "@/components/portal/pedidoEditable";
+import { ResumenPagoPedido, textoPagoEdicion } from "@/components/portal/ResumenPagoPedido";
 
 interface OrdenDB {
   id: string;
@@ -45,6 +46,7 @@ interface OrdenDB {
   notas?: string;
   vendedor_id?: string | null;   // pedido cargado por el vendedor: solo él lo edita
   odoo_id?: number | null;
+  numero_guds?: string | null;
   ediciones?: number | null;     // veces que se editó mientras estaba por aprobar
   editado_at?: string | null;
   items?: OrdenItem[];
@@ -135,7 +137,7 @@ const PortalPedidos = () => {
   const alGuardarEdicion = async (r: ResultadoEdicion) => {
     setEditando(false);
     setActualizado({ id: r.orden_id, total: r.total });
-    toast({ title: "Pedido actualizado", description: `${r.numero} · ${formatPrice(r.total)}. Sigue pendiente de aprobación.` });
+    toast({ title: "Pedido actualizado", description: `${r.numero} · ${formatPrice(r.total)}. Sigue pendiente de aprobación.${textoPagoEdicion(r, formatPrice)}` });
     const data = await fetchOrdenes(true);
     const o = data?.find((x) => x.id === r.orden_id);
     if (o) setSelectedOrder(o);
@@ -484,6 +486,10 @@ const PortalPedidos = () => {
                       <span className="text-primary">{formatPrice(selectedOrder.total)}</span>
                     </div>
                   </div>
+                  {/* Pedidos de GUDS: lo pagado frente al total (si se editó después de pagar, falta o queda a favor) */}
+                  {!selectedOrder.odoo_id || selectedOrder.numero_guds ? (
+                    <ResumenPagoPedido ordenId={selectedOrder.id} recarga={Number(actualizado?.total ?? 0)} className="mt-2" />
+                  ) : null}
                 </div>
               </>
             );

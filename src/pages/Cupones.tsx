@@ -97,6 +97,10 @@ const Cupones = () => {
       toast({ title: "Datos incompletos", description: "Código y un valor mayor que 0 son obligatorios", variant: "destructive" });
       return;
     }
+    if (form.tipo === "porcentaje" && Number(form.valor) > 100) {
+      toast({ title: "Porcentaje inválido", description: "Un cupón de porcentaje va de 1 a 100 %", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     const payload = {
       codigo: form.codigo.trim().toUpperCase(),
@@ -104,7 +108,8 @@ const Cupones = () => {
       tipo: form.tipo,
       valor: Number(form.valor),
       minimo_compra: Number(form.minimo_compra) || 0,
-      maximo_descuento: form.maximo_descuento ? Number(form.maximo_descuento) : null,
+      // El tope solo aplica a los cupones de porcentaje; uno de monto exacto descuenta ese monto
+      maximo_descuento: form.tipo === "porcentaje" && form.maximo_descuento ? Number(form.maximo_descuento) : null,
       usos_maximos: form.usos_maximos ? Number(form.usos_maximos) : null,
       usos_por_cliente: Number(form.usos_por_cliente) || 1,
       fecha_inicio: form.fecha_inicio || null,
@@ -186,7 +191,7 @@ const Cupones = () => {
                 <TableRow key={c.id} className="hover:bg-muted/50">
                   <TableCell className="whitespace-nowrap font-mono text-xs font-medium text-primary">{c.codigo}</TableCell>
                   <TableCell className="max-w-[260px] truncate text-muted-foreground" title={c.descripcion || undefined}>{c.descripcion || "—"}</TableCell>
-                  <TableCell className="whitespace-nowrap capitalize">{c.tipo}</TableCell>
+                  <TableCell className="whitespace-nowrap">{c.tipo === "porcentaje" ? "Porcentaje" : "Monto exacto"}</TableCell>
                   <TableCell className="whitespace-nowrap text-right font-semibold">{c.tipo === "porcentaje" ? `${c.valor}%` : formatPrice(Number(c.valor))}</TableCell>
                   <TableCell className="whitespace-nowrap text-right text-muted-foreground">{Number(c.minimo_compra) > 0 ? formatPrice(Number(c.minimo_compra)) : "—"}</TableCell>
                   <TableCell className="whitespace-nowrap text-center tabular-nums">{c.usos_actuales}{c.usos_maximos != null ? ` / ${c.usos_maximos}` : ""}</TableCell>
@@ -225,22 +230,24 @@ const Cupones = () => {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="porcentaje">Porcentaje (%)</SelectItem>
-                  <SelectItem value="fijo">Monto fijo ($)</SelectItem>
+                  <SelectItem value="fijo">Monto exacto ($)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>Valor</Label>
-              <Input type="number" min="0" step="0.01" value={form.valor} onChange={(e) => setForm((f) => ({ ...f, valor: e.target.value }))} placeholder={form.tipo === "porcentaje" ? "20" : "50.00"} />
+              <Label>{form.tipo === "porcentaje" ? "Porcentaje de descuento" : "Monto a descontar (USD)"}</Label>
+              <Input type="number" min="0" max={form.tipo === "porcentaje" ? 100 : undefined} step="0.01" value={form.valor} onChange={(e) => setForm((f) => ({ ...f, valor: e.target.value }))} placeholder={form.tipo === "porcentaje" ? "20" : "50.00"} />
             </div>
             <div>
               <Label>Mínimo de compra</Label>
               <Input type="number" min="0" step="0.01" value={form.minimo_compra} onChange={(e) => setForm((f) => ({ ...f, minimo_compra: e.target.value }))} />
             </div>
-            <div>
-              <Label>Descuento máximo</Label>
-              <Input type="number" min="0" step="0.01" value={form.maximo_descuento} onChange={(e) => setForm((f) => ({ ...f, maximo_descuento: e.target.value }))} placeholder="sin tope" />
-            </div>
+            {form.tipo === "porcentaje" && (
+              <div>
+                <Label>Descuento máximo (USD)</Label>
+                <Input type="number" min="0" step="0.01" value={form.maximo_descuento} onChange={(e) => setForm((f) => ({ ...f, maximo_descuento: e.target.value }))} placeholder="sin tope" />
+              </div>
+            )}
             <div>
               <Label>Usos máximos</Label>
               <Input type="number" min="0" value={form.usos_maximos} onChange={(e) => setForm((f) => ({ ...f, usos_maximos: e.target.value }))} placeholder="ilimitado" />
