@@ -34,3 +34,6 @@ scripts/package.json
 
 # Documentos con datos de clientes/vendedores (el repositorio es público)
 docs/privado/
+
+# Archivos temporales de Vite al recargar la configuración
+vite.config.ts.timestamp-*
