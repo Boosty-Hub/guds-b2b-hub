@@ -25,6 +25,7 @@ import {
   UserCog,
   ListChecks,
   BarChart3,
+  Undo2,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -88,7 +89,10 @@ export const navSections: NavSection[] = [
   },
   {
     title: "Logística",
-    items: [{ icon: Truck, label: "Delivery", path: "/admin/delivery", modulo: "delivery" }],
+    items: [
+      { icon: Truck, label: "Delivery", path: "/admin/delivery", modulo: "delivery" },
+      { icon: Undo2, label: "Devoluciones", path: "/admin/delivery/devoluciones", modulo: "inventario" },
+    ],
   },
 ];
 

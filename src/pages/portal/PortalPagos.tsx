@@ -466,7 +466,7 @@ const PortalPagos = () => {
       <NavFinanzas />
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
         {/* Resumen y facturas pendientes (en móvil va primero; en escritorio, columna derecha) */}
-        <aside className="space-y-4 lg:sticky lg:top-[5.5rem] lg:order-2">
+        <aside className="space-y-4 lg:sticky lg:top-[5.5rem] lg:order-2" aria-label="Resumen de pagos">
           <div className="grid grid-cols-2 gap-3">
             <Kpi etiqueta="Por pagar" icono={AlertCircle} cargando={loading} testId="por-pagar" alerta={hayVencidas}
               valor={formatPrice(totalPorPagar)}
@@ -608,9 +608,9 @@ const PortalPagos = () => {
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-5" data-testid="pago-scroll">
             {/* 1. Qué paga */}
             <div className="space-y-2">
-              <Label>¿Qué estás pagando?</Label>
+              <Label htmlFor="pago-destino">¿Qué estás pagando?</Label>
               <Select value={form.destino} onValueChange={elegirDestino}>
-                <SelectTrigger aria-label="Qué estás pagando">
+                <SelectTrigger id="pago-destino" aria-label="¿Qué estás pagando?">
                   <SelectValue placeholder="Elige una factura, un pedido o abono" />
                 </SelectTrigger>
                 <SelectContent>
@@ -639,10 +639,10 @@ const PortalPagos = () => {
             </div>
 
             {/* 2. Cuenta donde pagó */}
-            <div className="space-y-2">
-              <Label>¿A qué cuenta pagaste?</Label>
+            <div className="space-y-2" role="group" aria-labelledby="pago-cuenta-titulo">
+              <Label id="pago-cuenta-titulo">¿A qué cuenta pagaste?</Label>
               {cargandoCuentas ? (
-                <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+                <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="Cargando cuentas" /></div>
               ) : cuentas.length === 0 ? (
                 <p className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
                   {empresaActiva?.nombre_corto || "La empresa"} todavía no tiene cuentas publicadas para recibir pagos. Consulta con tu ejecutivo de cuenta.
@@ -676,8 +676,8 @@ const PortalPagos = () => {
               <>
                 {/* 3. Método (según los datos de la cuenta) */}
                 <div className="space-y-2">
-                  <Label>Método</Label>
-                  <div className="flex flex-wrap gap-2">
+                  <Label id="pago-metodo-titulo">Método</Label>
+                  <div className="flex flex-wrap gap-2" role="group" aria-labelledby="pago-metodo-titulo">
                     {metodosDeCuenta(cuentaSel).map((m) => (
                       <button
                         key={m}
@@ -714,7 +714,7 @@ const PortalPagos = () => {
                     value={form.monto}
                     onChange={(e) => { setForm({ ...form, monto: e.target.value }); setMontoAuto(false); setAvisoMonto(null); }}
                   />
-                  {avisoMonto && <p className="text-xs text-amber-700">{avisoMonto}</p>}
+                  {avisoMonto && <p className="text-xs text-amber-700 dark:text-amber-400" role="status">{avisoMonto}</p>}
                   {destinoSel?.saldoUSD != null && (
                     <p className="text-xs text-muted-foreground">
                       Saldo del documento: {fmtUsd(destinoSel.saldoUSD)}
@@ -760,10 +760,11 @@ const PortalPagos = () => {
 
                 {/* 6. Comprobante */}
                 <div className="space-y-2">
-                  <Label>Comprobante</Label>
+                  <Label id="pago-comprobante-titulo">Comprobante</Label>
                   <input
                     ref={comprobanteInputRef}
                     type="file"
+                    aria-labelledby="pago-comprobante-titulo"
                     accept="application/pdf,image/jpeg,image/png"
                     className="hidden"
                     onChange={handleComprobanteSelect}
@@ -773,16 +774,17 @@ const PortalPagos = () => {
                     type="button"
                     onClick={() => comprobanteInputRef.current?.click()}
                     disabled={uploadingComprobante}
+                    aria-describedby="pago-comprobante-titulo"
                     className="w-full border-2 border-dashed border-border rounded-xl p-4 text-center disabled:opacity-50"
                   >
                     {comprobanteFile ? (
                       <span className="flex items-center justify-center gap-2 text-sm">
-                        <Paperclip className="h-4 w-4 text-primary" />
+                        <Paperclip className="h-4 w-4 text-primary" aria-hidden />
                         {comprobanteFile.name}
                       </span>
                     ) : (
                       <span className="flex flex-col items-center gap-1 text-sm text-muted-foreground">
-                        <Upload className="h-6 w-6" />
+                        <Upload className="h-6 w-6" aria-hidden />
                         {uploadingComprobante ? "Subiendo..." : "Toca para adjuntar el comprobante (PDF, JPG o PNG, máx. 5 MB)"}
                       </span>
                     )}

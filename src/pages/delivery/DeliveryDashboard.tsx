@@ -6,6 +6,7 @@ import { Package, Truck, CheckCircle, AlertTriangle, Clock, ArrowRight, Loader2 
 import { useAuth } from "@/contexts/AuthContext";
 import { diaCaracas } from "@/components/delivery/fechas";
 import { useMisEntregas } from "@/components/delivery/useMisEntregas";
+import { usePingPosicion } from "@/components/delivery/usePingPosicion";
 
 const DeliveryDashboard = () => {
   const { user } = useAuth();
@@ -19,6 +20,8 @@ const DeliveryDashboard = () => {
     && diaCaracas((r.fecha_cierre || r.fecha_entrega)!) === hoy).length;
   const incidencias = rows.filter((r) => ["rechazada", "reprogramada", "fallida"].includes(r.estado) && !!r.fecha_cierre && diaCaracas(r.fecha_cierre) === hoy).length;
   const pendientes = asignadas + enCamino;
+  // Seguimiento (20p): con una entrega en camino, la última posición llega a la oficina (GPS de bajo consumo)
+  usePingPosicion(enCamino > 0);
 
   const stat = (icon: React.ReactNode, n: number, label: string, cls: string) => (
     <Card className="border-border"><CardContent className="p-4">

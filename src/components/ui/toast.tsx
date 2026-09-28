@@ -10,15 +10,17 @@ const ToastProvider = ToastPrimitives.Provider;
 const ToastViewport = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Viewport>,
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Viewport>
->(({ className, ...props }, ref) => (
-  <ToastPrimitives.Viewport
-    ref={ref}
-    className={cn(
-      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
-      className,
-    )}
-    {...props}
-  />
+>(({ className, label = "Notificaciones ({hotkey})", ...props }, ref) => (
+  // Accesibilidad: la región se anuncia en español y la lista es un <div> (Radix pinta <ol> con hijos role="status",
+  // que no son <li> válidos para los lectores de pantalla). El aspecto no cambia.
+  <ToastPrimitives.Viewport ref={ref} label={label} asChild {...props}>
+    <div
+      className={cn(
+        "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
+        className,
+      )}
+    />
+  </ToastPrimitives.Viewport>
 ));
 ToastViewport.displayName = ToastPrimitives.Viewport.displayName;
 
@@ -40,8 +42,12 @@ const toastVariants = cva(
 const Toast = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Root>,
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Root> & VariantProps<typeof toastVariants>
->(({ className, variant, ...props }, ref) => {
-  return <ToastPrimitives.Root ref={ref} className={cn(toastVariants({ variant }), className)} {...props} />;
+>(({ className, variant, children, ...props }, ref) => {
+  return (
+    <ToastPrimitives.Root ref={ref} className={cn(toastVariants({ variant }), className)} asChild {...props}>
+      <div>{children}</div>
+    </ToastPrimitives.Root>
+  );
 });
 Toast.displayName = ToastPrimitives.Root.displayName;
 
@@ -71,9 +77,10 @@ const ToastClose = React.forwardRef<
       className,
     )}
     toast-close=""
+    aria-label="Cerrar"
     {...props}
   >
-    <X className="h-4 w-4" />
+    <X className="h-4 w-4" aria-hidden />
   </ToastPrimitives.Close>
 ));
 ToastClose.displayName = ToastPrimitives.Close.displayName;

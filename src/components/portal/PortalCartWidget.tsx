@@ -126,7 +126,7 @@ export const CarritoHoja = ({ estado }: { estado: EstadoCarritoPanel }) => {
       <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
         <SheetHeader className="border-b border-border px-5 py-4 pr-12 text-left">
           <SheetTitle className="flex items-center gap-2 text-base">
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} />
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
             Tu carrito
             {unidades > 0 && <span className="text-sm font-normal tabular-nums text-muted-foreground">({items.length} {items.length === 1 ? "producto" : "productos"})</span>}
           </SheetTitle>
@@ -155,17 +155,17 @@ export const CarritoHoja = ({ estado }: { estado: EstadoCarritoPanel }) => {
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <div className="flex items-center rounded-md border border-border">
                         <button type="button" className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-foreground"
-                          onClick={() => cambiar(i.id, -1)} aria-label={`Quitar uno de ${i.producto?.nombre}`}><Minus className="h-3.5 w-3.5" /></button>
+                          onClick={() => cambiar(i.id, -1)} aria-label={`Quitar uno de ${i.producto?.nombre}`}><Minus className="h-3.5 w-3.5" aria-hidden /></button>
                         <span className="w-8 text-center text-sm font-medium tabular-nums" aria-live="polite">{i.cantidad}</span>
                         <button type="button" className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-foreground"
-                          onClick={() => cambiar(i.id, 1)} aria-label={`Agregar uno de ${i.producto?.nombre}`}><Plus className="h-3.5 w-3.5" /></button>
+                          onClick={() => cambiar(i.id, 1)} aria-label={`Agregar uno de ${i.producto?.nombre}`}><Plus className="h-3.5 w-3.5" aria-hidden /></button>
                       </div>
                       <p className="text-sm font-semibold tabular-nums">{formatPrice(precio(i) * i.cantidad)}</p>
                     </div>
                   </div>
                   <button type="button" onClick={() => quitar(i.id)} className="self-start rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
                     aria-label={`Eliminar ${i.producto?.nombre} del carrito`}>
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="h-4 w-4" aria-hidden />
                   </button>
                 </li>
               ))}
@@ -177,7 +177,7 @@ export const CarritoHoja = ({ estado }: { estado: EstadoCarritoPanel }) => {
           <div className="border-t border-border bg-card px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
             <ResumenCotizacion {...cotizacionEstado} className="mb-3" />
             <Button className="h-11 w-full gap-2 text-sm font-semibold" onClick={irACheckout} data-testid="carrito-finalizar">
-              Revisar y enviar pedido <ArrowRight className="h-4 w-4" />
+              Revisar y enviar pedido <ArrowRight className="h-4 w-4" aria-hidden />
             </Button>
             <p className="mt-2 text-center text-xs text-muted-foreground">El IVA depende de cada producto (exento o gravado).</p>
           </div>
@@ -192,15 +192,14 @@ export const BotonCarrito = ({ estado, className }: { estado: EstadoCarritoPanel
   <button
     type="button"
     onClick={() => estado.setAbierto(true)}
-    aria-label={`Abrir carrito${estado.lineas > 0 ? ` (${estado.lineas} productos)` : ""}`}
     className={cn("relative flex h-9 items-center gap-2 rounded-md border border-border bg-card px-3 text-sm font-medium hover:bg-muted", className)}
     data-testid="boton-carrito"
   >
-    <ShoppingCart className="h-4 w-4" strokeWidth={1.75} />
+    <ShoppingCart className="h-4 w-4" strokeWidth={1.75} aria-hidden />
     <span>Carrito</span>
     {estado.lineas > 0 && (
       <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold tabular-nums text-primary-foreground">
-        {estado.lineas}
+        {estado.lineas}<span className="sr-only"> {estado.lineas === 1 ? "producto" : "productos"}</span>
       </span>
     )}
   </button>

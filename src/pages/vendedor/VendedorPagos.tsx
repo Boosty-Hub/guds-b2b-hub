@@ -99,10 +99,10 @@ const VendedorPagos = () => {
 
         <BarraLista busqueda={q} onBusqueda={setQ} placeholder="Buscar cobro, cliente o referencia..."
           contador={loading ? undefined : `${filtrados.length} registros`}
-          acciones={<Button size="sm" className="gap-1.5 bg-emerald-500 hover:bg-emerald-600" onClick={() => navigate("/vendedor/cobros/nuevo")} data-testid="registrar-cobro-lista"><Plus className="h-3.5 w-3.5" />Registrar Cobro</Button>} />
+          acciones={<Button size="sm" className="gap-1.5 bg-emerald-700 hover:bg-emerald-800" onClick={() => navigate("/vendedor/cobros/nuevo")} data-testid="registrar-cobro-lista"><Plus className="h-3.5 w-3.5" />Registrar Cobro</Button>} />
 
         <div className="rounded-lg border border-border bg-card">
-          {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
+          {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div>
           : pagos.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay cobros registrados</div>
           : filtrados.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Sin resultados{texto ? ` para "${q.trim()}"` : ""}</div>
           : (
@@ -139,7 +139,7 @@ const VendedorPagos = () => {
                   <TableBody>
                     {pagination.pageItems.map((p) => (
                       <TableRow key={p.id}>
-                        <TableCell className="whitespace-nowrap font-medium text-emerald-600">
+                        <TableCell className="whitespace-nowrap font-medium text-emerald-700">
                           {p.numero}
                           {p.comprobante_url && (
                             <button type="button" onClick={() => verComprobante(p.comprobante_url!)} className="ml-1.5 inline-flex align-middle text-muted-foreground hover:text-foreground" title="Ver comprobante" aria-label={`Ver comprobante de ${p.numero}`}>

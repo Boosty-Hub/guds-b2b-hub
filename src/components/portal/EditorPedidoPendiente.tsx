@@ -473,7 +473,7 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
             <ResumenCotizacion {...cotizacionEstado} envioCero={modo === "vendedor" && orden.vendedor_id ? "Sin envío" : "Gratis"} />
           )}
           {descuentoSinCupon > 0 && (
-            <p className="text-xs text-amber-700">
+            <p className="text-xs text-amber-700 dark:text-amber-400">
               Este pedido tiene un descuento de {formatPrice(descuentoSinCupon)} que GUDS conserva al guardar; el total de arriba no lo incluye.
             </p>
           )}

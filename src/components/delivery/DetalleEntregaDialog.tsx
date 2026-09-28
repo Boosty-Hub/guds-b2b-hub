@@ -84,7 +84,7 @@ async function urlEvidencia(ruta: string | null): Promise<string | null> {
   return data.signedUrl;
 }
 
-function Evidencia({ titulo, ruta, fondoBlanco }: { titulo: string; ruta: string | null; fondoBlanco?: boolean }) {
+export function Evidencia({ titulo, ruta, fondoBlanco }: { titulo: string; ruta: string | null; fondoBlanco?: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
   const [estado, setEstado] = useState<"cargando" | "ok" | "vacio" | "error">(ruta ? "cargando" : "vacio");
   useEffect(() => {

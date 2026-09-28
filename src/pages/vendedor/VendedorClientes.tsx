@@ -89,7 +89,7 @@ const VendedorClientes = () => {
 
       <div className="rounded-lg border border-border bg-card">
         {loading || cargandoResumen ? (
-          <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
+          <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div>
         ) : filtrados.length === 0 ? (
           <div className="py-10 text-center text-sm text-muted-foreground">{clientes.length ? `Sin resultados${texto ? ` para "${search.trim()}"` : ""}` : "No tienes clientes asignados"}</div>
         ) : (

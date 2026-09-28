@@ -87,7 +87,7 @@ const PortalEliminarCuenta = () => {
           </div>
           <div>
             <p className="font-semibold text-destructive">Acción irreversible</p>
-            <p className="text-sm text-destructive/80">
+            <p className="text-sm text-destructive">
               Esta acción eliminará permanentemente tu cuenta y todos los datos asociados.
             </p>
           </div>
@@ -95,29 +95,29 @@ const PortalEliminarCuenta = () => {
 
         {/* What will be deleted */}
         <div className="bg-card rounded-xl border border-border p-4 space-y-4">
-          <h3 className="font-semibold">¿Qué sucederá al eliminar tu cuenta?</h3>
+          <h2 className="font-semibold">¿Qué sucederá al eliminar tu cuenta?</h2>
           
           <ul className="space-y-3 text-sm">
             <li className="flex items-start gap-2">
-              <span className="text-destructive">•</span>
+              <span className="text-destructive" aria-hidden>•</span>
               <span className="text-muted-foreground">
                 Tu cuenta se cerrará y perderás el acceso de forma permanente
               </span>
             </li>
             <li className="flex items-start gap-2">
-              <span className="text-destructive">•</span>
+              <span className="text-destructive" aria-hidden>•</span>
               <span className="text-muted-foreground">
                 Tu historial de pedidos se archiva por motivos fiscales (ya no lo verás)
               </span>
             </li>
             <li className="flex items-start gap-2">
-              <span className="text-destructive">•</span>
+              <span className="text-destructive" aria-hidden>•</span>
               <span className="text-muted-foreground">
                 Se eliminarán tus productos favoritos guardados
               </span>
             </li>
             <li className="flex items-start gap-2">
-              <span className="text-destructive">•</span>
+              <span className="text-destructive" aria-hidden>•</span>
               <span className="text-muted-foreground">
                 No podrás recuperar la cuenta después de eliminarla
               </span>
@@ -127,13 +127,15 @@ const PortalEliminarCuenta = () => {
 
         {/* Confirmation */}
         <div className="bg-card rounded-xl border border-border p-4 space-y-4">
-          <h3 className="font-semibold">Confirmar eliminación</h3>
+          <h2 className="font-semibold">Confirmar eliminación</h2>
           
           <div className="space-y-2">
-            <Label className="text-sm text-muted-foreground">
+            <Label htmlFor="confirmar-eliminar" className="text-sm text-muted-foreground">
               Escribe <span className="font-mono font-bold text-foreground">ELIMINAR</span> para confirmar
             </Label>
             <Input
+              id="confirmar-eliminar"
+              autoComplete="off"
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value.toUpperCase())}
               placeholder="Escribe ELIMINAR"
@@ -160,7 +162,7 @@ const PortalEliminarCuenta = () => {
 
         {/* Alternative */}
         <div className="bg-muted rounded-xl p-4">
-          <h3 className="font-semibold mb-2">¿Tienes problemas con tu cuenta?</h3>
+          <h2 className="font-semibold mb-2">¿Tienes problemas con tu cuenta?</h2>
           <p className="text-sm text-muted-foreground mb-3">
             Si tienes algún problema, nuestro equipo de soporte puede ayudarte antes de tomar esta decisión.
           </p>

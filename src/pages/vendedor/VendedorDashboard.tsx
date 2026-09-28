@@ -83,23 +83,23 @@ const VendedorDashboard = () => {
 
   return (
     <VendedorLayout title="Hoy">
-      {cargando && cargandoResumen ? (
-        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-emerald-500" /></div>
+      {cargando || cargandoResumen ? (
+        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-emerald-700" aria-label="Cargando" /></div>
       ) : (
         <div className="mx-auto max-w-7xl" data-testid="hoy">
           <p className="mb-2 text-[13px] text-muted-foreground">
             Hola, <span className="font-medium text-foreground">{user?.nombre}</span> · <span className="first-letter:uppercase">{fechaHoy}</span>
           </p>
-          {(error || errorResumen) && <p className="mb-2 text-[13px] text-destructive">No se pudo cargar todo: {error || errorResumen}</p>}
+          {(error || errorResumen) && <p className="mb-2 text-[13px] text-destructive" role="alert">No se pudo cargar todo: {error || errorResumen}</p>}
           {r && <AvisoEmpresaCartera clientes={r.clientes} porEmpresa={r.clientes_por_empresa} />}
 
           {/* Acciones rápidas */}
           <div className="mb-3 grid grid-cols-2 gap-2">
-            <Link to="/vendedor/pedidos/nuevo" className="flex h-12 items-center justify-center gap-2 rounded-lg bg-emerald-500 text-sm font-semibold text-white hover:bg-emerald-600" data-testid="hoy-nuevo-pedido">
-              <ShoppingCart className="h-4 w-4" />Nuevo pedido
+            <Link to="/vendedor/pedidos/nuevo" className="flex h-12 items-center justify-center gap-2 rounded-lg bg-emerald-700 text-sm font-semibold text-white hover:bg-emerald-800" data-testid="hoy-nuevo-pedido">
+              <ShoppingCart className="h-4 w-4" aria-hidden />Nuevo pedido
             </Link>
             <Link to="/vendedor/cobros/nuevo" className="flex h-12 items-center justify-center gap-2 rounded-lg border border-emerald-500/60 bg-card text-sm font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10" data-testid="hoy-registrar-cobro">
-              <CreditCard className="h-4 w-4" />Registrar cobro
+              <CreditCard className="h-4 w-4" aria-hidden />Registrar cobro
             </Link>
           </div>
 
@@ -119,19 +119,19 @@ const VendedorDashboard = () => {
           {r && (
             <Link to="/vendedor/metas" className="mb-3 block rounded-lg border border-border bg-card px-3 py-2.5 hover:bg-muted/30" data-testid="hoy-meta">
               <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
-                <span className="flex items-center gap-2 text-[13px] font-semibold"><Target className="h-4 w-4 text-emerald-500" />Meta de {mesDe(r)}</span>
+                <span className="flex items-center gap-2 text-[13px] font-semibold"><Target className="h-4 w-4 text-emerald-700" />Meta de {mesDe(r)}</span>
                 <span className="text-xs text-muted-foreground">
                   {meta > 0 ? <><span className="font-semibold text-foreground">{formatPrice(venta)}</span> de {formatPrice(meta)} · {avance}%</> : <>Sin meta cargada · vendido {formatPrice(venta)}</>}
                 </span>
               </div>
-              <Progress value={meta > 0 ? Math.min(100, avance) : 0} className="h-2" />
+              <Progress value={meta > 0 ? Math.min(100, avance) : 0} className="h-2" aria-label={`Avance de la meta de ${mesDe(r)}`} />
               {meta > 0 && venta < meta && <p className="mt-1 text-[11px] text-muted-foreground">Faltan {formatPrice(meta - venta)} para la meta.</p>}
             </Link>
           )}
 
           {hoy && (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <Tarjeta icono={<Wallet className="h-4 w-4 text-emerald-500" />} titulo="Clientes para hoy" n={hoy.visitar.n} tono="alerta" testid="hoy-visitar"
+              <Tarjeta icono={<Wallet className="h-4 w-4 text-emerald-700" />} titulo="Clientes para hoy" n={hoy.visitar.n} tono="alerta" testid="hoy-visitar"
                 ver={{ a: "/vendedor/cartera?filtro=visitar", texto: "Ver todos" }}>
                 {hoy.visitar.items.length === 0 ? <Vacio texto="Nada urgente: sin vencidos ni clientes sin comprar." /> : (
                   <ul className="divide-y divide-border">

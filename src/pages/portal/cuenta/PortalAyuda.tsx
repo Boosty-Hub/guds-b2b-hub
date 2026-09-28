@@ -178,7 +178,7 @@ const PortalAyuda = () => {
           </section>
         </div>
 
-        <aside className="space-y-4 lg:sticky lg:top-[5.5rem]">
+        <aside className="space-y-4 lg:sticky lg:top-[5.5rem]" aria-label="Contacto">
           {/* Canales de contacto (solo datos reales) */}
           <section className="space-y-3 rounded-xl border border-border bg-card p-4">
             <h2 className="text-sm font-semibold">Contacto</h2>

@@ -85,9 +85,9 @@ export const Antiguedad = ({ resumen, enlaces = true }: { resumen: ResumenCuenta
           return (
             <li key={t.k}>
               {enlaces && v > 0 ? (
-                <Link to={`/portal/facturas?tramo=${t.k}`} className="-mx-2 flex items-center justify-between gap-3 rounded-md px-2 py-2.5 hover:bg-muted/50"
-                  aria-label={`${t.etiqueta}: ${formatPrice(v)}. Ver facturas`}>
+                <Link to={`/portal/facturas?tramo=${t.k}`} className="-mx-2 flex items-center justify-between gap-3 rounded-md px-2 py-2.5 hover:bg-muted/50">
                   {contenido}
+                  <span className="sr-only">. Ver facturas</span>
                 </Link>
               ) : (
                 <div className="flex items-center justify-between gap-3 py-2.5">{contenido}</div>

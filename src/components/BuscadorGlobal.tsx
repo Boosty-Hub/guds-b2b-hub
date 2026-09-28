@@ -132,7 +132,7 @@ export function BuscadorGlobal({ className, compacto = false, atajo = true, cont
 
   return (
     <>
-      <button type="button" onClick={() => setAbierto(true)} aria-label="Buscar en toda la base (Ctrl+K)"
+      <button type="button" onClick={() => setAbierto(true)} aria-label={compacto ? "Buscar en toda la base (Ctrl+K)" : undefined}
         className={cn("flex h-8 items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted",
           compacto ? "w-8 justify-center px-0" : "w-72", className)}>
         <Search className="h-3.5 w-3.5 shrink-0" />

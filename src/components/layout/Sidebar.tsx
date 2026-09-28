@@ -53,6 +53,9 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
     .map((s) => ({ ...s, items: s.items.filter((i) => i.modulo === "dashboard" || can(i.modulo, "ver")) }))
     .filter((s) => s.items.length > 0);
 
+  // Un módulo con otro enlace debajo de su ruta (Delivery → Devoluciones) solo se marca en su ruta exacta
+  const tieneHijo = (path: string) => navSections.some((s) => s.items.some((i) => i.path.startsWith(path + "/")));
+
   const linkClass = (isActive: boolean) =>
     cn(
       "flex items-center rounded-md text-[13px] font-medium transition-all duration-200",
@@ -64,7 +67,7 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
 
   const renderItem = (item: NavItem) => {
     const link = (
-      <NavLink key={item.path} to={item.path} className={({ isActive }) => linkClass(isActive)}>
+      <NavLink key={item.path} to={item.path} end={tieneHijo(item.path)} className={({ isActive }) => linkClass(isActive)}>
         <item.icon className="h-4 w-4 shrink-0" />
         {!collapsed && <span className="truncate">{item.label}</span>}
       </NavLink>

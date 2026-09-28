@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -122,12 +122,14 @@ export const Kpi = ({ etiqueta, valor, detalle, icono: Icono, href, cargando, al
       <div className="flex items-center justify-between gap-2">
         <p className="truncate text-[11px] font-medium uppercase text-muted-foreground sm:text-xs sm:tracking-wide">{etiqueta}</p>
         {Icono && <Icono className={cn("hidden h-4 w-4 shrink-0 sm:block", alerta ? "text-destructive" : "text-muted-foreground")} strokeWidth={1.75} aria-hidden />}
+        {cargando && <span className="sr-only">Cargando</span>}
       </div>
       {cargando ? (
-        <>
-          <Skeleton className="mt-3 h-7 w-28" />
-          <Skeleton className="mt-2 h-3.5 w-20" />
-        </>
+        // Mismo alto que la cifra y el detalle (sin salto de diseño al llegar los datos)
+        <div aria-hidden>
+          <Skeleton className="mt-2 h-7 w-28 sm:h-8" />
+          <Skeleton className="mt-1 h-4 w-20" />{/* siempre: el detalle suele llegar con los datos */}
+        </div>
       ) : (
         <>
           <p className="mt-2 truncate text-xl font-semibold tabular-nums text-foreground sm:text-2xl" data-testid={testId}>{valor}</p>
@@ -149,14 +151,26 @@ export const Kpi = ({ etiqueta, valor, detalle, icono: Icono, href, cargando, al
 export function Segmentado<T extends string>({ opciones, valor, onCambio, className, etiqueta }: {
   opciones: { valor: T; etiqueta: ReactNode; n?: number }[]; valor: T; onCambio: (v: T) => void; className?: string; etiqueta?: string;
 }) {
+  // Teclado como en el patrón de pestañas: una sola parada de tabulación y flechas / Inicio / Fin para cambiar
+  const teclas = (e: KeyboardEvent<HTMLDivElement>) => {
+    const i = opciones.findIndex((o) => o.valor === valor);
+    const destino = e.key === "ArrowRight" ? (i + 1) % opciones.length
+      : e.key === "ArrowLeft" ? (i - 1 + opciones.length) % opciones.length
+      : e.key === "Home" ? 0 : e.key === "End" ? opciones.length - 1 : -1;
+    if (destino < 0) return;
+    e.preventDefault();
+    onCambio(opciones[destino].valor);
+    (e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[destino])?.focus();
+  };
   return (
-    <div className={cn("flex rounded-lg bg-muted p-1", className)} role="tablist" aria-label={etiqueta}>
-      {opciones.map((o) => (
+    <div className={cn("flex rounded-lg bg-muted p-1", className)} role="tablist" aria-label={etiqueta} onKeyDown={teclas}>
+      {opciones.map((o, idx) => (
         <button
           key={o.valor}
           type="button"
           role="tab"
           aria-selected={valor === o.valor}
+          tabIndex={valor === o.valor || (idx === 0 && !opciones.some((x) => x.valor === valor)) ? 0 : -1}
           onClick={() => onCambio(o.valor)}
           className={cn(
             "flex min-h-[40px] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-center text-sm font-medium leading-tight transition-colors",
@@ -205,7 +219,7 @@ export const SelectorMoneda = ({ compacto = false, className }: { compacto?: boo
         type="button"
         onClick={() => setCurrency(currency === "USD" ? "BS" : "USD")}
         className={cn("h-9 min-w-[3.25rem] rounded-md border border-border bg-card px-2 text-xs font-semibold tabular-nums text-foreground hover:bg-muted", className)}
-        aria-label={`Moneda: ${currency === "USD" ? "dólares" : "bolívares"}. Cambiar`}
+        aria-label={currency === "USD" ? "USD: cambiar la moneda a bolívares" : "Bs.: cambiar la moneda a dólares"}
         data-testid="moneda-toggle"
       >
         {currency === "USD" ? "USD" : "Bs."}

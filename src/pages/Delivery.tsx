@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertTriangle, Eye, ListChecks, Loader2, MapPin, MapPinned, Route, UserPlus } from "lucide-react";
+import { AlertTriangle, BarChart3, Eye, ListChecks, Loader2, MapPin, MapPinned, Route, Scale, ShieldAlert, Truck, UserPlus } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
@@ -32,6 +32,11 @@ import { PlanificadorRutas } from "@/components/delivery/PlanificadorRutas";
 import {
   cargarUbicaciones, claveDestino, estadoUbicacion, ETIQUETA_UBICACION, type DestinoEntrega, type DireccionCliente, type Ubicacion,
 } from "@/components/delivery/ubicaciones";
+import { SeguimientoPanel } from "@/components/delivery/SeguimientoPanel";
+import { IncidenciasPanel } from "@/components/delivery/IncidenciasPanel";
+import { IndicadoresPanel } from "@/components/delivery/IndicadoresPanel";
+import { CuadreOdooPanel } from "@/components/delivery/CuadreOdooPanel";
+import { DISCREPANCIAS, cargarIncidencias, type Incidencia } from "@/components/delivery/seguimiento";
 
 // Delivery (fase 19v): la cola son los DOCUMENTOS DE ENTREGA DE ODOO tal cual (stock.picking de salida, por empresa) y las
 // reposiciones a consignación (traslado interno hacia un almacén de consignación: se entrega en el cliente del almacén).
@@ -88,9 +93,11 @@ function armarFilas(docs: DocEntrega[], entregas: EntregaAdmin[], escrituras: Es
 // venta (orden de entrega desde almacén propio) · corte (orden de entrega desde consignación) · reposicion (propio → consignación)
 const tipoDe = (f: FilaDoc) => (esReposicion(f.doc) ? "reposicion" : f.doc?.almacen?.tipo === "consignacion" ? "corte" : "venta");
 
-const fechaCola = (f: FilaDoc) => {
+// En la cola, un documento reprogramado (por el repartidor o por administración desde Incidencias, 20p) va con su fecha nueva
+const fechaCola = (f: FilaDoc, inc?: Map<string, Incidencia>) => {
   const e = f.entrega;
-  if (f.situacion === "por_asignar") return e?.estado === "reprogramada" && e.reprogramada_para ? `${e.reprogramada_para}T12:00:00Z` : f.doc?.fecha_programada ?? "";
+  const objetivo = e ? inc?.get(e.id)?.fecha_objetivo ?? (e.estado === "reprogramada" ? e.reprogramada_para : null) : null;
+  if (f.situacion === "por_asignar") return objetivo ? `${objetivo}T12:00:00Z` : f.doc?.fecha_programada ?? "";
   if (f.situacion === "cerrada") return e?.fecha_cierre || e?.fecha_entrega || f.doc?.fecha_realizada || "";
   return e?.fecha_asignacion ?? "";
 };
@@ -114,7 +121,9 @@ const Delivery = () => {
   const [saving, setSaving] = useState(false);
   // 20f: vistas Cola / Rutas / Ubicaciones (en la URL, ?vista=rutas), ubicaciones de entrega y editor en el mapa
   const [params, setParams] = useSearchParams();
-  const seccion = (["rutas", "ubicaciones"].includes(params.get("vista") ?? "") ? params.get("vista") : "cola") as "cola" | "rutas" | "ubicaciones";
+  // 20p: En curso (seguimiento del día), Incidencias, Indicadores y Cuadre con Odoo
+  const seccion = (["rutas", "ubicaciones", "curso", "incidencias", "indicadores", "cuadre"].includes(params.get("vista") ?? "") ? params.get("vista") : "cola") as
+    "cola" | "rutas" | "ubicaciones" | "curso" | "incidencias" | "indicadores" | "cuadre";
   const cambiarVista = (v: string) => setParams((p) => { const n = new URLSearchParams(p); if (v === "cola") n.delete("vista"); else n.set("vista", v); return n; }, { replace: true });
   const { can } = usePermissions();
   const puedeUbicar = can("delivery", "editar") || can("clientes", "editar");
@@ -122,6 +131,17 @@ const Delivery = () => {
   const [ubicaciones, setUbicaciones] = useState<Map<string, Ubicacion>>(new Map());
   const [editarUbic, setEditarUbic] = useState<DestinoEntrega | null>(null);
   const [recargaRutas, setRecargaRutas] = useState(0);
+  const [incidencias, setIncidencias] = useState<Incidencia[]>([]);
+  const [cargandoInc, setCargandoInc] = useState(true);
+  const [cuadreDisc, setCuadreDisc] = useState(0);
+
+  const recargarIncidencias = useCallback(async () => {
+    setCargandoInc(true);
+    try { setIncidencias(await cargarIncidencias(false, DIAS_HISTORIAL)); }
+    catch (e) { toast({ title: "No se pudieron cargar las incidencias", description: (e as Error).message, variant: "destructive" }); }
+    finally { setCargandoInc(false); }
+  }, [toast]);
+  const incPorEntrega = useMemo(() => new Map(incidencias.map((i) => [i.entrega_id, i])), [incidencias]);
 
   const recargarUbicaciones = useCallback(async () => {
     try { setUbicaciones(await cargarUbicaciones()); }
@@ -132,6 +152,9 @@ const Delivery = () => {
     setLoading(true);
     const desde = new Date(Date.now() - DIAS_HISTORIAL * 86400000).toISOString();
     recargarUbicaciones();
+    recargarIncidencias();
+    supabase.from("cuadre_entregas_odoo").select("tipo").in("tipo", DISCREPANCIAS)
+      .then(({ data }) => setCuadreDisc((data as unknown[] | null)?.length ?? 0));
     supabase.from("cliente_direcciones").select("id, odoo_id, cliente_id, nombre, direccion, ciudad, estado").limit(5000)
       .then(({ data }) => setDirecciones((data as DireccionCliente[] | null) ?? []));
     const [rRes, dRes, iRes, eRes, wRes] = await Promise.all([
@@ -152,7 +175,7 @@ const Delivery = () => {
       (eRes.data as unknown as EntregaAdmin[] | null) ?? [],
       (wRes.data as unknown as EscrituraOdoo[] | null) ?? []));
     setLoading(false);
-  }, [toast, recargarUbicaciones]);
+  }, [toast, recargarUbicaciones, recargarIncidencias]);
   useEffect(() => { cargar(); }, [cargar]);
 
   // Destino de cada documento: el cliente (o el de su almacén de consignación) y la sucursal si el contacto del documento
@@ -205,6 +228,13 @@ const Delivery = () => {
   const hoy = diaCaracas();
   const cerradasHoy = filas.filter((f) => f.situacion === "cerrada" && f.entrega?.fecha_cierre && diaCaracas(f.entrega.fecha_cierre) === hoy).length;
   const conError = filas.filter((f) => f.escritura?.estado === "error").length;
+  const incPorDecidir = incidencias.filter((i) => i.estado === "abierta").length;
+  const devPendientes = incidencias.filter((i) => i.devolucion === "pendiente").length;
+  const verEnCola = (odooId: number) => {
+    const f = filas.find((x) => x.clave === `d${odooId}`);
+    if (f) setDetalle(f);
+    else toast({ title: "No está en la cola de los últimos 90 días", description: "Ábrelo en Odoo con el enlace del documento." });
+  };
 
   const vista = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -216,11 +246,11 @@ const Delivery = () => {
       .sort((a, b) => {
         if (tab === "por_asignar") {
           const la = a.doc?.estado === "lista" ? 0 : 1, lb = b.doc?.estado === "lista" ? 0 : 1;
-          return la - lb || fechaCola(a).localeCompare(fechaCola(b));
+          return la - lb || fechaCola(a, incPorEntrega).localeCompare(fechaCola(b, incPorEntrega));
         }
         return fechaCola(b).localeCompare(fechaCola(a));
       });
-  }, [filas, tab, q, estadoOdoo, tipoDoc]);
+  }, [filas, tab, q, estadoOdoo, tipoDoc, incPorEntrega]);
   const pagination = usePagination(vista, 50);
   const empresaDe = (id: string) => empresas.find((x) => x.id === id) ?? null;
 
@@ -267,12 +297,26 @@ const Delivery = () => {
     const e = f.entrega;
     if (f.situacion === "por_asignar") {
       if (!e) return <span className="text-muted-foreground">—</span>;
+      // 20p: la incidencia manda la fecha en la cola (reprogramada por administración) y dice si ya se resolvió
+      const inc = incPorEntrega.get(e.id);
+      const objetivo = inc?.fecha_objetivo ?? (e.estado === "reprogramada" ? e.reprogramada_para : null);
+      const intento = f.intentos.filter((x) => x.estado !== "cancelada").length + 1;
       return (
         <span className="flex flex-col items-start gap-0.5">
-          <EstadoEntregaBadge estado={e.estado} />
-          <span className="text-[11px] text-muted-foreground">
-            {e.estado === "reprogramada" && e.reprogramada_para ? `para el ${fmtDia(e.reprogramada_para)} · ` : ""}{e.motivo_codigo ? etiquetaMotivo(e.motivo_codigo) : e.motivo_detalle || ""}
+          <span className="flex flex-wrap items-center gap-1">
+            <EstadoEntregaBadge estado={e.estado} />
+            {intento > 1 && e.estado !== "cancelada" && <span className="text-[11px] font-medium text-muted-foreground">{intento}.º intento</span>}
           </span>
+          <span className="text-[11px] text-muted-foreground">
+            {objetivo && inc?.estado !== "resuelta" ? `para el ${fmtDia(objetivo)} · ` : ""}{e.motivo_codigo ? etiquetaMotivo(e.motivo_codigo) : e.motivo_detalle || ""}
+          </span>
+          {inc && (inc.estado === "abierta" || inc.estado === "resuelta") && (
+            <button type="button" onClick={(ev) => { ev.stopPropagation(); cambiarVista("incidencias"); }}
+              className={`text-[11px] hover:underline ${inc.estado === "resuelta" ? "text-muted-foreground" : "text-destructive"}`}
+              title={inc.estado === "resuelta" ? inc.nota ?? undefined : "Administración aún no decide: reprogramar, reasignar o resolver"}>
+              {inc.estado === "resuelta" ? "Incidencia resuelta" : "Incidencia por decidir"}
+            </button>
+          )}
         </span>
       );
     }
@@ -309,7 +353,10 @@ const Delivery = () => {
           { label: "Cerradas hoy", valor: cerradasHoy, detalle: `${conteo.cerrada} en ${DIAS_HISTORIAL} días`, tono: "positivo", onClick: () => { cambiarVista("cola"); setTab("cerrada"); }, activo: seccion === "cola" && tab === "cerrada" },
           { label: "Sin ubicación", valor: sinUbicacion, detalle: porConfirmar ? `${porConfirmar} por confirmar (GPS)` : "destinos pendientes", tono: sinUbicacion ? "alerta" : "tenue",
             onClick: () => cambiarVista("ubicaciones"), activo: seccion === "ubicaciones", titulo: "Destinos de los documentos pendientes sin ubicación en el mapa" },
-          { label: "Error en Odoo", valor: conError, tono: conError ? "negativo" : "tenue", titulo: "Entregas cerradas cuya validación en Odoo falló" },
+          { label: "Incidencias", valor: incPorDecidir, detalle: devPendientes ? `${devPendientes} devoluciones por confirmar` : "por decidir", tono: incPorDecidir ? "negativo" : "tenue",
+            onClick: () => cambiarVista("incidencias"), activo: seccion === "incidencias", titulo: "Entregas incompletas, rechazadas o reprogramadas por decidir" },
+          { label: "Error en Odoo", valor: conError, detalle: cuadreDisc ? `${cuadreDisc} con diferencias de cuadre` : undefined, tono: conError || cuadreDisc ? "negativo" : "tenue",
+            onClick: () => cambiarVista("cuadre"), activo: seccion === "cuadre", titulo: "Entregas cuya validación en Odoo falló y diferencias del cuadre con Odoo" },
         ]}
       />
 
@@ -317,9 +364,22 @@ const Delivery = () => {
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="cola" className="gap-1.5"><ListChecks className="h-3.5 w-3.5" />Cola de despacho</TabsTrigger>
           <TabsTrigger value="rutas" className="gap-1.5"><Route className="h-3.5 w-3.5" />Rutas</TabsTrigger>
+          <TabsTrigger value="curso" className="gap-1.5"><Truck className="h-3.5 w-3.5" />En curso</TabsTrigger>
+          <TabsTrigger value="incidencias" className="gap-1.5"><ShieldAlert className="h-3.5 w-3.5" />Incidencias{incPorDecidir + devPendientes ? ` (${incPorDecidir + devPendientes})` : ""}</TabsTrigger>
+          <TabsTrigger value="indicadores" className="gap-1.5"><BarChart3 className="h-3.5 w-3.5" />Indicadores</TabsTrigger>
+          <TabsTrigger value="cuadre" className="gap-1.5"><Scale className="h-3.5 w-3.5" />Cuadre con Odoo{cuadreDisc ? ` (${cuadreDisc})` : ""}</TabsTrigger>
           <TabsTrigger value="ubicaciones" className="gap-1.5"><MapPinned className="h-3.5 w-3.5" />Ubicaciones{sinUbicacion + porConfirmar ? ` (${sinUbicacion + porConfirmar})` : ""}</TabsTrigger>
         </TabsList>
       </Tabs>
+
+      {seccion === "curso" && <SeguimientoPanel />}
+      {seccion === "incidencias" && (
+        <IncidenciasPanel incidencias={incidencias} cargando={cargandoInc} repartidores={repartidores} puedeDecidir={can("delivery", "editar")}
+          puedeConfirmar={can("delivery", "editar") || can("inventario", "editar")} soloLectura={soloLectura} abrirId={params.get("incidencia")}
+          onCambio={() => cargar()} />
+      )}
+      {seccion === "indicadores" && <IndicadoresPanel />}
+      {seccion === "cuadre" && <CuadreOdooPanel onVerEntrega={verEnCola} />}
 
       {seccion === "rutas" && (
         <PlanificadorRutas repartidores={repartidores} puedeEditar={can("delivery", "editar")} recarga={recargaRutas}

@@ -44,8 +44,11 @@ detalle del pedido), los **avisos desde Odoo**, **D2–D3** (ubicaciones, mapa y
 reportes) y **R3–R6** (costo promedio de Odoo visible solo para administración, motor de reporte tipo cubo con subtotales y
 filtros cruzados, pestaña **Análisis** con las vistas del Excel y exportación del análisis y del detalle de líneas con las
 columnas de "Base datos"; migraciones 20j) y **F2** (catálogo paginado y ficha de producto), **F5–F6** (estado de cuenta, facturas, cuenta) y **V2–V5** (venta rápida,
-ficha y cartera, cobro con comprobante y propuesta, "Hoy" y metas). Siguiente: F7, V6 (PWA), D5–D6, el
-piloto de entregas en Odoo, R2 (clasificación comercial en Odoo) y R7 (comparativos y metas).
+ficha y cartera, cobro con comprobante y propuesta, "Hoy" y metas), **D6/D8** (seguimiento del repartidor, incidencias,
+devoluciones por almacén, indicadores y cuadre con Odoo), **R2/R7/R8b** (clasificación comercial, comparativos, metas y
+calidad y cuadre) y **F7** (accesibilidad WCAG 2.2 AA; rendimiento móvil 82–87). Descartado por decisión: instalar como aplicación
+(PWA de V6) y el modo sin señal (D5); todo queda en línea. Siguiente: piloto de entregas en Odoo, fotos y descripciones bidireccionales con Odoo y
+rendimiento ≥ 90.
 
 ## 2. Principios comunes (los tres portales)
 

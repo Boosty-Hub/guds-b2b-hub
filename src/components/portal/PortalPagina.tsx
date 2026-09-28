@@ -48,7 +48,7 @@ export const PortalPagina = ({
     <>
       {/* Encabezado compacto (móvil y tableta) */}
       <header
-        className="sticky top-0 z-30 border-b border-border bg-card/95 pt-[env(safe-area-inset-top)] backdrop-blur supports-[backdrop-filter]:bg-card/85 lg:hidden"
+        className="sticky top-0 z-30 border-b border-border bg-card pt-[env(safe-area-inset-top)] lg:hidden"
         style={{ boxShadow: `inset 0 2px 0 0 ${acento}` }}
         data-encabezado-movil
       >

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeftRight, Banknote, Camera, CheckCircle2, FileText, ImagePlus, Loader2, MessageCircle, Plus, Trash2, User, Wand2, X,
@@ -73,7 +73,7 @@ const VendedorCobroNuevo = () => {
     return (
       <VendedorLayout title="Registrar cobro" pantallaCompletaMovil>
         <BarraSuperiorMovil titulo="Registrar cobro" volverA="/vendedor/pagos" />
-        <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
+        <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div>
       </VendedorLayout>
     );
   }
@@ -268,7 +268,7 @@ function FormularioCobro({ cliente, usuarioId, vendedor, onCambiarCliente }: { c
             <Button asChild variant="outline" className="h-10 gap-1.5">
               <a href={enlaceWhatsApp(cliente.celular || cliente.telefono, recibo)} target="_blank" rel="noopener noreferrer"><MessageCircle className="h-4 w-4" />Enviar recibo por WhatsApp</a>
             </Button>
-            <Button className="h-10 bg-emerald-500 text-white hover:bg-emerald-600" onClick={() => navigate("/vendedor/pagos")}>Ver mis cobros</Button>
+            <Button className="h-10 bg-emerald-700 text-white hover:bg-emerald-800" onClick={() => navigate("/vendedor/pagos")}>Ver mis cobros</Button>
           </div>
           <Link to={`/vendedor/clientes/${cliente.id}`} className="block text-center text-sm text-emerald-700 hover:underline dark:text-emerald-400">Volver a la ficha del cliente</Link>
         </div>
@@ -284,7 +284,7 @@ function FormularioCobro({ cliente, usuarioId, vendedor, onCambiarCliente }: { c
           <Wand2 className="h-3.5 w-3.5" />Sugerir (más vieja primero)
         </button>
       </header>
-      {facturas === null ? <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-emerald-500" /></div>
+      {facturas === null ? <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-emerald-700" /></div>
         : facturas.length === 0 ? <p className="px-3 py-4 text-sm text-muted-foreground">El cliente no tiene facturas pendientes: el cobro queda como saldo a favor.</p>
         : (
           <ul className="divide-y divide-border lg:max-h-[46vh] lg:overflow-y-auto">
@@ -356,7 +356,7 @@ function FormularioCobro({ cliente, usuarioId, vendedor, onCambiarCliente }: { c
           <div className="min-w-0 space-y-3 lg:sticky lg:top-14">
             {facturasBloque}
             <div className="hidden md:block">
-              <Button className="h-11 w-full bg-emerald-500 text-base text-white hover:bg-emerald-600" onClick={enviar} disabled={!puedeEnviar} data-testid="registrar-cobro">
+              <Button className="h-11 w-full bg-emerald-700 text-base text-white hover:bg-emerald-800" onClick={enviar} disabled={!puedeEnviar} data-testid="registrar-cobro">
                 {enviando ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Registrando…</> : `Registrar cobro · ${formatPrice(total)}`}
               </Button>
               {todosProblemas.length > 0 && <p className="mt-1.5 text-xs text-muted-foreground">Falta: {[...new Set(todosProblemas)].join(" · ")}.</p>}
@@ -368,7 +368,7 @@ function FormularioCobro({ cliente, usuarioId, vendedor, onCambiarCliente }: { c
       {/* Teléfono: botón fijo abajo */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden">
         {todosProblemas.length > 0 && <p className="mb-1 truncate text-[11px] text-muted-foreground">Falta: {[...new Set(todosProblemas)][0]}{todosProblemas.length > 1 ? "…" : ""}</p>}
-        <Button className="h-11 w-full bg-emerald-500 text-base text-white hover:bg-emerald-600" onClick={enviar} disabled={!puedeEnviar} data-testid="registrar-cobro-movil">
+        <Button className="h-11 w-full bg-emerald-700 text-base text-white hover:bg-emerald-800" onClick={enviar} disabled={!puedeEnviar} data-testid="registrar-cobro-movil">
           {enviando ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Registrando…</> : `Registrar cobro · ${formatPrice(total)}`}
         </Button>
       </div>
@@ -382,6 +382,7 @@ function LineaPago({ l, n, total, cuentas, cargandoCuentas, moneda, cuenta, tasa
   onCuenta: (v: string) => void; onCambiar: (f: Partial<LineaCobro>) => void; onAdjuntar: (a: File | undefined) => void; onQuitarComprobante: () => void; onQuitar: () => void;
 }) {
   const { formatPrice } = useCurrency();
+  const uid = useId();
   const camara = useRef<HTMLInputElement>(null);
   const archivo = useRef<HTMLInputElement>(null);
   const esEfectivo = l.cuenta_id === EFECTIVO;
@@ -395,9 +396,9 @@ function LineaPago({ l, n, total, cuentas, cargandoCuentas, moneda, cuenta, tasa
       </header>
       <div className="space-y-3 p-3">
         <div className="space-y-1">
-          <Label className="text-xs">¿Dónde pagó el cliente?</Label>
+          <Label htmlFor={`${uid}-cuenta`} className="text-xs">¿Dónde pagó el cliente?</Label>
           <Select value={l.cuenta_id} onValueChange={onCuenta}>
-            <SelectTrigger className="h-10" data-testid="cuenta-cobro"><SelectValue placeholder={cargandoCuentas ? "Cargando cuentas…" : "Cuenta que recibió el pago"} /></SelectTrigger>
+            <SelectTrigger id={`${uid}-cuenta`} aria-label="¿Dónde pagó el cliente?" className="h-10" data-testid="cuenta-cobro"><SelectValue placeholder={cargandoCuentas ? "Cargando cuentas…" : "Cuenta que recibió el pago"} /></SelectTrigger>
             <SelectContent>
               {cuentas.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre} · {c.moneda === "BS" ? "Bs." : "USD"}</SelectItem>)}
               <SelectItem value={EFECTIVO}>Efectivo (me lo entregó a mí)</SelectItem>
@@ -405,18 +406,18 @@ function LineaPago({ l, n, total, cuentas, cargandoCuentas, moneda, cuenta, tasa
           </Select>
         </div>
         {cuenta && metodos.length > 1 && (
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Método de pago">
             {metodos.map((m) => (
-              <Button key={m} type="button" size="sm" variant={l.metodo === m ? "default" : "outline"} className={cn("h-8", l.metodo === m && "bg-emerald-500 hover:bg-emerald-600")}
+              <Button key={m} type="button" size="sm" aria-pressed={l.metodo === m} variant={l.metodo === m ? "default" : "outline"} className={cn("h-8", l.metodo === m && "bg-emerald-700 hover:bg-emerald-800")}
                 onClick={() => onCambiar({ metodo: m })}>{METODO_LABEL[m] || m}</Button>
             ))}
           </div>
         )}
         {esEfectivo && (
           <div className="space-y-1">
-            <div className="flex gap-1.5">
+            <div className="flex gap-1.5" role="group" aria-label="Moneda del efectivo">
               {(["USD", "BS"] as const).map((m) => (
-                <Button key={m} type="button" size="sm" variant={l.moneda === m ? "default" : "outline"} className={cn("h-8", l.moneda === m && "bg-emerald-500 hover:bg-emerald-600")}
+                <Button key={m} type="button" size="sm" aria-pressed={l.moneda === m} variant={l.moneda === m ? "default" : "outline"} className={cn("h-8", l.moneda === m && "bg-emerald-700 hover:bg-emerald-800")}
                   onClick={() => onCambiar({ moneda: m, monto: l.moneda === m ? l.monto : "" })}>{m === "USD" ? "Dólares" : "Bolívares"}</Button>
               ))}
             </div>
@@ -427,13 +428,13 @@ function LineaPago({ l, n, total, cuentas, cargandoCuentas, moneda, cuenta, tasa
           <>
             <div className="grid grid-cols-2 gap-2">
               <div className="min-w-0 space-y-1">
-                <Label className="text-xs">Monto ({moneda === "BS" ? "Bs." : "USD"})</Label>
-                <Input type="text" inputMode="decimal" value={l.monto} placeholder="0.00" className="h-10 tabular-nums" data-testid="monto-cobro"
+                <Label htmlFor={`${uid}-monto`} className="text-xs">Monto ({moneda === "BS" ? "Bs." : "USD"})</Label>
+                <Input id={`${uid}-monto`} type="text" inputMode="decimal" value={l.monto} placeholder="0.00" className="h-10 tabular-nums" data-testid="monto-cobro"
                   onChange={(e) => onCambiar({ monto: e.target.value.replace(/[^\d.,]/g, "").slice(0, 14) })} />
               </div>
               <div className="min-w-0 space-y-1">
-                <Label className="text-xs">Fecha del pago</Label>
-                <Input type="date" value={l.fecha} min={minFecha} max={hoy} className="h-10" data-testid="fecha-cobro" onChange={(e) => onCambiar({ fecha: e.target.value })} />
+                <Label htmlFor={`${uid}-fecha`} className="text-xs">Fecha del pago</Label>
+                <Input id={`${uid}-fecha`} type="date" value={l.fecha} min={minFecha} max={hoy} className="h-10" data-testid="fecha-cobro" onChange={(e) => onCambiar({ fecha: e.target.value })} />
               </div>
             </div>
             {moneda === "BS" && (
@@ -446,12 +447,12 @@ function LineaPago({ l, n, total, cuentas, cargandoCuentas, moneda, cuenta, tasa
             )}
             {!esEfectivo && (
               <div className="space-y-1">
-                <Label className="text-xs">Referencia de la operación</Label>
-                <Input value={l.referencia} onChange={(e) => onCambiar({ referencia: e.target.value.slice(0, 40) })} placeholder="Número de referencia (obligatorio)" className="h-10" data-testid="referencia-cobro" />
+                <Label htmlFor={`${uid}-referencia`} className="text-xs">Referencia de la operación</Label>
+                <Input id={`${uid}-referencia`} value={l.referencia} onChange={(e) => onCambiar({ referencia: e.target.value.slice(0, 40) })} placeholder="Número de referencia (obligatorio)" className="h-10" data-testid="referencia-cobro" />
               </div>
             )}
             <div className="space-y-1">
-              <Label className="text-xs">Comprobante {esEfectivo ? "(recibo firmado)" : "(captura o foto)"}</Label>
+              <p className="text-xs font-medium leading-none" id={`${uid}-comprobante`}>Comprobante {esEfectivo ? "(recibo firmado)" : "(captura o foto)"}</p>
               {l.comprobante ? (
                 <div className="flex items-center gap-3 rounded-md border border-border p-2" data-testid="comprobante-adjunto">
                   {esPdfComprobante(l.comprobante) ? <FileText className="h-10 w-10 shrink-0 text-muted-foreground" />
@@ -470,11 +471,11 @@ function LineaPago({ l, n, total, cuentas, cargandoCuentas, moneda, cuenta, tasa
                   </Button>
                 </div>
               )}
-              <input ref={camara} type="file" accept="image/*" capture="environment" className="hidden" data-testid="input-camara"
+              <input ref={camara} type="file" accept="image/*" capture="environment" className="hidden" data-testid="input-camara" aria-labelledby={`${uid}-comprobante`}
                 onChange={(e) => { onAdjuntar(e.target.files?.[0]); e.target.value = ""; }} />
-              <input ref={archivo} type="file" accept="image/*,application/pdf" className="hidden" data-testid="input-archivo"
+              <input ref={archivo} type="file" accept="image/*,application/pdf" className="hidden" data-testid="input-archivo" aria-labelledby={`${uid}-comprobante`}
                 onChange={(e) => { onAdjuntar(e.target.files?.[0]); e.target.value = ""; }} />
-              {l.errorArchivo && <p className="text-xs text-destructive">{l.errorArchivo}</p>}
+              {l.errorArchivo && <p className="text-xs text-destructive" role="alert">{l.errorArchivo}</p>}
             </div>
           </>
         )}

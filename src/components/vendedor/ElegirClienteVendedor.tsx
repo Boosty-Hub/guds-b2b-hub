@@ -36,11 +36,11 @@ export function ElegirClienteVendedor({ titulo, pregunta, volverA, clientes, car
       <div className="mx-auto max-w-2xl p-3 md:p-0">
         <h2 className="mb-2 hidden text-sm font-semibold md:block">{pregunta}</h2>
         <div className="relative mb-2">
-          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar cliente, código o ciudad…" className="h-10 pl-8" data-testid="buscar-cliente" />
+          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar cliente, código o ciudad…" aria-label="Buscar cliente, código o ciudad" className="h-10 pl-8" data-testid="buscar-cliente" />
         </div>
         <div className="rounded-lg border border-border bg-card">
-          {cargando ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
+          {cargando ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" aria-label="Cargando clientes" /></div>
             : lista.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground">{clientes.length ? "Sin resultados" : "No tienes clientes activos en tu cartera"}</p>
             : (
               <ul className="divide-y divide-border" data-testid="lista-elegir-cliente">
@@ -57,7 +57,7 @@ export function ElegirClienteVendedor({ titulo, pregunta, volverA, clientes, car
                         {c.vencido > 0.009 ? <span className="font-medium text-destructive">Vencido {formatPrice(c.vencido)}</span>
                           : c.por_cobrar > 0.009 ? <span className="text-muted-foreground">Por cobrar {formatPrice(c.por_cobrar)}</span> : null}
                       </div>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
                     </button>
                   </li>
                 ))}

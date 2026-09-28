@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, Fi
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { Panel } from "@/components/datos/FichaCampos";
 import { exportarCSV } from "@/components/datos/tabla";
-import { InsigniaProfit } from "@/components/reportes/comun";
+import { InsigniaProfit, TEXTO_COMPARACION, Variacion, desplazamientoMeses, fechaCorta, periodoComparacion, variacionPct, type Comparacion } from "@/components/reportes/comun";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 // ── Motor reporte_ventas_cubo (migración 20j): agrupa por hasta 4 niveles con subtotales y, opcionalmente, una columna ──
 export type FuenteCubo = "ambas" | "odoo" | "profit";
 type Dim = "empresa" | "anio" | "mes" | "anio_mes" | "vendedor" | "cliente" | "tipo_cliente" | "canal" | "segmento"
-  | "categoria" | "linea" | "sublinea" | "marca" | "producto";
+  | "categoria" | "linea" | "sublinea" | "marca" | "producto" | "categoria_profit" | "linea_profit" | "sublinea_profit";
 type Columna = "" | "anio" | "mes" | "anio_mes" | "empresa";
 type Medida = "venta" | "unidades" | "precio" | "margen_pct" | "margen_usd" | "costo" | "documentos" | "clientes" | "nc" | "financieras" | "participacion";
 
@@ -36,17 +36,22 @@ interface Nodo { id: string; nivel: number; clave: string; etiqueta: string; det
 interface ValorFiltro { k: string; e: string }
 type Filtros = Partial<Record<Dim, ValorFiltro[]>>;
 
-const DIMS: Record<Dim, { titulo: string; tiempo?: boolean; profit?: boolean; detalle?: string }> = {
+// Categoría › Línea › Sub-línea = niveles de la categoría de Odoo para las dos fuentes (20q). Marca, tipo de cliente, canal y
+// segmento vienen de Odoo y, si Odoo no los tiene, de Profit. Las dimensiones "Profit" son la clasificación original del Excel.
+const DIMS: Record<Dim, { titulo: string; tiempo?: boolean; profit?: boolean; mixta?: boolean; detalle?: string }> = {
   categoria: { titulo: "Categoría" },
   linea: { titulo: "Línea" },
   sublinea: { titulo: "Sub-línea" },
   producto: { titulo: "Artículo", detalle: "Código" },
-  marca: { titulo: "Marca", profit: true },
+  marca: { titulo: "Marca", mixta: true },
   vendedor: { titulo: "Vendedor" },
   cliente: { titulo: "Cliente", detalle: "RIF" },
-  tipo_cliente: { titulo: "Tipo de cliente", profit: true },
-  canal: { titulo: "Canal", profit: true },
-  segmento: { titulo: "Segmento", profit: true },
+  tipo_cliente: { titulo: "Tipo de cliente", mixta: true },
+  canal: { titulo: "Canal", mixta: true },
+  segmento: { titulo: "Segmento", mixta: true },
+  categoria_profit: { titulo: "Categoría Profit", profit: true },
+  linea_profit: { titulo: "Línea Profit", profit: true },
+  sublinea_profit: { titulo: "Sub-línea Profit", profit: true },
   empresa: { titulo: "Empresa" },
   anio: { titulo: "Año", tiempo: true },
   mes: { titulo: "Mes", tiempo: true },
@@ -73,6 +78,7 @@ const LISTA_MEDIDAS = Object.keys(MEDIDAS) as Medida[];
 interface Preset { titulo: string; niveles: Dim[]; columna: Columna; medidas: Medida[]; matriz?: Medida; top?: number }
 const PRESETS: Record<string, Preset> = {
   productos: { titulo: "Categoría › Línea › Sub-línea › Artículo", niveles: ["categoria", "linea", "sublinea", "producto"], columna: "", medidas: ["venta", "unidades", "margen_pct", "precio"] },
+  excel_profit: { titulo: "Clasificación de Profit (Excel): Cat › Lín › Sub › Art", niveles: ["categoria_profit", "linea_profit", "sublinea_profit", "producto"], columna: "", medidas: ["venta", "unidades", "margen_pct", "precio"] },
   vendedor_cliente: { titulo: "Vendedor › Cliente", niveles: ["vendedor", "cliente"], columna: "", medidas: ["venta", "margen_pct", "precio", "participacion"] },
   cliente_articulo: { titulo: "Cliente › Categoría › Artículo", niveles: ["cliente", "categoria", "producto"], columna: "", medidas: ["venta", "unidades", "margen_pct", "precio"] },
   anio_mes: { titulo: "Matriz Año × Mes", niveles: ["anio"], columna: "mes", medidas: ["venta"], matriz: "venta" },
@@ -83,8 +89,8 @@ const PRESETS: Record<string, Preset> = {
 
 // Última configuración (por navegador). Puede no haber almacenamiento: todo va en try/catch.
 const CLAVE_LS = "guds.reportes.analisis.v1";
-interface Config { preset: string; niveles: Dim[]; columna: Columna; medidas: Medida[]; matriz: Medida; filtros: Filtros; orden: Medida }
-const CONFIG_INICIAL: Config = { preset: "productos", ...PRESETS.productos, matriz: "venta", filtros: {}, orden: "venta" };
+interface Config { preset: string; niveles: Dim[]; columna: Columna; medidas: Medida[]; matriz: Medida; filtros: Filtros; orden: Medida; comparar: "" | Comparacion }
+const CONFIG_INICIAL: Config = { preset: "productos", ...PRESETS.productos, matriz: "venta", filtros: {}, orden: "venta", comparar: "" };
 function leerConfig(): Config {
   try {
     const c = JSON.parse(localStorage.getItem(CLAVE_LS) || "null");
@@ -101,6 +107,7 @@ function leerConfig(): Config {
       matriz: c.matriz in MEDIDAS ? c.matriz : "venta",
       filtros,
       orden: c.orden in MEDIDAS ? c.orden : "venta",
+      comparar: c.comparar === "anterior" || c.comparar === "anio_anterior" ? c.comparar : "",
     };
   } catch {
     return CONFIG_INICIAL;
@@ -117,6 +124,8 @@ const r2 = (v: number | null) => (v === null ? null : Math.round(v * 100) / 100)
 const claveFila = (f: FilaCubo) => [f.k1, f.k2, f.k3, f.k4].slice(0, f.nivel);
 const idDe = (ks: (string | null)[]) => ks.join("\u0001");
 const EN_BLANCO = new Set<string>();
+// Clave del total en el mapa de la comparación (un primer nivel vacío, p. ej. "Sin categoría", tiene id "")
+const ID_TOTAL = "\u0000total";
 
 // reporte_ventas_cubo_json devuelve las filas como arreglos (respuesta compacta) + si quien consulta ve el costo
 interface RespuestaCubo { columnas: string[]; filas: unknown[][]; ve_costo: boolean }
@@ -133,6 +142,18 @@ async function consultarCubo(args: Record<string, unknown>) {
     return o as unknown as FilaCubo;
   });
   return { filas, veCosto: !!d?.ve_costo };
+}
+
+/** Clave de un nivel de tiempo del período comparado llevada al período actual (el comparado está `meses` antes). Sin
+ * alineación posible (período por días) devuelve null y la fila no se compara. */
+function claveAlineada(dim: Dim, k: string | null, meses: number | null): string | null {
+  if (k === null || !DIMS[dim]?.tiempo) return k;
+  if (meses === null) return null;
+  if (dim === "anio") return meses % 12 === 0 ? String(Number(k) + meses / 12) : null;
+  if (dim === "mes") return meses % 12 === 0 ? k : String(((Number(k) - 1 + meses) % 12) + 1).padStart(2, "0");
+  const [y, m] = k.split("-").map(Number);
+  const d = new Date(y, m - 1 + meses, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 /** Arma el árbol (y las celdas de la matriz) a partir de las filas del cubo */
@@ -178,8 +199,13 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
   const [abiertos, setAbiertos] = useState<Set<string>>(EN_BLANCO);
   const [verTodos, setVerTodos] = useState(false);
   const [exportando, setExportando] = useState<string | null>(null);
+  const [comparadas, setComparadas] = useState<Map<string, FilaCubo> | null>(null);
+  const [cargandoComp, setCargandoComp] = useState(false);
   const { niveles, columna, filtros } = config;
   const matriz = !!columna;
+  // Comparación (20q): período anterior o mismo período del año anterior, solo sin columnas (en la matriz ya se comparan meses)
+  const comparar = matriz ? "" : config.comparar;
+  const [cDesde, cHasta] = comparar ? periodoComparacion(desde, hasta, comparar) : ["", ""];
 
   useEffect(() => { guardarConfig(config); }, [config]);
   const cambiar = (c: Partial<Config>, personalizado = true) => setConfig((x) => ({ ...x, ...c, ...(personalizado ? { preset: "personalizado" } : {}) }));
@@ -216,7 +242,40 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claveConsulta]);
 
+  // Consulta del período comparado (mismos niveles y filtros; solo la venta): las filas se alinean por clave
+  const claveComp = JSON.stringify([comparar, cDesde, cHasta, fuente, niveles, filtrosRpc, soloLectura, seleccion]);
+  useEffect(() => {
+    if (!comparar) { setComparadas(null); return; }
+    let cancelado = false;
+    (async () => {
+      setCargandoComp(true);
+      try {
+        const r = await consultarCubo({ p_desde: cDesde, p_hasta: cHasta, p_niveles: niveles, p_fuente: fuente, p_filtros: filtrosRpc, p_columna: null, p_conteos: false });
+        if (cancelado) return;
+        const meses = desplazamientoMeses(desde, hasta, comparar);
+        const m = new Map<string, FilaCubo>();
+        for (const f of r.filas) {
+          if (f.col !== null) continue;
+          const ks = claveFila(f).map((k, i) => claveAlineada(niveles[i], k, meses));
+          if (ks.some((k) => k === null)) continue;
+          m.set(f.nivel === 0 ? ID_TOTAL : idDe(ks), f);
+        }
+        setComparadas(m);
+      } catch (e) {
+        if (cancelado) return;
+        setComparadas(new Map());
+        toast({ title: "No se pudo calcular la comparación", description: (e as Error).message, variant: "destructive" });
+      }
+      setCargandoComp(false);
+    })();
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claveComp]);
+
   const { raiz, total, columnas, cantidad } = useMemo(() => construirArbol(filas), [filas]);
+  const comparada = (n: Nodo | null | undefined) => (n && comparadas ? comparadas.get(n.nivel === 0 ? ID_TOTAL : n.id) : undefined);
+  const compTotal = total ? comparada(total) : undefined;
+  const compConProfit = !!compTotal && compTotal.fuente !== "odoo" && Math.abs(num(compTotal.profit_usd) ?? 0) > 0.004;
 
   // Orden de cada nivel: tiempo por clave; el resto por la medida elegida (o el total de la fila en la matriz), de mayor a menor
   const valor = (f: FilaCubo | undefined, m: Medida): number | null => {
@@ -309,6 +368,12 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
   const insigniaPorFila = !!t && t.fuente === "ambas";
   const kpis = t ? [
     { label: "Venta neta", valor: formatPrice(num(t.venta_usd) ?? 0), detalle: conProfit ? <span className="inline-flex items-center gap-1"><InsigniaProfit />{formatPrice(num(t.profit_usd) ?? 0)} de Profit</span> : undefined, titulo: MEDIDAS.venta.ayuda },
+    ...(comparar && comparadas ? [{
+      label: comparar === "anterior" ? "Vs período anterior" : "Vs año anterior",
+      valor: <Variacion soloPct actual={num(t.venta_usd) ?? 0} previo={num(compTotal?.venta_usd) ?? 0} formato={formatPrice} />,
+      detalle: <span className="inline-flex items-center gap-1">{compConProfit && <InsigniaProfit />}{formatPrice(num(compTotal?.venta_usd) ?? 0)} · {fechaCorta(cDesde)} – {fechaCorta(cHasta)}</span>,
+      titulo: `${TEXTO_COMPARACION[comparar]}: ${fechaCorta(cDesde)} – ${fechaCorta(cHasta)}. Variación: ${formatPrice((num(t.venta_usd) ?? 0) - (num(compTotal?.venta_usd) ?? 0))}`,
+    }] : []),
     { label: "Unidades", valor: fmtN(num(t.unidades)) },
     { label: "Precio prom.", valor: t.precio_promedio === null ? "—" : formatPrice(num(t.precio_promedio)!), titulo: MEDIDAS.precio.ayuda },
     ...(veCosto ? [{
@@ -347,9 +412,14 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
           { titulo: `Total · ${MEDIDAS[config.matriz].titulo}`, valor: (x: (typeof filasCsv)[number]) => valorCsv(x.nodo.fila, config.matriz) }]
         : medidas.map((m) => ({ titulo: MEDIDAS[m].titulo + (m === "venta" || dinero.has(m) ? " (USD)" : ""), valor: (x: (typeof filasCsv)[number]) => valorCsv(x.nodo.fila, m) }))),
       ...(!matriz && veCosto && medidas.includes("margen_pct") ? [{ titulo: "% de la venta con costo", valor: (x: (typeof filasCsv)[number]) => num(x.nodo.fila.cobertura_costo_pct) }] : []),
+      ...(comparar && comparadas ? [
+        { titulo: `Venta ${TEXTO_COMPARACION[comparar].toLowerCase()} ${cDesde} a ${cHasta} (USD)`, valor: (x: (typeof filasCsv)[number]) => r2(num(comparada(x.nodo)?.venta_usd) ?? 0) },
+        { titulo: "Variación (USD)", valor: (x: (typeof filasCsv)[number]) => r2((num(x.nodo.fila.venta_usd) ?? 0) - (num(comparada(x.nodo)?.venta_usd) ?? 0)) },
+        { titulo: "Variación %", valor: (x: (typeof filasCsv)[number]) => { const v = variacionPct(num(x.nodo.fila.venta_usd) ?? 0, num(comparada(x.nodo)?.venta_usd) ?? 0); return v === null ? null : Math.round(v * 100) / 100; } },
+      ] : []),
       { titulo: "Incluye Profit", valor: (x) => (x.nodo.fila.fuente === "odoo" ? "No" : "Sí") },
     ];
-    exportarCSV(`analisis-${niveles.join("-")}${columna ? `-x-${columna}` : ""}_${desde}_${hasta}`, filasCsv, cols);
+    exportarCSV(`analisis-${niveles.join("-")}${columna ? `-x-${columna}` : ""}${comparar ? `-vs-${comparar}` : ""}_${desde}_${hasta}`, filasCsv, cols);
   };
 
   // Detalle de líneas con las columnas de la hoja "Base datos" del Excel, por tramos de 3 meses
@@ -399,6 +469,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
       // Columnas de GUDS (no están en el Excel)
       c("Fuente", "fuente"), c("Tratamiento", "tratamiento"), c("RIF", "cliente_rif"), c("Venta neta GUDS (USD)", "venta_neta_usd"),
       c("NC financieras Profit (USD)", "financieras_usd"), ...(veCosto ? [c("Fecha del costo (Odoo)", "costo_fecha")] : []),
+      c("Categoría Odoo", "categoria_odoo"), c("Línea Odoo", "linea_odoo"), c("Sub-línea Odoo", "sublinea_odoo"),
     ]);
     setExportando(null);
     toast({ title: `Detalle descargado: ${lineas.length.toLocaleString("es-VE")} líneas` });
@@ -418,7 +489,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
       <SelectContent>
         {i > 0 && <SelectItem value="_">— sin nivel —</SelectItem>}
         {LISTA_DIMS.filter((d) => d === niveles[i] || !usados.has(d)).map((d) => (
-          <SelectItem key={d} value={d}>{DIMS[d].titulo}{DIMS[d].profit ? " (Profit)" : ""}</SelectItem>
+          <SelectItem key={d} value={d}>{DIMS[d].titulo}</SelectItem>
         ))}
       </SelectContent>
     </Select>
@@ -472,6 +543,16 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
               </PopoverContent>
             </Popover>
           )}
+          <Select value={comparar || "_"} disabled={matriz} onValueChange={(v) => cambiar({ comparar: (v === "_" ? "" : v) as Config["comparar"] }, false)}>
+            <SelectTrigger className="h-8 w-[calc(50%-4px)] text-[13px] sm:w-52" aria-label="Comparar con" title={matriz ? "En la matriz ya se comparan las columnas: quita las columnas para comparar períodos" : undefined}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_">Sin comparar</SelectItem>
+              <SelectItem value="anterior">Vs período anterior</SelectItem>
+              <SelectItem value="anio_anterior">Vs mismo período año anterior</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <Filter className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
@@ -502,7 +583,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
           <span className="font-normal text-muted-foreground">· {cantidad.toLocaleString("es-VE")} filas</span>
         </span>}
         acciones={<>
-          {cargando && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          {(cargando || cargandoComp) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
           <Button type="button" size="sm" variant="outline" className="h-8 w-8 px-0" onClick={expandirTodo} disabled={niveles.length < 2 || !raiz.length} title="Abrir todos los niveles" aria-label="Abrir todos los niveles"><ChevronsUpDown className="h-3.5 w-3.5" /></Button>
           <Button type="button" size="sm" variant="outline" className="h-8 w-8 px-0" onClick={() => setAbiertos(EN_BLANCO)} disabled={!abiertos.size} title="Cerrar todos los niveles" aria-label="Cerrar todos los niveles"><ChevronsDownUp className="h-3.5 w-3.5" /></Button>
           <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 px-2" onClick={exportarAnalisis} disabled={!raiz.length} title="Descargar el análisis con sus niveles y subtotales (CSV)" aria-label="Exportar análisis (CSV)">
@@ -535,6 +616,14 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
                         onClick={() => cambiar({ orden: m }, false)}>{MEDIDAS[m].titulo}</button>
                     </TableHead>
                   ))}
+                  {comparar && (
+                    <>
+                      <TableHead className="whitespace-nowrap border-l border-border text-right" title={`Venta neta ${TEXTO_COMPARACION[comparar].toLowerCase()}: ${fechaCorta(cDesde)} – ${fechaCorta(cHasta)}`}>
+                        <span className="inline-flex items-center gap-1">{comparar === "anterior" ? "Venta anterior" : "Venta año ant."}{compConProfit && <InsigniaProfit />}</span>
+                      </TableHead>
+                      <TableHead className="whitespace-nowrap text-right" title="Venta neta actual − comparada (USD y %)">Variación</TableHead>
+                    </>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -561,6 +650,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
                           <TableCell className="sticky right-0 z-[1] whitespace-nowrap bg-card py-1 text-right font-semibold">{celda(n.fila, config.matriz)}</TableCell>
                         </>
                       ) : medidas.map((m) => <TableCell key={m} className="whitespace-nowrap py-1 text-right">{celda(n.fila, m)}</TableCell>)}
+                      {comparar && <CeldasComparacion actual={num(n.fila.venta_usd) ?? 0} previa={comparada(n)} listo={!!comparadas} formatPrice={formatPrice} />}
                     </TableRow>
                   );
                 })}
@@ -577,6 +667,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
                         <TableCell className="sticky right-0 z-[1] whitespace-nowrap bg-muted py-1 text-right font-semibold">{celda(total.fila, config.matriz)}</TableCell>
                       </>
                     ) : medidas.map((m) => <TableCell key={m} className="whitespace-nowrap py-1 text-right font-semibold">{celda(total.fila, m)}</TableCell>)}
+                    {comparar && <CeldasComparacion actual={num(total.fila.venta_usd) ?? 0} previa={compTotal} listo={!!comparadas} formatPrice={formatPrice} negrita />}
                   </TableRow>
                 </TableFooter>
               )}
@@ -589,12 +680,30 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
               )}
               <span>Venta neta en USD sin IVA: facturas − NC y devoluciones; sin saldos iniciales, ND ni facturas anuladas por completo.</span>
               {veCosto && medidas.includes("margen_pct") && <span>Margen sobre las líneas con costo (Odoo: costo promedio actual; Profit: último costo). * = parte de la venta sin costo.</span>}
-              {niveles.some((d) => DIMS[d].profit) && <span>Marca, tipo de cliente, canal y segmento solo existen en Profit.</span>}
+              {niveles.some((d) => DIMS[d].mixta) && <span>Marca, tipo de cliente, canal y segmento: los de Odoo (marca del producto; industria, canal y segmento del contacto) y, si Odoo no los tiene, los de Profit.</span>}
+              {niveles.some((d) => DIMS[d].profit) && <span>La clasificación de Profit (como en el Excel) solo existe en las ventas de Profit.</span>}
+              {niveles.some((d) => d === "categoria" || d === "linea" || d === "sublinea") && <span>Categoría › Línea › Sub-línea: niveles de la categoría de Odoo (Profit, por artículo o por la equivalencia de Histórico Profit).</span>}
+              {comparar && <span>{TEXTO_COMPARACION[comparar]}: {fechaCorta(cDesde)} – {fechaCorta(cHasta)}, mismos filtros.</span>}
             </div>
           </>
         )}
       </Panel>
     </div>
+  );
+}
+
+/** Venta del período comparado y variación (USD y %) de una fila */
+function CeldasComparacion({ actual, previa, listo, formatPrice, negrita }: { actual: number; previa: FilaCubo | undefined; listo: boolean; formatPrice: (v: number) => string; negrita?: boolean }) {
+  const previo = num(previa?.venta_usd) ?? 0;
+  return (
+    <>
+      <TableCell className={cn("whitespace-nowrap border-l border-border py-1 text-right tabular-nums", negrita && "font-semibold")}>
+        {!listo ? <span className="text-muted-foreground/60">…</span> : previa ? formatPrice(previo) : <span className="text-muted-foreground/60">—</span>}
+      </TableCell>
+      <TableCell className={cn("whitespace-nowrap py-1 text-right", negrita && "font-semibold")}>
+        {listo ? <Variacion actual={actual} previo={previo} formato={formatPrice} /> : null}
+      </TableCell>
+    </>
   );
 }
 
@@ -640,7 +749,7 @@ function NuevoFiltro({ desde, hasta, fuente, filtros, onAplicar, formatPrice }: 
         <div className="flex items-center gap-1.5">
           <Select value={dim} onValueChange={(v) => { setDim(v as Dim); setQ(""); }}>
             <SelectTrigger className="h-8 flex-1 text-[13px]" aria-label="Filtrar por"><SelectValue /></SelectTrigger>
-            <SelectContent>{LISTA_DIMS.map((d) => <SelectItem key={d} value={d}>{DIMS[d].titulo}{DIMS[d].profit ? " (Profit)" : ""}</SelectItem>)}</SelectContent>
+            <SelectContent>{LISTA_DIMS.map((d) => <SelectItem key={d} value={d}>{DIMS[d].titulo}</SelectItem>)}</SelectContent>
           </Select>
           {cargando && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </div>

@@ -138,6 +138,41 @@ html.densidad-comoda {
     --sidebar-border: 0 10% 18%;
     --sidebar-ring: 0 65% 45%;
   }
+
+  /* Portales del cliente y del vendedor (F7, WCAG 2.2 AA): la clase la ponen PortalShell y VendedorLayout en <html>
+     mientras están montados (también alcanza a diálogos y menús, que se pintan en <body>). Oscurece el texto secundario,
+     el rojo de error y el verde de éxito para llegar a 4.5:1 sobre blanco, gris claro y sus fondos al 10 %.
+     El admin no cambia. */
+  html.portal-aa {
+    --muted-foreground: 0 0% 40%;
+    --destructive: 0 72% 44%;
+    --success: 142 76% 26%;
+  }
+  /* Tema oscuro del portal: el rojo de marca y el de error se aclaran para leerse como texto sobre fondos oscuros
+     (4.5:1) y, como fondo de botón, llevan texto oscuro en vez de blanco. */
+  html.portal-aa.dark {
+    --muted-foreground: 0 0% 64%;
+    --success: 142 70% 45%;
+    --primary: 0 80% 66%;
+    --primary-foreground: 0 0% 8%;
+    --destructive: 0 80% 66%;
+    --destructive-foreground: 0 0% 8%;
+    --success-foreground: 0 0% 8%;
+    --ring: 0 80% 66%;
+  }
+}
+
+/* Movimiento reducido en los portales: sin animaciones ni transiciones de entrada/salida (los indicadores de carga
+   siguen girando) y sin desplazamiento suave. */
+@media (prefers-reduced-motion: reduce) {
+  html.portal-aa *:not(.animate-spin),
+  html.portal-aa *::before,
+  html.portal-aa *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer base {

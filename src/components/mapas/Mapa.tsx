@@ -8,7 +8,7 @@ import { CENTRO_VENEZUELA, type Punto } from "./geo";
 // Mapa (Mapbox GL) con marcadores HTML numerados, línea de recorrido opcional, pin arrastrable y clic para ubicar.
 // Carga Mapbox solo cuando se monta. Si no hay token o WebGL, muestra un aviso y el resto de la pantalla sigue funcionando.
 
-export type TonoMarcador = "parada" | "siguiente" | "propuesta" | "hecha" | "salida" | "yo" | "busqueda" | "pin";
+export type TonoMarcador = "parada" | "siguiente" | "propuesta" | "hecha" | "incidencia" | "salida" | "yo" | "repartidor" | "repartidor_viejo" | "busqueda" | "pin";
 
 export interface MarcadorMapa extends Punto {
   id: string;
@@ -23,8 +23,12 @@ const CLASES: Record<Exclude<TonoMarcador, "pin">, string> = {
   siguiente: "h-9 min-w-9 px-1 bg-amber-500 text-white text-sm ring-4 ring-amber-500/30",
   propuesta: "h-7 min-w-7 px-1 bg-white text-amber-800 text-xs border-2 border-dashed border-amber-500",
   hecha: "h-6 min-w-6 px-1 bg-emerald-600 text-white text-[11px] opacity-90",
+  incidencia: "h-6 min-w-6 px-1 bg-red-600 text-white text-[11px]",
   salida: "h-7 w-7 rounded-md bg-slate-800 text-white text-[11px]",
   yo: "h-4 w-4 bg-sky-500 ring-4 ring-sky-500/30",
+  // Última posición conocida de un repartidor (seguimiento del admin); "viejo" = hace más de media hora
+  repartidor: "h-8 min-w-8 px-1 bg-sky-600 text-white text-[11px] ring-4 ring-sky-500/30 z-10",
+  repartidor_viejo: "h-8 min-w-8 px-1 bg-slate-400 text-white text-[11px] ring-4 ring-slate-400/30",
   busqueda: "h-3.5 w-3.5 bg-slate-500",
 };
 
@@ -44,7 +48,7 @@ function elementoMarcador(m: MarcadorMapa, onClick?: (id: string) => void): HTML
 interface Enfoque extends Punto { zoom?: number; clave: string | number }
 
 // Paradas en el mismo punto (p. ej. dos documentos para la misma sucursal): un solo marcador "2·3"
-const PRIORIDAD: Partial<Record<TonoMarcador, number>> = { siguiente: 4, parada: 3, propuesta: 2, hecha: 1 };
+const PRIORIDAD: Partial<Record<TonoMarcador, number>> = { siguiente: 5, incidencia: 4, parada: 3, propuesta: 2, hecha: 1 };
 function agrupar(marcadores: MarcadorMapa[]): MarcadorMapa[] {
   const salida: MarcadorMapa[] = [];
   const porPunto = new Map<string, MarcadorMapa>();

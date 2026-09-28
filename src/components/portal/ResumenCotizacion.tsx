@@ -90,7 +90,7 @@ export const ResumenCotizacion = ({
         </span>
         <span className={cn("tabular-nums", cargando && "opacity-60", claseTotal)} data-testid="cotizacion-total">{formatPrice(c.total)}</span>
       </div>
-      {c.aviso && <p className="text-xs text-amber-700" data-testid="cotizacion-aviso">{c.aviso}</p>}
+      {c.aviso && <p className="text-xs text-amber-700 dark:text-amber-400" role="status" data-testid="cotizacion-aviso">{c.aviso}</p>}
     </div>
   );
 };

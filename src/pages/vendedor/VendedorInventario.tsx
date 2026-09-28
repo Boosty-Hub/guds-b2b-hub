@@ -73,7 +73,7 @@ const VendedorInventario = () => {
       <div className="rounded-lg border border-border bg-card">
         {loading ? (
           <div className="flex items-center justify-center py-10">
-            <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
+            <Loader2 className="h-6 w-6 animate-spin text-emerald-700" />
           </div>
         ) : (
           <Table>

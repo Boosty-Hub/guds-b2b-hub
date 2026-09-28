@@ -72,6 +72,7 @@ const PortalFavoritos = () => {
       ) : (
         <>
           <p className="mb-3 text-sm text-muted-foreground lg:hidden">{n} {n === 1 ? "producto guardado" : "productos guardados"}</p>
+          <h2 className="sr-only">Productos guardados</h2>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:gap-4 xl:grid-cols-4">
             {favoritos.map((p, i) => {
               const tipo = empaquePorDefecto(p);

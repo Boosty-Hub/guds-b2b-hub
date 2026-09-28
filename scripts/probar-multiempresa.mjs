@@ -1344,6 +1344,382 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
          and has_function_privilege('anon', p.oid, 'execute')) anon) t`));
 }
 
+// ── Delivery D6/D8 (20p): posición del repartidor, seguimiento, incidencias y devoluciones, indicadores y cuadre con Odoo ──
+{
+  const REP = '00000000-0000-0000-0000-0000000d2d60';
+  const AUTH_REP = '00000000-0000-0000-0000-0000000a2d60';
+  const ALM = '00000000-0000-0000-0000-0000000a2d61';
+  const CLI = '00000000-0000-0000-0000-0000000c2d60';
+  const sesion = (uid) => `perform set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
+    perform set_config('request.headers', '{"x-empresa-id":"${guds.id}"}', true);`;
+  const HOY = `(now() at time zone 'America/Caracas')::date`;
+  const repFalso = `insert into auth.users (id, email, aud, role) values ('${AUTH_REP}', 'prueba.20p@guds.test', 'authenticated', 'authenticated');
+    insert into usuarios (id, auth_id, email, nombre, apellido, role, rol_id, activo) select '${REP}', '${AUTH_REP}', 'prueba.20p@guds.test', 'Prueba', 'Repartidor 20p', 'delivery', r.id, true
+      from roles r where lower(r.nombre) = 'delivery' limit 1;
+    insert into usuario_empresas (usuario_id, empresa_id, por_defecto) values ('${REP}', '${guds.id}', true);`;
+  // Personal de almacén: rol "Almacén" con inventario (ver/editar) y sin delivery
+  const almacen = `insert into auth.users (id, email, aud, role) values ('${ALM}', 'prueba.almacen.20p@guds.test', 'authenticated', 'authenticated');
+    insert into permisos (rol_id, modulo_id, puede_ver, puede_editar) select r.id, m.id, true, true from roles r, modulos m where r.nombre = 'Almacén' and m.codigo = 'inventario'
+      on conflict (rol_id, modulo_id) do update set puede_ver = true, puede_editar = true;
+    insert into usuarios (auth_id, email, nombre, role, rol_id, activo) select '${ALM}', 'prueba.almacen.20p@guds.test', 'Almacén', 'admin', r.id, true from roles r where r.nombre = 'Almacén';
+    insert into usuario_empresas (usuario_id, empresa_id, por_defecto) select id, '${guds.id}', true from usuarios where auth_id = '${ALM}';`;
+  const clienteFalso = `insert into auth.users (id, email, aud, role) values ('${CLI}', 'prueba.cliente.20p@guds.test', 'authenticated', 'authenticated');
+    insert into usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${CLI}', 'prueba.cliente.20p@guds.test', 'Prueba', 'cliente', '${cliGuds}', true);`;
+  // Entregas de prueba del repartidor (documentos ficticios con odoo_id negativo): estado y minutos desde "salir a entregar"
+  const ent = (n, estado, extra = {}) => {
+    const cols = { id: `'00000000-0000-0000-0000-0000002d60${String(n).padStart(2, '0')}'`, transferencia_odoo_id: -2060000 - n, doc_numero: `'P-20P/${n}'`,
+      empresa_id: `'${guds.id}'`, repartidor_id: `'${REP}'`, estado: `'${estado}'`, fecha_asignacion: 'now()', ...extra };
+    return `insert into entregas (${Object.keys(cols).join(', ')}) values (${Object.values(cols).join(', ')});`;
+  };
+  const idEnt = (n) => `'00000000-0000-0000-0000-0000002d60${String(n).padStart(2, '0')}'`;
+  const t0 = Date.now();
+  const pings = JSON.stringify([{ lat: 10.4901, lng: -66.8702, precision: 12, at: t0 - 300000 }, { lat: 10.5012, lng: -66.8611, precision: 15, at: t0 - 120000 }]);
+  const registrar = (k) => `perform set_config('guds.p20p_${k}', public.registrar_posiciones('${pings}'::jsonb)::text, true);`;
+  const incid = (n) => `(select id from incidencias_entrega where entrega_id = ${idEnt(n)})`;
+  const lineasIncompleta = `'[{"item_id":"00000000-0000-0000-0000-0000002d6f01","move_odoo_id":1,"producto":"Producto A","esperada":10,"entregada":7,"motivo":"danado"},
+    {"item_id":"00000000-0000-0000-0000-0000002d6f02","move_odoo_id":2,"producto":"Producto B","esperada":4,"entregada":4,"motivo":null}]'::jsonb`;
+  const cerrada = (motivo = null) => ({ fecha_cierre: 'now()', origen_cierre: `'guds'`, cerrada_por: `'${REP}'`, ...(motivo ? { motivo_codigo: `'${motivo}'` } : {}) });
+
+  await caso('Delivery 20p: el repartidor registra su posición en lote con una entrega en camino (reintentar no duplica)', (r) => r?.a === 2 && r?.b === 0 && r?.activo === true && r?.guardadas === 2,
+    como({ rol: 'postgres', empresa: guds.id, previo: `${repFalso} ${ent(1, 'en_camino', { fecha_inicio_entrega: 'now()' })} ${sesion(AUTH_REP)} ${registrar('a')} ${registrar('b')}` },
+      `select row_to_json(t)::text from (select (current_setting('guds.p20p_a')::jsonb->>'aceptados')::int a, (current_setting('guds.p20p_b')::jsonb->>'aceptados')::int b,
+        (current_setting('guds.p20p_a')::jsonb->>'activo')::boolean activo,
+        (select count(*) from posiciones_repartidor where repartidor_id = '${REP}' and entrega_id = ${idEnt(1)}) guardadas) t`));
+  await caso('Delivery 20p: sin reparto en curso no se guarda la posición (activo = false)', (r) => r?.activo === false && r?.aceptados === 0,
+    como({ uid: AUTH_REP, empresa: guds.id, previo: repFalso }, `select row_to_json(t)::text from (select (x->>'activo')::boolean activo, (x->>'aceptados')::int aceptados
+      from (select public.registrar_posiciones('${pings}'::jsonb) x) z) t`));
+  await caso('Delivery 20p: el repartidor no escribe directo en posiciones_repartidor', 'permission denied',
+    como({ uid: AUTH_REP, empresa: guds.id, previo: `${repFalso} ${ent(1, 'en_camino')}` },
+      `with x as (insert into posiciones_repartidor (repartidor_id, latitud, longitud, tomada_at) values ('${REP}', 10.5, -66.9, now()) returning id) select row_to_json(x)::text from x`));
+  await caso('Delivery 20p: el repartidor no lee las posiciones (ni la suya)', (r) => r?.n === 0,
+    como({ uid: AUTH_REP, empresa: guds.id, previo: `${repFalso} ${ent(1, 'en_camino')} ${sesion(AUTH_REP)} ${registrar('a')}` },
+      `select row_to_json(t)::text from (select count(*) n from posiciones_repartidor) t`));
+  await caso('Delivery 20p: administración no registra posiciones (solo el repartidor)', 'Solo el repartidor registra su posición',
+    como({ empresa: guds.id }, `select public.registrar_posiciones('${pings}'::jsonb)::text`));
+  if (vendGuds) {
+    await caso('Delivery 20p: un vendedor no registra posiciones', 'Solo el repartidor registra su posición',
+      como({ uid: vendGuds, empresa: guds.id }, `select public.registrar_posiciones('${pings}'::jsonb)::text`));
+    await caso('Delivery 20p: un vendedor no lee las posiciones ni el seguimiento', (r) => r?.n === 0,
+      como({ uid: vendGuds, empresa: guds.id, previo: `${repFalso} ${ent(1, 'en_camino')} ${sesion(AUTH_REP)} ${registrar('a')}` },
+        `select row_to_json(t)::text from (select count(*) n from posiciones_repartidor) t`));
+    await caso('Delivery 20p: un vendedor no abre el seguimiento del día', 'Solo administración',
+      como({ uid: vendGuds, empresa: guds.id }, `select public.seguimiento_delivery()::text`));
+  }
+  await caso('Delivery 20p: un cliente no lee las posiciones', (r) => r?.n === 0,
+    como({ uid: CLI, empresa: guds.id, previo: `${clienteFalso} ${repFalso} ${ent(1, 'en_camino')} ${sesion(AUTH_REP)} ${registrar('a')}` },
+      `select row_to_json(t)::text from (select count(*) n from posiciones_repartidor) t`));
+  await caso('Delivery 20p: administración ve la última posición y las paradas del día (hechas, pendientes y siguiente)',
+    (r) => r?.n_tabla === 2 && Number(r?.lat) === 10.5012 && r?.paradas === 3 && r?.hechas === 1 && r?.siguiente === 'P-20P/2' && r?.rastro === 2,
+    como({ empresa: guds.id, previo: `${repFalso}
+        ${ent(1, 'entregada', { fecha_ruta: HOY, orden_ruta: 1, fecha_entrega: 'now()', ...cerrada() })}
+        ${ent(2, 'en_camino', { fecha_ruta: HOY, orden_ruta: 2, fecha_inicio_entrega: 'now()' })}
+        ${ent(3, 'asignada', { fecha_ruta: HOY, orden_ruta: 3 })}
+        ${sesion(AUTH_REP)} ${registrar('a')} ${sesion(admin)}` },
+      `select row_to_json(t)::text from (select (select count(*) from posiciones_repartidor where repartidor_id = '${REP}') n_tabla,
+        r->'posicion'->>'lat' lat, jsonb_array_length(r->'paradas') paradas, jsonb_array_length(r->'rastro') rastro,
+        (select count(*) from jsonb_array_elements(r->'paradas') p where p->>'estado' = 'entregada') hechas,
+        (select p->>'numero' from jsonb_array_elements(r->'paradas') p where p->>'estado' in ('en_camino', 'asignada') order by (p->>'estado' = 'en_camino') desc, (p->>'orden_ruta')::int limit 1) siguiente
+        from jsonb_array_elements(public.seguimiento_delivery()->'repartidores') r where r->>'id' = '${REP}') t`));
+
+  // Incidencias y devoluciones
+  await caso('Delivery 20p: una entrega incompleta abre su incidencia con lo que regresa al almacén', (r) => r?.tipo === 'incompleta' && r?.devolucion === 'pendiente' && r?.lineas === 1 && Number(r?.esperada) === 3,
+    como({ rol: 'postgres', empresa: guds.id, previo: `${repFalso} ${ent(4, 'incompleta', { lineas: lineasIncompleta, fecha_entrega: 'now()', ...cerrada() })}` },
+      `select row_to_json(t)::text from (select tipo, devolucion, jsonb_array_length(devolucion_lineas) lineas, devolucion_lineas->0->>'esperada' esperada
+        from incidencias_entrega where entrega_id = ${idEnt(4)}) t`));
+  const conIncompleta = `${repFalso} ${ent(4, 'incompleta', { lineas: lineasIncompleta, fecha_entrega: 'now()', ...cerrada() })}`;
+  const confirmar = (recibida, nota = null) => `select public.confirmar_devolucion_entrega(${incid(4)}, '[{"item_id":"00000000-0000-0000-0000-0000002d6f01","recibida":${recibida}}]'::jsonb, ${nota ? `'${nota}'` : 'null'})::text`;
+  if (vendGuds) {
+    await caso('Delivery 20p: un vendedor no confirma devoluciones', 'Solo almacén o administración',
+      como({ uid: vendGuds, empresa: guds.id, previo: conIncompleta }, confirmar(3)));
+  }
+  await caso('Delivery 20p: el repartidor no confirma su propia devolución', 'Solo almacén o administración',
+    como({ uid: AUTH_REP, empresa: guds.id, previo: conIncompleta }, confirmar(3)));
+  await caso('Delivery 20p: recibir menos de lo que regresa exige una nota', 'Explica en la nota',
+    como({ empresa: guds.id, previo: conIncompleta }, confirmar(2)));
+  await caso('Delivery 20p: almacén (rol con inventario) confirma la devolución con cantidades, quién y cuándo', (r) => r?.devolucion === 'confirmada' && Number(r?.recibida) === 2 && r?.quien === true && r?.cuando === true,
+    como({ empresa: guds.id, previo: `${conIncompleta} ${almacen} ${sesion(ALM)}
+        perform public.confirmar_devolucion_entrega(${incid(4)}, '[{"item_id":"00000000-0000-0000-0000-0000002d6f01","recibida":2}]'::jsonb, 'Llegaron 2, una caja rota se quedó en el camión');` },
+      `select row_to_json(t)::text from (select devolucion, devolucion_lineas->0->>'recibida' recibida, devolucion_por = (select id from usuarios where auth_id = '${ALM}') quien,
+        devolucion_at is not null cuando from incidencias_entrega where entrega_id = ${idEnt(4)}) t`));
+  await caso('Delivery 20p: almacén ve las devoluciones pero no las incidencias completas', 'No tienes permiso para ver las incidencias',
+    como({ uid: ALM, empresa: guds.id, previo: `${conIncompleta} ${almacen}` }, `select public.incidencias_delivery(60, false)::text`));
+  await caso('Delivery 20p: almacén solo lee (tabla) las incidencias con mercancía por devolver', (r) => r?.con === 1 && r?.sin === 0,
+    como({ uid: ALM, empresa: guds.id, previo: `${conIncompleta} ${ent(5, 'reprogramada', { reprogramada_para: HOY, ...cerrada('cerrado') })} ${almacen}` },
+      `select row_to_json(t)::text from (select count(*) filter (where entrega_id = ${idEnt(4)}) con, count(*) filter (where entrega_id = ${idEnt(5)}) sin from incidencias_entrega) t`));
+  await caso('Delivery 20p: no se resuelve una incidencia con la devolución pendiente', 'Falta que almacén confirme',
+    como({ empresa: guds.id, previo: conIncompleta }, `select public.resolver_incidencia(${incid(4)}, 'Se emitió la nota de crédito')::text`));
+  await caso('Delivery 20p: una entrega incompleta no se reprograma (lo que falta va como pendiente en Odoo)', 'La entrega incompleta ya se entregó',
+    como({ empresa: guds.id, previo: conIncompleta }, `select public.reprogramar_incidencia(${incid(4)}, ${HOY} + 1)::text`));
+  await caso('Delivery 20p: resolver exige una nota y queda quién y cuándo', (r) => r?.estado === 'resuelta' && r?.quien === true,
+    como({ empresa: guds.id, previo: `${repFalso} ${ent(5, 'reprogramada', { reprogramada_para: HOY, ...cerrada('cerrado') })} ${sesion(admin)}
+        perform public.resolver_incidencia(${incid(5)}, 'El cliente canceló el pedido: se anula en Odoo');` },
+      `select row_to_json(t)::text from (select estado, resuelta_por is not null quien from incidencias_entrega where entrega_id = ${idEnt(5)}) t`));
+  if (vendGuds) {
+    await caso('Delivery 20p: un vendedor no decide sobre incidencias', 'Solo administración puede decidir',
+      como({ uid: vendGuds, empresa: guds.id, previo: `${repFalso} ${ent(5, 'reprogramada', { reprogramada_para: HOY, ...cerrada('cerrado') })}` },
+        `select public.resolver_incidencia(${incid(5)}, 'nota de prueba')::text`));
+  }
+  // Rechazo sobre un documento real "Listo" de Odoo: reprogramar lo devuelve a la cola con fecha; reasignar crea la entrega nueva en la ruta de ese día
+  const [docLista] = await sql(`select t.id, t.odoo_id from transferencias t where t.empresa_id = '${guds.id}' and t.tipo = 'entrega' and t.estado = 'lista'
+    and exists (select 1 from transferencia_items ti where ti.transferencia_id = t.id and ti.cantidad_hecha > 0)
+    and not exists (select 1 from entregas e where e.transferencia_odoo_id = t.odoo_id and e.estado in ('asignada', 'en_camino')) order by t.numero limit 1`);
+  if (docLista) {
+    const rechazoReal = `${repFalso} ${ent(6, 'rechazada', { transferencia_id: `'${docLista.id}'`, transferencia_odoo_id: docLista.odoo_id, ...cerrada('precio') })}`;
+    await caso('Delivery 20p: un rechazo abre la incidencia con toda la mercancía del documento por devolver', (r) => r?.tipo === 'rechazada' && r?.devolucion === 'pendiente' && r?.lineas > 0,
+      como({ rol: 'postgres', empresa: guds.id, previo: rechazoReal },
+        `select row_to_json(t)::text from (select tipo, devolucion, jsonb_array_length(devolucion_lineas) lineas from incidencias_entrega where entrega_id = ${idEnt(6)}) t`));
+    await caso('Delivery 20p: reprogramar un rechazo lo devuelve a la cola con la fecha nueva', (r) => r?.estado === 'reprogramada' && r?.ok === true,
+      como({ empresa: guds.id, previo: `${rechazoReal} ${sesion(admin)} perform public.reprogramar_incidencia(${incid(6)}, ${HOY} + 2, 'El cliente pidió el jueves');` },
+        `select row_to_json(t)::text from (select estado, fecha_objetivo = ${HOY} + 2 ok from incidencias_entrega where entrega_id = ${idEnt(6)}) t`));
+    await caso('Delivery 20p: reasignar crea la entrega nueva (2.º intento) en la ruta del día elegido', (r) => r?.estado === 'reasignada' && r?.nueva === 'asignada' && r?.ruta_ok === true && r?.intento === 2,
+      como({ empresa: guds.id, previo: `${rechazoReal} ${sesion(admin)} perform public.reasignar_incidencia(${incid(6)}, '${REP}', ${HOY} + 1);` },
+        `select row_to_json(t)::text from (select i.estado, n.estado nueva, n.fecha_ruta = ${HOY} + 1 ruta_ok,
+          (select count(*) from entregas p where p.transferencia_odoo_id = ${docLista.odoo_id} and p.estado <> 'cancelada')::int intento
+          from incidencias_entrega i join entregas n on n.id = i.nueva_entrega_id where i.entrega_id = ${idEnt(6)}) t`));
+    await caso('Delivery 20p: no se reprograma un documento que ya volvió a asignarse', 'ya volvió a asignarse',
+      como({ empresa: guds.id, previo: `${rechazoReal} ${sesion(admin)} perform public.reasignar_incidencia(${incid(6)}, '${REP}', null);
+          update incidencias_entrega set estado = 'abierta' where entrega_id = ${idEnt(6)};` },
+        `select public.reprogramar_incidencia(${incid(6)}, ${HOY} + 1)::text`));
+  }
+
+  // Indicadores: 5 asignadas hoy; 4 cerradas (completa, incompleta, rechazada, reprogramada); 60 min de salida a entrega; a tiempo 2 de 2
+  await caso('Delivery 20p: los indicadores cuadran con las entregas del repartidor',
+    (r) => r?.asignadas === 5 && r?.cerradas === 4 && r?.completas === 1 && r?.incompletas === 1 && r?.rechazadas === 1 && r?.reprogramadas === 1
+      && Number(r?.minutos) === 60 && r?.a_tiempo === 2 && r?.con_objetivo === 2 && r?.motivos === 'cerrado,danado,precio' && r?.total_ok === true,
+    como({ empresa: guds.id, previo: `${repFalso}
+        ${ent(1, 'entregada', { fecha_ruta: HOY, fecha_inicio_entrega: `now() - interval '60 minutes'`, fecha_entrega: 'now()', ...cerrada() })}
+        ${ent(2, 'incompleta', { fecha_ruta: HOY, fecha_inicio_entrega: `now() - interval '60 minutes'`, fecha_entrega: 'now()', lineas: lineasIncompleta, ...cerrada() })}
+        ${ent(3, 'rechazada', { fecha_ruta: HOY, ...cerrada('precio') })}
+        ${ent(4, 'reprogramada', { fecha_ruta: HOY, reprogramada_para: HOY, ...cerrada('cerrado') })}
+        ${ent(5, 'asignada', { fecha_ruta: HOY })}` },
+      `select row_to_json(t)::text from (select (r->>'asignadas')::int asignadas, (r->>'cerradas')::int cerradas, (r->>'completas')::int completas,
+        (r->>'incompletas')::int incompletas, (r->>'rechazadas')::int rechazadas, (r->>'reprogramadas')::int reprogramadas, r->>'minutos_salida_entrega' minutos,
+        (r->>'a_tiempo')::int a_tiempo, (r->>'con_objetivo')::int con_objetivo,
+        (select string_agg(m->>'codigo', ',' order by m->>'codigo') from jsonb_array_elements(r->'motivos') m) motivos,
+        ((i->'total'->>'cerradas')::int >= 4) total_ok
+        from (select public.indicadores_delivery(${HOY}, ${HOY}) i) z, jsonb_array_elements(i->'repartidores') r where r->>'id' = '${REP}') t`));
+  if (vendGuds) {
+    await caso('Delivery 20p: un vendedor no ve los indicadores de delivery', 'Solo administración',
+      como({ uid: vendGuds, empresa: guds.id }, `select public.indicadores_delivery(${HOY} - 30, ${HOY})::text`));
+  }
+
+  // Cuadre con Odoo (D8): lo que la sincronización compara con el documento de Odoo (solo lectura)
+  const docsHechos = await sql(`select t.id, t.odoo_id from transferencias t where t.empresa_id = '${guds.id}' and t.tipo = 'entrega' and t.estado = 'hecha'
+    and exists (select 1 from transferencia_items ti where ti.transferencia_id = t.id and coalesce(ti.estado, '') <> 'cancelada' and ti.cantidad_hecha > 0)
+    and not exists (select 1 from entregas e where e.transferencia_odoo_id = t.odoo_id) order by t.fecha_realizada desc limit 3`);
+  if (docLista && docsHechos.length === 3) {
+    const [h1, h2, h3] = docsHechos;
+    const lineasDe = (doc, mas = 0) => `(select jsonb_agg(jsonb_build_object('item_id', ti.id, 'move_odoo_id', ti.odoo_id, 'producto', ti.nombre_producto,
+      'esperada', ti.cantidad_hecha, 'entregada', ti.cantidad_hecha + ${mas})) from transferencia_items ti where ti.transferencia_id = '${doc.id}' and coalesce(ti.estado, '') <> 'cancelada')`;
+    const docEnt = (n, doc, estado, extra) => ent(n, estado, { transferencia_id: `'${doc.id}'`, transferencia_odoo_id: doc.odoo_id, ...extra });
+    const fixtures = `${repFalso}
+      ${docEnt(1, docLista, 'entregada', { fecha_entrega: 'now()', lineas: lineasDe(docLista), ...cerrada() })}
+      ${docEnt(2, h1, 'rechazada', cerrada('precio'))}
+      ${docEnt(3, h2, 'entregada', { fecha_entrega: 'now()', lineas: lineasDe(h2), ...cerrada() })}
+      ${docEnt(4, h3, 'incompleta', { fecha_entrega: 'now()', lineas: lineasDe(h3, -1), ...cerrada() })}
+      perform set_config('guds.p20p_c', public.cuadrar_entregas_odoo('${guds.id}')::text, true);`;
+    await caso('Delivery 20p: el cuadre con Odoo separa pendiente en Odoo, validada sin GUDS, cantidades distintas y cuadrada',
+      (r) => r?.a === 'pendiente_odoo' && r?.b === 'validada_sin_guds' && r?.c === 'cuadrada' && r?.d === 'cantidades_distintas' && Number(r?.dif) === 1 && r?.resumen >= 1,
+      como({ rol: 'postgres', empresa: guds.id, previo: fixtures },
+        `select row_to_json(t)::text from (select
+          (select tipo from cuadre_entregas_odoo where transferencia_odoo_id = ${docLista.odoo_id}) a,
+          (select tipo from cuadre_entregas_odoo where transferencia_odoo_id = ${h1.odoo_id}) b,
+          (select tipo from cuadre_entregas_odoo where transferencia_odoo_id = ${h2.odoo_id}) c,
+          (select tipo from cuadre_entregas_odoo where transferencia_odoo_id = ${h3.odoo_id}) d,
+          (select lineas->0->>'diferencia' from cuadre_entregas_odoo where transferencia_odoo_id = ${h3.odoo_id}) dif,
+          (current_setting('guds.p20p_c')::jsonb->>'cantidades_distintas')::int resumen) t`));
+    await caso('Delivery 20p: el cuadre se recalcula (si Odoo valida lo que GUDS entregó, pasa a cuadrada)', (r) => r?.tipo === 'cuadrada',
+      como({ rol: 'postgres', empresa: guds.id, previo: `${fixtures} update transferencias set estado = 'hecha' where id = '${docLista.id}';
+          perform public.cuadrar_entregas_odoo('${guds.id}');` },
+        `select row_to_json(t)::text from (select tipo from cuadre_entregas_odoo where transferencia_odoo_id = ${docLista.odoo_id}) t`));
+    if (vendGuds) {
+      await caso('Delivery 20p: un vendedor no lee el cuadre con Odoo', (r) => r?.n === 0,
+        como({ uid: vendGuds, empresa: guds.id, previo: fixtures }, `select row_to_json(t)::text from (select count(*) n from cuadre_entregas_odoo) t`));
+    }
+    await caso('Delivery 20p: administración lee el cuadre de su empresa', (r) => r?.n >= 4,
+      como({ empresa: guds.id, previo: fixtures }, `select row_to_json(t)::text from (select count(*) n from cuadre_entregas_odoo) t`));
+  }
+  await caso('Delivery 20p: nadie recalcula el cuadre por la API', 'permission denied',
+    como({ empresa: guds.id }, `select public.cuadrar_entregas_odoo('${guds.id}')::text`));
+  await caso('Delivery 20p: anon no ejecuta las funciones y nadie ejecuta las internas', (r) => r?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace and (
+      (p.proname in ('registrar_posiciones', 'seguimiento_delivery', 'incidencias_delivery', 'reprogramar_incidencia', 'reasignar_incidencia',
+          'resolver_incidencia', 'confirmar_devolucion_entrega', 'indicadores_delivery') and has_function_privilege('anon', p.oid, 'execute'))
+      or (p.proname in ('purgar_posiciones_repartidor', 'cuadrar_entregas_odoo', 'puede_confirmar_devolucion', 'trg_entrega_incidencia', 'incidencia_historial', 'incidencia_para_decidir')
+        and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))))) t`));
+  await caso('Delivery 20p: sin sesión no se leen posiciones, incidencias ni cuadre', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select ((select count(*) from posiciones_repartidor) + (select count(*) from incidencias_entrega) + (select count(*) from cuadre_entregas_odoo))::text`));
+  await caso('Delivery 20p: la purga de posiciones está programada (90 días)', (r) => r?.n === 1,
+    como({ rol: 'postgres' }, `select row_to_json(t)::text from (select count(*) n from cron.job where jobname = 'purgar-posiciones-repartidor') t`));
+}
+
+// ── Reportes R2 · R7 · R8b (20q): clasificación comercial de Odoo, equivalencias, comparativos, metas, calidad y cuadre ──
+{
+  const valor20q = async (q, empresa = 'todas', extra = {}) => { const r = await como({ empresa, ...extra }, q); return r.ok ? JSON.parse(r.ok) : { error: r.error }; };
+  const resuelto20q = (obj) => Promise.resolve(obj?.error ? obj : { ok: JSON.stringify(obj) });
+  const [{ lote: lote20q }] = await sql(`select public.profit_lote_vigente() lote`);
+  const sinPermiso20q = vendGuds ? { uid: vendGuds, empresa: guds.id } : null;
+
+  // R2 · clasificación comercial: se trae de Odoo y no se edita en GUDS
+  const [clasif] = await sql(`select (select count(*) from clientes where etiquetas is not null) etiquetas,
+    (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'clientes' and column_name in ('tipo_cliente', 'canal', 'segmento', 'etiquetas')) cols_cli,
+    (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'productos' and column_name = 'marca') cols_prod`);
+  casos.push({ ok: Number(clasif.cols_cli) === 4 && Number(clasif.cols_prod) === 1 && Number(clasif.etiquetas) > 0 ? '✓' : '✗',
+    caso: 'Clasificación 20q: el importador trae tipo de cliente, canal, segmento, etiquetas y marca de Odoo', resultado: JSON.stringify(clasif) });
+  await caso('Clasificación 20q: el tipo de cliente viene de Odoo (no se edita en GUDS)', 'viene de Odoo', como(E, upd('clientes', `tipo_cliente = 'X'`, cliOdoo)));
+  await caso('Clasificación 20q: la marca del producto viene de Odoo (no se edita en GUDS)', 'viene de Odoo', como(E, upd('productos', `marca = 'X'`, prodOdoo)));
+
+  if (lote20q) {
+    // Motor: Categoría › Línea › Sub-línea son los niveles de la categoría de Odoo también en las ventas de Profit
+    await caso('Cubo 20q: en Profit la categoría usa los niveles de Odoo (sin nombres de Profit mezclados)', (r) => r?.filas > 1 && r.mezcladas === 0,
+      como({ empresa: 'todas' }, `select row_to_json(t)::text from (select count(*) filas,
+        count(*) filter (where k1 <> '' and k1 not like '% (Profit)' and k1 not in (select distinct upper(btrim(split_part(nombre, '/', 1))) from public.categorias)) mezcladas
+        from public.reporte_ventas_cubo('2025-01-01', '2025-12-31', array['categoria'], 'profit', '{}', null, false) where nivel = 1) t`));
+    await caso('Cubo 20q: la línea de Odoo en Profit = artículo con categoría en Odoo o la equivalencia (Quirutec 2025, SOLUCIONES)',
+      (r) => r?.cubo !== null && Number(r.cubo) > 0 && Math.abs(Number(r.cubo) - Number(r.directo)) < 0.02,
+      como({ empresa: qrt.id }, `with c as (select round(sum(venta_usd), 2) v from public.reporte_ventas_cubo('2025-01-01', '2025-12-31', array['categoria', 'linea'], 'profit', '{}', null, false)
+          where nivel = 2 and k2 = 'SOLUCIONES'),
+        d as (select round(sum(v.neto_usd), 2) v from public.ventas_historicas v
+          left join public.productos pr on pr.id = v.producto_id
+          left join public.profit_categorias pq on pq.empresa_id = v.empresa_id and pq.categoria_profit = btrim(coalesce(v.categoria, '')) and pq.linea_profit = btrim(coalesce(v.linea, ''))
+          join public.categorias ca on ca.id = coalesce(pr.categoria_id, pq.categoria_id)
+          where v.lote = public.profit_lote_vigente() and v.tratamiento = 'venta' and v.fecha between '2025-01-01' and '2025-12-31'
+            and upper(btrim(split_part(ca.nombre, '/', 2))) = 'SOLUCIONES')
+        select row_to_json(t)::text from (select (select v from c) cubo, (select v from d) directo) t`));
+    await caso('Cubo 20q: la clasificación original de Profit sigue disponible y suma lo mismo', (r) => r && Number(r.unificada) === Number(r.profit) && r.nombres_profit > 0,
+      como({ empresa: 'todas' }, `select row_to_json(t)::text from (select
+        (select round(venta_usd, 2) from public.reporte_ventas_cubo('2025-01-01', '2025-12-31', array['categoria'], 'profit', '{}', null, false) where nivel = 0) unificada,
+        (select round(venta_usd, 2) from public.reporte_ventas_cubo('2025-01-01', '2025-12-31', array['categoria_profit'], 'profit', '{}', null, false) where nivel = 0) profit,
+        (select count(*) from public.reporte_ventas_cubo('2025-01-01', '2025-12-31', array['categoria_profit'], 'profit', '{}', null, false)
+          where nivel = 1 and k1 in (select distinct btrim(categoria) from public.ventas_historicas where lote = public.profit_lote_vigente())) nombres_profit) t`));
+    await caso('Reportes 20q: por categoría, los artículos de Profit sin pareja usan la equivalencia (mismo total)', (r) => r && Number(r.categorias) === Number(r.productos) && r.sin_equivalencia === r.pares_sin,
+      como({ empresa: 'todas' }, `select row_to_json(t)::text from (select
+        (select round(sum(neto_usd), 2) from public.reporte_ventas('2025-01-01', '2025-12-31', 'categoria', 'profit', false)) categorias,
+        (select round(sum(neto_usd), 2) from public.reporte_ventas('2025-01-01', '2025-12-31', 'producto', 'profit', false)) productos,
+        (select count(*) from public.reporte_ventas('2025-01-01', '2025-12-31', 'categoria', 'profit', false) where clave like 'profit:%') sin_equivalencia,
+        (select count(distinct upper(btrim(v.categoria))) from public.ventas_historicas v
+          left join public.productos pr on pr.id = v.producto_id
+          left join public.profit_categorias pq on pq.empresa_id = v.empresa_id and pq.categoria_profit = btrim(coalesce(v.categoria, '')) and pq.linea_profit = btrim(coalesce(v.linea, ''))
+          where v.lote = public.profit_lote_vigente() and v.tratamiento = 'venta' and v.fecha between '2025-01-01' and '2025-12-31'
+            and pr.categoria_id is null and pq.categoria_id is null and nullif(btrim(v.categoria), '') is not null) pares_sin) t`));
+    await caso('Detalle 20q: el detalle de líneas trae la categoría de Odoo', (r) => r?.n > 0 && r.con_cat > 0.9 * r.n,
+      como({ empresa: guds.id }, `select row_to_json(t)::text from (select count(*) n, count(categoria_odoo) con_cat from public.reporte_ventas_lineas('2026-04-01', '2026-04-30')) t`));
+
+    // Equivalencias: las lee quien tiene reportes; solo administración las edita, en la empresa activa y con la función
+    const eq = (await sql(`select id, categoria_id from profit_categorias where empresa_id = '${guds.id}' and categoria_id is not null limit 1`))[0];
+    if (sinPermiso20q) {
+      await caso('Equivalencias 20q: un vendedor sin permiso no las lee', (r) => r?.n === 0, como(sinPermiso20q, `select row_to_json(t)::text from (select count(*) n from public.profit_categorias) t`));
+      await caso('Equivalencias 20q: un vendedor sin permiso no abre la pantalla', 'permiso para ver reportes', como(sinPermiso20q, `select public.equivalencias_categorias_profit()::text`));
+      const previoRepEditar = `insert into public.permisos (rol_id, modulo_id, puede_ver, puede_editar) select u.rol_id, m.id, true, true from public.usuarios u, public.modulos m
+        where u.auth_id = '${vendGuds}' and m.codigo = 'reportes' on conflict (rol_id, modulo_id) do update set puede_ver = true, puede_editar = true;`;
+      if (eq) {
+        await caso('Equivalencias 20q: con "reportes: editar" pero sin ser administración no se editan', 'Solo administración',
+          como({ ...sinPermiso20q, previo: previoRepEditar }, `select public.guardar_profit_categorias(${lit(JSON.stringify([{ id: eq.id, categoria_id: eq.categoria_id }]))}::jsonb)::text`));
+      }
+    }
+    if (eq) {
+      await caso('Equivalencias 20q: nadie las edita directamente (solo con la función)', 'permission denied',
+        como(E, `with x as (update public.profit_categorias set categoria_id = null where id = '${eq.id}' returning id) select row_to_json(x)::text from x`));
+      await caso('Equivalencias 20q: en "Ambas" no se editan', 'Modo consulta',
+        como({ empresa: 'todas' }, `select public.guardar_profit_categorias(${lit(JSON.stringify([{ id: eq.id, categoria_id: eq.categoria_id }]))}::jsonb)::text`));
+      await caso('Equivalencias 20q: una categoría que no es de Odoo se rechaza', 'no existe en Odoo',
+        como(E, `select public.guardar_profit_categorias(${lit(JSON.stringify([{ id: eq.id, categoria_id: '00000000-0000-0000-0000-000000000000' }]))}::jsonb)::text`));
+      const previoValidar20q = `create function pg_temp.p20q_validar(p jsonb, v uuid) returns text language plpgsql as $f$
+        declare n int; r text;
+        begin
+          n := public.guardar_profit_categorias(p);
+          select row_to_json(t)::text into r from (select n, estado, revisado_por is not null quien, categoria_id is null sin from public.profit_categorias where id = v) t;
+          return r;
+        end $f$;`;
+      await caso('Equivalencias 20q: administración valida una en su empresa (y puede dejarla sin equivalencia)', (r) => r?.n === 1 && r.estado === 'validado' && r.quien && r.sin,
+        como({ empresa: guds.id, previo: previoValidar20q }, `select pg_temp.p20q_validar(${lit(JSON.stringify([{ id: eq.id, categoria_id: null }]))}::jsonb, '${eq.id}')`));
+    }
+
+    // R8b · cuadre Profit ↔ Odoo
+    const cuadre = await valor20q(`select (public.reporte_cuadre_profit_odoo() -> 'totales')::text`);
+    await caso('Cuadre 20q: repite el cruce previo (≥ 666 documentos cuadran desde dic-2024, diferencia total < 2 USD)', (r) => r && Number(r.ventana_cuadran) >= 666
+      && Math.abs(Number(r.ventana_odoo_usd) - Number(r.ventana_profit_usd)) < 2 && Number(r.cuadran) >= Number(r.ventana_cuadran)
+      && Number(r.documentos) === Number(r.cuadran) + Number(r.pronto_pago) + Number(r.difieren) + Number(r.nc_ambiguas) + Number(r.solo_odoo), resuelto20q(cuadre));
+    const [siDirecto] = await sql(`select count(*) n from facturas where es_saldo_inicial`);
+    casos.push({ ok: Number(cuadre?.documentos) === Number(siDirecto.n) ? '✓' : '✗', caso: 'Cuadre 20q: revisa todos los saldos iniciales de Odoo', resultado: JSON.stringify({ cuadre: cuadre?.documentos, directo: siDirecto.n }) });
+  }
+
+  // R7 · comparativos: cada período es exactamente reporte_ventas en sus fechas
+  const compMes = await valor20q(`select row_to_json(t)::text from (select
+      (select round(sum(actual_usd), 2) from public.reporte_ventas_comparativo('2026-08-01', '2026-08-31', 'empresa')) actual,
+      (select round(sum(anterior_usd), 2) from public.reporte_ventas_comparativo('2026-08-01', '2026-08-31', 'empresa')) anterior,
+      (select round(sum(anio_anterior_usd), 2) from public.reporte_ventas_comparativo('2026-08-01', '2026-08-31', 'empresa')) anio,
+      (select min(anterior_desde)::text || '/' || min(anterior_hasta)::text || '/' || min(anio_desde)::text || '/' || min(anio_hasta)::text from public.reporte_ventas_comparativo('2026-08-01', '2026-08-31', 'empresa')) fechas,
+      (select round(sum(neto_usd), 2) from public.reporte_ventas('2026-08-01', '2026-08-31', 'empresa')) rv_actual,
+      (select round(sum(neto_usd), 2) from public.reporte_ventas('2026-07-01', '2026-07-31', 'empresa')) rv_anterior,
+      (select round(sum(neto_usd), 2) from public.reporte_ventas('2025-08-01', '2025-08-31', 'empresa')) rv_anio) t`);
+  await caso('Comparativo 20q: el período anterior y el año anterior coinciden con reporte_ventas (mes)', (r) => r && Number(r.actual) === Number(r.rv_actual)
+    && Number(r.anterior) === Number(r.rv_anterior) && Number(r.anio) === Number(r.rv_anio) && Number(r.anio) > 0
+    && r.fechas === '2026-07-01/2026-07-31/2025-08-01/2025-08-31', resuelto20q(compMes));
+  await caso('Comparativo 20q: por vendedor y en un período de días, el anterior es el mismo número de días justo antes', (r) => r && r.filas > 0 && r.distintas === 0 && r.fechas === '2026-08-17/2026-08-31',
+    como({ empresa: 'todas' }, `with c as (select * from public.reporte_ventas_comparativo('2026-09-01', '2026-09-15', 'vendedor')),
+        p as (select * from public.reporte_ventas('2026-08-17', '2026-08-31', 'vendedor'))
+      select row_to_json(t)::text from (select (select count(*) from c) filas,
+        (select count(*) from c full join p on p.clave = c.clave where coalesce(c.anterior_usd, 0) <> coalesce(p.neto_usd, 0)) distintas,
+        (select min(anterior_desde)::text || '/' || min(anterior_hasta)::text from c) fechas) t`));
+  await caso('Comparativo 20q: por mes no se compara (las claves cambian de período)', 'Agrupación no válida',
+    como(E, `select count(*)::text from public.reporte_ventas_comparativo('2026-08-01', '2026-08-31', 'mes')`));
+  if (sinPermiso20q) {
+    await caso('Comparativo 20q: un vendedor sin el permiso de reportes no compara', 'permiso para ver reportes',
+      como(sinPermiso20q, `select count(*)::text from public.reporte_ventas_comparativo('2026-08-01', '2026-08-31')`));
+  }
+
+  // R7 · metas: el cumplimiento y la venta son los de resumen_vendedor; proyección con días hábiles (lunes a viernes)
+  await caso('Metas 20q: días hábiles de septiembre 2026 = 22 (lunes a viernes)', (r) => r?.n === 22,
+    como(E, `select row_to_json(t)::text from (select public.dias_habiles('2026-09-01', '2026-09-30') n) t`));
+  const vm = (await sql(`select u.id usuario, u.auth_id from usuarios u where u.role = 'vendedor' and u.auth_id is not null and coalesce(u.activo, true)
+    and exists (select 1 from clientes c where c.vendedor_asignado_id = u.id and c.empresa_id = '${guds.id}') order by u.created_at limit 1`))[0];
+  if (vm) {
+    const hdr = JSON.stringify({ 'x-empresa-id': guds.id });
+    const previoMeta = `insert into public.metas_vendedor (vendedor_id, anio, mes, meta_ventas, empresa_id)
+        values ('${vm.usuario}', extract(year from (now() at time zone 'America/Caracas'))::int, extract(month from (now() at time zone 'America/Caracas'))::int, 5000, '${guds.id}')
+        on conflict (empresa_id, vendedor_id, mes, anio) do update set meta_ventas = 5000;
+      perform set_config('request.jwt.claims', ${lit(JSON.stringify({ sub: vm.auth_id, role: 'authenticated' }))}, true);
+      perform set_config('request.headers', ${lit(hdr)}, true);
+      perform set_config('prueba.rv20q', public.resumen_vendedor()::text, true);`;
+    const metas = await valor20q(`select row_to_json(t)::text from (select m.meta_usd, m.venta_usd, m.cumplimiento_pct, m.proyeccion_usd, m.dias_habiles, m.dias_transcurridos,
+        current_setting('prueba.rv20q')::jsonb rv
+      from public.reporte_metas_vendedores(date_trunc('month', now() at time zone 'America/Caracas')::date, (now() at time zone 'America/Caracas')::date) m
+      where m.vendedor_id = '${vm.usuario}' and m.en_curso) t`, guds.id, { previo: previoMeta });
+    await caso('Metas 20q: el cumplimiento coincide con resumen_vendedor (meta, venta y %)', (r) => r && Number(r.meta_usd) === 5000
+      && Number(r.meta_usd) === Number(r.rv.meta_mes.meta) && Number(r.venta_usd) === Number(r.rv.ventas_mes.neto)
+      && Number(r.cumplimiento_pct) === Math.round((Number(r.venta_usd) / 5000) * 10000) / 100, resuelto20q(metas));
+    await caso('Metas 20q: proyección del mes = venta ÷ días hábiles transcurridos × días hábiles del mes', (r) => r && r.dias_habiles > 0
+      && (r.dias_transcurridos === 0 ? r.proyeccion_usd === null
+        : Math.abs(Number(r.proyeccion_usd) - Math.round((Number(r.venta_usd) / r.dias_transcurridos) * r.dias_habiles * 100) / 100) < 0.011), resuelto20q(metas));
+  }
+  if (sinPermiso20q) {
+    await caso('Metas 20q: un vendedor sin el permiso de reportes no ve la tabla de metas', 'permiso para ver reportes',
+      como(sinPermiso20q, `select count(*)::text from public.reporte_metas_vendedores('2026-09-01', '2026-09-30')`));
+  }
+
+  // R8b · calidad de datos
+  const calidad = await valor20q(`select row_to_json(t)::text from (select r -> 'conteos' conteos,
+      (select jsonb_object_agg(k, jsonb_array_length(v)) from jsonb_each(r -> 'listas') x(k, v)) largos from (select public.reporte_calidad_datos() r) z) t`);
+  await caso('Calidad 20q: cada lista trae su conteo', (r) => r?.conteos && Object.keys(r.conteos).length === 8 && Object.entries(r.conteos).every(([k, n]) => r.largos[k] === n), resuelto20q(calidad));
+  const [ext] = await sql(`select count(*) n from clientes where activo and estado ~ '\\((?!VE\\))[A-Z]{2}\\)\\s*$'`);
+  casos.push({ ok: Number(calidad?.conteos?.clientes_estado_extranjero) === Number(ext.n) ? '✓' : '✗', caso: 'Calidad 20q: clientes con estado de otro país = los "(XX)" distintos de Venezuela',
+    resultado: JSON.stringify({ calidad: calidad?.conteos?.clientes_estado_extranjero, directo: ext.n }) });
+  if (sinPermiso20q) {
+    await caso('Calidad 20q: un vendedor sin permiso no ve Calidad', 'permiso para ver reportes', como(sinPermiso20q, `select public.reporte_calidad_datos()::text`));
+    await caso('Cuadre 20q: un vendedor sin permiso no ve el cuadre Profit ↔ Odoo', 'permiso para ver reportes', como(sinPermiso20q, `select public.reporte_cuadre_profit_odoo()::text`));
+  }
+  await caso('Calidad 20q: sin sesión no se ejecuta', 'permission denied', como({ rol: 'anon', uid: null, empresa: guds.id }, `select public.reporte_calidad_datos()::text`));
+  await caso('Reportes 20q: las funciones internas no se ejecutan por la API y las nuevas no se abren sin sesión', (r) => r?.internas === 0 && r?.anon === 0,
+    como({}, `select row_to_json(t)::text from (select
+      (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('profit_proponer_categorias', 'profit_norm_categoria',
+         'cubo_niveles_categoria_sql', 'cubo_clasificacion_profit_sql')
+         and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))) internas,
+      (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('equivalencias_categorias_profit', 'guardar_profit_categorias',
+         'reporte_ventas_comparativo', 'periodo_comparacion', 'dias_habiles', 'reporte_metas_vendedores', 'reporte_cuadre_profit_odoo', 'reporte_calidad_datos')
+         and has_function_privilege('anon', p.oid, 'execute')) anon) t`));
+}
+
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {
   const pol = await sql(String.raw`select tablename || '.' || policyname p, coalesce(qual,'') || ' ' || coalesce(with_check,'') t from pg_policies where schemaname = 'public'`);

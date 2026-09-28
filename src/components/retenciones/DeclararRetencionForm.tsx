@@ -110,9 +110,9 @@ export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante 
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Tipo *</Label>
+          <Label htmlFor="retencion-tipo">Tipo *</Label>
           <Select value={tipo} onValueChange={(v) => setTipo(v as "iva" | "islr")}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger id="retencion-tipo" aria-label="Tipo de retención"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="iva">IVA</SelectItem>
               <SelectItem value="islr">ISLR</SelectItem>
@@ -121,9 +121,9 @@ export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante 
         </div>
         {tipo === "islr" && (
           <div className="space-y-2">
-            <Label>Concepto *</Label>
+            <Label htmlFor="retencion-concepto">Concepto *</Label>
             <Select value={conceptoId} onValueChange={setConceptoId}>
-              <SelectTrigger><SelectValue placeholder="Elegir concepto" /></SelectTrigger>
+              <SelectTrigger id="retencion-concepto" aria-label="Concepto de ISLR"><SelectValue placeholder="Elegir concepto" /></SelectTrigger>
               <SelectContent>
                 {conceptos.map((c) => <SelectItem key={c.id} value={c.id}>{c.concepto} ({c.porcentaje}%)</SelectItem>)}
               </SelectContent>
@@ -134,25 +134,25 @@ export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante 
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Monto total retenido (USD) *</Label>
-          <Input type="number" min="0" step="0.01" value={montoTotal} onChange={(e) => setMontoTotal(e.target.value)} placeholder="0.00" />
+          <Label htmlFor="retencion-monto">Monto total retenido (USD) *</Label>
+          <Input id="retencion-monto" type="number" min="0" step="0.01" inputMode="decimal" value={montoTotal} onChange={(e) => setMontoTotal(e.target.value)} placeholder="0.00" />
         </div>
         <div className="space-y-2">
-          <Label>Fecha</Label>
-          <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          <Label htmlFor="retencion-fecha">Fecha</Label>
+          <Input id="retencion-fecha" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
         </div>
       </div>
 
       <div className="space-y-2">
-        <Label>Nº de comprobante (opcional)</Label>
-        <Input value={numero} onChange={(e) => setNumero(e.target.value)} placeholder="Nº del comprobante de retención" />
+        <Label htmlFor="retencion-numero">Nº de comprobante (opcional)</Label>
+        <Input id="retencion-numero" value={numero} onChange={(e) => setNumero(e.target.value)} placeholder="Nº del comprobante de retención" />
       </div>
 
       {permiteComprobante && (
         <div className="space-y-2">
-          <Label>Comprobante (PDF/JPG/PNG, opcional)</Label>
+          <Label htmlFor="retencion-archivo">Comprobante (PDF/JPG/PNG, opcional)</Label>
           <div className="flex items-center gap-2">
-            <Input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => handleFile(e.target.files?.[0] ?? null)} className="flex-1" />
+            <Input id="retencion-archivo" type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => handleFile(e.target.files?.[0] ?? null)} className="flex-1" />
             {comprobanteFile && <Upload className="h-4 w-4 text-success" />}
           </div>
         </div>
@@ -167,8 +167,8 @@ export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante 
       />
 
       <div className="space-y-2">
-        <Label>Notas (opcional)</Label>
-        <Textarea rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
+        <Label htmlFor="retencion-notas">Notas (opcional)</Label>
+        <Textarea id="retencion-notas" rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
       </div>
 
       <Button onClick={declarar} disabled={saving} className="gap-2">

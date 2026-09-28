@@ -112,7 +112,7 @@ const PortalDashboard = () => {
       encabezadoMovil={
         <div className="min-w-0 leading-tight">
           <p className="truncate text-xs text-muted-foreground">{saludo}</p>
-          <p className="truncate text-sm font-semibold text-foreground" data-testid="nombre-negocio">{portal?.cliente?.nombre_negocio ?? "Mi negocio"}</p>
+          <h1 className="truncate text-sm font-semibold text-foreground" data-testid="nombre-negocio">{portal?.cliente?.nombre_negocio ?? "Mi negocio"}</h1>
         </div>
       }
       acciones={
@@ -125,7 +125,7 @@ const PortalDashboard = () => {
       <div className="space-y-6">
         {/* Buscador (móvil y tableta; en escritorio está en la barra superior) */}
         <Link to="/portal/catalogo?focus=search" className="flex h-11 items-center gap-2.5 rounded-lg border border-border bg-card px-3.5 text-sm text-muted-foreground lg:hidden">
-          <Search className="h-4 w-4" />Buscar productos por nombre o código
+          <Search className="h-4 w-4" aria-hidden />Buscar productos por nombre o código
         </Link>
 
         {banners.length > 0 && (
@@ -183,13 +183,13 @@ const PortalDashboard = () => {
             )}
           </Panel>
 
-          <div className="space-y-6">
+          {!cargando && <div className="space-y-6">
             <Panel titulo="Accesos rápidos" cuerpoClassName="p-2 sm:p-2">
               <ul className="grid grid-cols-3 gap-1 lg:grid-cols-2">
                 {ACCESOS.map((a) => (
                   <li key={a.ruta + a.etiqueta}>
                     <Link to={a.ruta} className="flex h-full flex-col items-center gap-1.5 rounded-lg px-2 py-3 text-center text-xs font-medium text-foreground hover:bg-muted/60 lg:flex-row lg:gap-2.5 lg:px-3 lg:text-left lg:text-sm">
-                      <a.icono className="h-5 w-5 shrink-0 text-muted-foreground lg:h-4 lg:w-4" strokeWidth={1.75} />
+                      <a.icono className="h-5 w-5 shrink-0 text-muted-foreground lg:h-4 lg:w-4" strokeWidth={1.75} aria-hidden />
                       <span className="leading-tight">{a.etiqueta}</span>
                     </Link>
                   </li>
@@ -209,11 +209,11 @@ const PortalDashboard = () => {
                 </div>
               </Panel>
             )}
-          </div>
+          </div>}
         </div>
 
         {/* Destacados */}
-        {(destacados === null || destacados.length > 0) && (
+        {!cargando && (destacados === null || destacados.length > 0) && (
           <section>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-base font-semibold text-foreground">Productos destacados</h2>

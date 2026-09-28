@@ -177,9 +177,9 @@ export function VerificarCobroDialog({ pagoId, onCerrar, onHecho }: { pagoId: st
 
               {!pago.banco_id && (
                 <div className="space-y-1">
-                  <Label className="text-xs">Cuenta o caja donde ingresa <span className="font-normal text-muted-foreground">· opcional</span></Label>
+                  <Label htmlFor="verificar-caja" className="text-xs">Cuenta o caja donde ingresa <span className="font-normal text-muted-foreground">· opcional</span></Label>
                   <Select value={banco} onValueChange={setBanco}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Sin movimiento bancario" /></SelectTrigger>
+                    <SelectTrigger id="verificar-caja" aria-label="Cuenta o caja donde ingresa (opcional)" className="h-9"><SelectValue placeholder="Sin movimiento bancario" /></SelectTrigger>
                     <SelectContent>{cajas.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre}{c.moneda ? ` · ${c.moneda === "BS" ? "Bs." : c.moneda}` : ""}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
@@ -247,7 +247,7 @@ export function VerificarCobroDialog({ pagoId, onCerrar, onHecho }: { pagoId: st
                         <span className="text-muted-foreground">Asignado {formatPrice(asignado)} de {formatPrice(monto)}</span>
                         <span className={cn("tabular-nums", excede && "text-destructive")}>{excede ? "Excede el monto" : `A favor ${formatPrice(Math.max(0, r2(monto - asignado)))}`}</span>
                       </div>
-                      {facturaExcedida && <p className="border-t border-border px-3 py-1.5 text-xs text-destructive">La factura {facturaExcedida.numero} solo tiene saldo {formatPrice(facturaExcedida.saldo_usd)}.</p>}
+                      {facturaExcedida && <p className="border-t border-border px-3 py-1.5 text-xs text-destructive" role="alert">La factura {facturaExcedida.numero} solo tiene saldo {formatPrice(facturaExcedida.saldo_usd)}.</p>}
                     </div>
                   )}
                   {modo === "sin_aplicar" && <p className="text-xs text-muted-foreground">El pago queda como saldo a favor del cliente (se aplica luego desde Cuentas por cobrar).</p>}
@@ -255,8 +255,8 @@ export function VerificarCobroDialog({ pagoId, onCerrar, onHecho }: { pagoId: st
               )}
 
               <div className="space-y-1">
-                <Label className="text-xs">{rechazar ? "Motivo del rechazo (lo verán el vendedor y el cliente)" : "Notas (opcional)"}</Label>
-                <Textarea rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} data-testid="notas-verificacion" />
+                <Label htmlFor="verificar-notas" className="text-xs">{rechazar ? "Motivo del rechazo (lo verán el vendedor y el cliente)" : "Notas (opcional)"}</Label>
+                <Textarea id="verificar-notas" rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} data-testid="notas-verificacion" />
               </div>
             </div>
           </div>

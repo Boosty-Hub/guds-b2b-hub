@@ -1,17 +1,18 @@
-import { useState } from "react";
-import { Bell, Package, CheckCircle, AlertCircle, Info } from "lucide-react";
+import { lazy, Suspense, useState } from "react";
+import { Bell, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useNavigate } from "react-router-dom";
-import { formatDistanceToNow } from "date-fns";
-import { es } from "date-fns/locale";
 import { useNotifications, Notification } from "@/contexts/NotificationsContext";
 import { usePortal } from "@/components/portal/contextoPortal";
+
+// El contenido (lista, fechas relativas con date-fns) se descarga al abrir el menú o al acercarse a la campana.
+const cargarLista = () => import("@/components/portal/NotificationsLista");
+const NotificationsLista = lazy(cargarLista);
 
 interface NotificationsDropdownProps {
   variant?: "default" | "header";
@@ -29,27 +30,6 @@ export const NotificationsDropdown = ({ variant = "default" }: NotificationsDrop
     if (n.link) { setOpen(false); navigate(n.link); }
   };
 
-  const getIcon = (tipo: string | null) => {
-    switch (tipo) {
-      case "orden":
-        return <Package className="h-4 w-4 text-blue-500" />;
-      case "exito":
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case "alerta":
-        return <AlertCircle className="h-4 w-4 text-amber-500" />;
-      default:
-        return <Info className="h-4 w-4 text-muted-foreground" />;
-    }
-  };
-
-  const formatTime = (dateStr: string | null) => {
-    if (!dateStr) return "";
-    return formatDistanceToNow(new Date(dateStr), {
-      addSuffix: true,
-      locale: es,
-    });
-  };
-
   const isHeader = variant === "header";
 
   return (
@@ -59,15 +39,18 @@ export const NotificationsDropdown = ({ variant = "default" }: NotificationsDrop
           variant="ghost"
           size="icon"
           aria-label={unreadCount > 0 ? `Avisos (${unreadCount} sin leer)` : "Avisos"}
+          onPointerEnter={() => { void cargarLista(); }}
+          onFocus={() => { void cargarLista(); }}
           className={`relative ${
             isHeader
               ? "text-primary-foreground hover:bg-white/20"
               : "text-foreground"
           }`}
         >
-          <Bell className="h-5 w-5" />
+          <Bell className="h-5 w-5" aria-hidden />
           {unreadCount > 0 && (
             <span
+              aria-hidden
               className={`absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold ${
                 isHeader
                   ? "bg-white text-primary"
@@ -83,84 +66,17 @@ export const NotificationsDropdown = ({ variant = "default" }: NotificationsDrop
         className="w-80 p-0 bg-card border shadow-lg z-[100]"
         align="end"
         sideOffset={8}
+        aria-label="Notificaciones"
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b">
-          <h3 className="font-semibold text-foreground">Notificaciones</h3>
-          {unreadCount > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={markAllAsRead}
-              className="text-xs text-primary hover:text-primary/80"
-            >
-              Marcar todas como leídas
-            </Button>
-          )}
-        </div>
-
-        <ScrollArea className="h-[300px]">
-          {notifications.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-              <Bell className="h-10 w-10 mb-2 opacity-50" />
-              <p className="text-sm">No tienes notificaciones</p>
-            </div>
-          ) : (
-            <div className="divide-y">
-              {notifications.map((notification) => (
-                <div
-                  key={notification.id}
-                  className={`px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors ${
-                    !notification.leida ? "bg-primary/5" : ""
-                  }`}
-                  onClick={() => handleClick(notification)}
-                >
-                  <div className="flex gap-3">
-                    <div className="flex-shrink-0 mt-0.5">
-                      {getIcon(notification.tipo)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p
-                        className={`text-sm ${
-                          !notification.leida
-                            ? "font-semibold text-foreground"
-                            : "text-foreground"
-                        }`}
-                      >
-                        {notification.titulo}
-                      </p>
-                      {notification.mensaje && (
-                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-                          {notification.mensaje}
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {formatTime(notification.created_at)}
-                      </p>
-                    </div>
-                    {!notification.leida && (
-                      <div className="flex-shrink-0">
-                        <div className="h-2 w-2 rounded-full bg-primary" />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </ScrollArea>
-
-        {notifications.length > 0 && (
-          <div className="border-t px-4 py-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full text-sm text-primary"
-              onClick={() => { setOpen(false); if (enPortal) navigate("/portal/cuenta/notificaciones"); }}
-            >
-              Ver todas las notificaciones
-            </Button>
-          </div>
-        )}
+        <Suspense fallback={<div className="flex h-[360px] items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="Cargando notificaciones" /></div>}>
+          <NotificationsLista
+            notifications={notifications}
+            unreadCount={unreadCount}
+            onAbrir={handleClick}
+            onMarcarTodas={markAllAsRead}
+            onVerTodas={() => { setOpen(false); if (enPortal) navigate("/portal/cuenta/notificaciones"); }}
+          />
+        </Suspense>
       </PopoverContent>
     </Popover>
   );

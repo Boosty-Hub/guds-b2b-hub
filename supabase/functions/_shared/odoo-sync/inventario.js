@@ -82,6 +82,15 @@ export async function cerrarEntregasDesdeOdoo(sql, E) {
   return Number(n) || 0;
 }
 
+// Cuadre con Odoo (D8, fase 20p; solo lectura): compara lo cerrado en GUDS con el estado del documento de entrega en Odoo
+// (cerrada en GUDS y abierta en Odoo, validada en Odoo sin cierre en GUDS, cantidades distintas, cancelada en Odoo o
+// cuadrada) y lo guarda en cuadre_entregas_odoo. La lógica vive en la base (cuadrar_entregas_odoo) para probarla con la
+// suite. Es un reporte: si falla, se avisa y la sincronización sigue.
+export async function cuadrarEntregasOdoo(sql, E) {
+  const [{ r }] = await sql(`select public.cuadrar_entregas_odoo('${E}')::text r`);
+  return typeof r === 'string' ? JSON.parse(r) : r;
+}
+
 // ── Transformación + escritura ─────────────────────────────────────────
 export async function escribirInventario({ inv, quants, E, sql, escribir, ts, aplicar, plantillaDe, almacenDe, clienteDe, provDe, empDe, log }) {
   const tmpl = (pid) => plantillaDe.get(pid) ?? null;
@@ -306,6 +315,14 @@ export async function escribirInventario({ inv, quants, E, sql, escribir, ts, ap
   await limpiar('inventario_lotes', filasQuants.map((q) => q.odoo_id));
   resumen.entregas_cerradas_odoo = await cerrarEntregasDesdeOdoo(sql, E);
   if (resumen.entregas_cerradas_odoo) log(`    ${resumen.entregas_cerradas_odoo} entregas cerradas porque el documento se validó o canceló en Odoo`);
+  try {
+    const c = await cuadrarEntregasOdoo(sql, E);
+    resumen.cuadre_pendiente_odoo = Number(c.pendiente_odoo) || 0;
+    resumen.cuadre_discrepancias = (Number(c.validada_sin_guds) || 0) + (Number(c.cantidades_distintas) || 0) + (Number(c.cancelada_odoo) || 0);
+    if (resumen.cuadre_discrepancias) log(`    Cuadre con Odoo: ${resumen.cuadre_discrepancias} entregas con diferencias (validadas sin GUDS ${c.validada_sin_guds}, cantidades distintas ${c.cantidades_distintas}, canceladas ${c.cancelada_odoo})`);
+  } catch (e) {
+    log(`    ⚠ No se pudo calcular el cuadre de entregas con Odoo: ${String(e?.message || e).slice(0, 200)}`);
+  }
   await limpiar('lotes', lotesUnicos.filter((l) => l.empresa_id).map((l) => l.odoo_id));
   const sinProducto = filasQuants.length - (await sql(`select count(*)::int n from inventario_lotes where empresa_id = '${E}'`))[0].n;
   if (sinProducto > 0) log(`    ${sinProducto} existencias por lote de productos que no están en GUDS (archivados en Odoo)`);

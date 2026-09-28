@@ -16,7 +16,7 @@ export const VendedorSidebar = () => {
   };
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-56 border-r border-border bg-card">
+    <aside className="fixed left-0 top-0 z-40 h-screen w-56 border-r border-border bg-card" aria-label="Navegación del portal del vendedor">
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-12 items-center gap-3 border-b border-border px-4">
@@ -26,13 +26,13 @@ export const VendedorSidebar = () => {
         {/* Seller Info */}
         <div className="border-b border-border px-3 py-2">
           <div className="rounded-md bg-emerald-500/10 px-2.5 py-1.5">
-            <p className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-600"><TrendingUp className="h-3.5 w-3.5" /> Portal Vendedor</p>
+            <p className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-700"><TrendingUp className="h-3.5 w-3.5" aria-hidden /> Portal Vendedor</p>
             <p className="truncate text-[13px] font-semibold text-foreground">{user ? `${user.nombre} ${user.apellido || ""}` : "Vendedor"}</p>
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
+        <nav className="flex-1 space-y-0.5 overflow-y-auto p-2" aria-label="Secciones del portal">
           {navItems.map((item) => (
             <NavLink
               key={item.path}
@@ -41,12 +41,12 @@ export const VendedorSidebar = () => {
               className={({ isActive }) =>
                 `flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
                   isActive
-                    ? "bg-emerald-500 text-white"
+                    ? "bg-emerald-700 text-white"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`
               }
             >
-              <item.icon className="h-4 w-4" />
+              <item.icon className="h-4 w-4" aria-hidden />
               {item.label}
             </NavLink>
           ))}
@@ -58,7 +58,7 @@ export const VendedorSidebar = () => {
             onClick={handleLogout}
             className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-4 w-4" aria-hidden />
             Cerrar Sesión
           </button>
         </div>

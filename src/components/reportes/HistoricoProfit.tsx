@@ -31,6 +31,16 @@ interface EstadoProfit {
   puede_editar: boolean;
 }
 
+// ── equivalencias_categorias_profit() (migración 20q): categoría y línea de Profit → categoría de Odoo ──
+interface EquivCategoria {
+  id: string; empresa: string; empresa_id: string; categoria_profit: string; linea_profit: string; categoria_id: string | null; categoria: string | null;
+  propuesta_id: string | null; propuesta: string | null; metodo: "productos" | "nombre" | null; estado: "propuesto" | "sin_pareja" | "validado";
+  revisado_at: string | null; revisado_por: string | null; lineas: number; venta_usd: number; venta_sin_articulo_usd: number;
+  reparto: { categoria: string; venta_usd: number }[];
+}
+interface EquivCategorias { filas: EquivCategoria[]; candidatas: { id: string; nombre: string; empresas: string[]; productos: number }[]; puede_editar: boolean }
+const METODO: Record<string, string> = { productos: "Propuesta por los artículos en común (la categoría de Odoo de la mayoría de su venta)", nombre: "Propuesta por nombre" };
+
 const SIN_PAREJA = "__profit__";
 const num = (v: unknown) => Number(v ?? 0);
 const fechaCorta = (d: string | null | undefined) => (d ? d.slice(0, 10).split("-").reverse().join("/") : "—");
@@ -48,14 +58,17 @@ export function HistoricoProfit() {
   const { soloLectura, seleccion } = useEmpresa();
   const { toast } = useToast();
   const [estado, setEstado] = useState<EstadoProfit | null>(null);
+  const [equiv, setEquiv] = useState<EquivCategorias | null>(null);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    const { data, error } = await supabase.rpc("estado_historico_profit");
+    const [{ data, error }, eq] = await Promise.all([supabase.rpc("estado_historico_profit"), supabase.rpc("equivalencias_categorias_profit")]);
     if (error) toast({ title: "No se pudo cargar el histórico de Profit", description: error.message, variant: "destructive" });
     else setEstado(data as EstadoProfit);
+    if (eq.error) toast({ title: "No se pudieron cargar las equivalencias de categorías", description: eq.error.message, variant: "destructive" });
+    else setEquiv(eq.data as EquivCategorias);
     setCargando(false);
   }, [toast]);
   useEffect(() => { cargar(); }, [cargar, seleccion]);
@@ -69,11 +82,26 @@ export function HistoricoProfit() {
     cargar();
   };
 
+  const guardarCategorias = async (clave: string, cambios: { id: string; categoria_id: string | null }[]) => {
+    setGuardando(clave);
+    const { error } = await supabase.rpc("guardar_profit_categorias", { p_cambios: cambios });
+    setGuardando(null);
+    if (error) { toast({ title: "No se guardó la equivalencia", description: error.message, variant: "destructive" }); return; }
+    toast({ title: cambios.length === 1 ? "Equivalencia de categoría guardada" : `${cambios.length} equivalencias de categorías validadas` });
+    cargar();
+  };
+
   const fmtN = (v: unknown) => num(v).toLocaleString("es-VE", { maximumFractionDigits: 0 });
   const editable = (v: VendedorProfit) => !!estado?.puede_editar && !soloLectura && v.empresa_id === seleccion;
   const propuestas = useMemo(() => (estado?.vendedores ?? []).filter((v) => v.estado === "propuesto" && editable(v)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [estado, soloLectura, seleccion]);
+  const editableCat = (f: EquivCategoria) => !!equiv?.puede_editar && !soloLectura && f.empresa_id === seleccion;
+  const propuestasCat = useMemo(() => (equiv?.filas ?? []).filter((f) => f.estado === "propuesto" && editableCat(f)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [equiv, soloLectura, seleccion]);
+  // Categorías de Odoo para elegir: las que tienen productos en la empresa de la fila (y la actual)
+  const candidatasDe = (f: EquivCategoria) => (equiv?.candidatas ?? []).filter((c) => c.empresas.includes(f.empresa_id) || c.id === f.categoria_id);
 
   if (cargando && !estado) {
     return <div className="flex items-center gap-2 px-1 py-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Cargando el histórico de Profit…</div>;
@@ -149,6 +177,59 @@ export function HistoricoProfit() {
           ]} />
       {estado.puede_editar && soloLectura && (
         <p className="-mt-1 mb-3 text-xs text-muted-foreground">Para editar las equivalencias elige GUDS o Quirutec en el menú superior.</p>
+      )}
+
+      {equiv && (
+        <>
+          <TablaReporte titulo={<>Equivalencias de categorías <span className="font-normal text-muted-foreground">· categoría y línea de Profit → categoría de Odoo</span></>}
+            filas={equiv.filas} exportar="profit-categorias" limite={12} metrica={(f) => num(f.venta_usd)}
+            acciones={propuestasCat.length > 0 && (
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={!!guardando}
+                onClick={() => guardarCategorias("todas-cat", propuestasCat.map((f) => ({ id: f.id, categoria_id: f.categoria_id })))}>
+                {guardando === "todas-cat" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Confirmar {propuestasCat.length}
+              </Button>
+            )}
+            columnas={[
+              { clave: "profit", titulo: "Profit: categoría › línea", valor: (f) => `${f.categoria_profit} › ${f.linea_profit}`,
+                render: (f) => <span title={`${f.empresa} · ${fmtN(f.lineas)} líneas`}>{f.categoria_profit || "—"} <span className="text-muted-foreground">›</span> {f.linea_profit || "—"} <span className="text-xs font-normal text-muted-foreground">{f.empresa}</span></span> },
+              { clave: "sin_articulo", titulo: "Usa la equivalencia", valor: (f) => num(f.venta_sin_articulo_usd), render: (f) => formatPrice(num(f.venta_sin_articulo_usd)), derecha: true, ocultarMovil: true },
+              { clave: "odoo", titulo: "Categoría en Odoo", valor: (f) => f.categoria ?? "",
+                render: (f) => editableCat(f) ? (
+                  <Select value={f.categoria_id ?? SIN_PAREJA} disabled={!!guardando}
+                    onValueChange={(v) => guardarCategorias(f.id, [{ id: f.id, categoria_id: v === SIN_PAREJA ? null : v }])}>
+                    <SelectTrigger className="h-7 w-56 text-xs" aria-label={`Categoría de Odoo para ${f.categoria_profit} › ${f.linea_profit}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SIN_PAREJA} className="text-xs">Sin equivalencia (nombre de Profit)</SelectItem>
+                      {candidatasDe(f).map((c) => <SelectItem key={c.id} value={c.id} className="text-xs">{c.nombre.trim()}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                ) : <span className={f.categoria ? "" : "text-muted-foreground"} title={f.reparto.length ? `Sus artículos en Odoo: ${f.reparto.map((r) => `${r.categoria.trim()} ${formatPrice(num(r.venta_usd))}`).join(" · ")}` : undefined}>{f.categoria?.trim() ?? "Nombre de Profit"}</span> },
+              { clave: "estado", titulo: "Estado", valor: (f) => ESTADOS[f.estado].texto,
+                render: (f) => (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Badge variant={ESTADOS[f.estado].variante} title={f.revisado_at ? `${f.revisado_por ?? ""} · ${fechaCorta(f.revisado_at)}` : f.metodo ? METODO[f.metodo] : undefined}>{ESTADOS[f.estado].texto}</Badge>
+                    {f.estado === "propuesto" && editableCat(f) && (
+                      <Button size="sm" variant="ghost" className="h-6 px-1.5 text-xs" disabled={!!guardando} onClick={() => guardarCategorias(f.id, [{ id: f.id, categoria_id: f.categoria_id }])}>
+                        {guardando === f.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Confirmar"}
+                      </Button>
+                    )}
+                  </span>
+                ) },
+              { clave: "empresa", titulo: "Empresa", valor: (f) => f.empresa, soloExportar: true },
+              { clave: "categoria_profit", titulo: "Categoría Profit", valor: (f) => f.categoria_profit, soloExportar: true },
+              { clave: "linea_profit", titulo: "Línea Profit", valor: (f) => f.linea_profit, soloExportar: true },
+              { clave: "venta", titulo: "Venta Profit (USD)", valor: (f) => num(f.venta_usd), soloExportar: true },
+              { clave: "propuesta", titulo: "Propuesta de GUDS", valor: (f) => f.propuesta, soloExportar: true },
+              { clave: "metodo", titulo: "Método", valor: (f) => f.metodo, soloExportar: true },
+              { clave: "reparto", titulo: "Artículos en Odoo por categoría", valor: (f) => f.reparto.map((r) => `${r.categoria.trim()}: ${r.venta_usd}`).join(" | "), soloExportar: true },
+            ]} />
+          <p className="-mt-1 mb-3 text-xs text-muted-foreground">
+            En los reportes, Categoría › Línea › Sub-línea son los niveles de la categoría de Odoo. Los artículos de Profit que existen en Odoo (mismo código)
+            toman la categoría que tienen en Odoo; esta equivalencia ubica el resto («Usa la equivalencia»). Sin equivalencia se muestra el nombre de Profit
+            marcado «(Profit)». La clasificación original de Profit sigue disponible en Análisis (Categoría, Línea y Sub-línea Profit).
+            {equiv.puede_editar && soloLectura && " Para editar elige GUDS o Quirutec en el menú superior."}
+          </p>
+        </>
       )}
 
       <div className="grid gap-3 xl:grid-cols-2">

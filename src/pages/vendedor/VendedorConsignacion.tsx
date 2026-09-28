@@ -78,7 +78,7 @@ const VendedorConsignacion = () => {
         <div className="space-y-6">
           <div className="max-w-sm space-y-2">
             <Select value={clienteId} onValueChange={elegirCliente}>
-              <SelectTrigger><SelectValue placeholder="Elegí un cliente con consignación" /></SelectTrigger>
+              <SelectTrigger aria-label="Cliente con consignación"><SelectValue placeholder="Elige un cliente con consignación" /></SelectTrigger>
               <SelectContent>
                 {clientes.map((c) => <SelectItem key={c.cliente_id} value={c.cliente_id}>{c.nombre}</SelectItem>)}
               </SelectContent>

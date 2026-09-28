@@ -85,12 +85,13 @@ const PortalCupones = () => {
       <div className="pb-6 space-y-4">
         {/* Add Coupon */}
         <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="font-semibold mb-3 flex items-center gap-2">
-            <Ticket className="h-5 w-5 text-primary" />
-            ¿Tienes un código?
-          </h3>
+          <h2 className="font-semibold mb-3 flex items-center gap-2">
+            <Ticket className="h-5 w-5 text-primary" aria-hidden />
+            <label htmlFor="cupon-codigo">¿Tienes un código?</label>
+          </h2>
           <div className="flex gap-2">
             <Input
+              id="cupon-codigo"
               placeholder="Ingresa tu código"
               value={codigoInput}
               onChange={(e) => setCodigoInput(e.target.value.toUpperCase())}
@@ -103,21 +104,21 @@ const PortalCupones = () => {
         {/* Coupons List */}
         {loading ? (
           <div className="flex justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <Loader2 className="h-8 w-8 animate-spin text-primary" aria-label="Cargando cupones" />
           </div>
         ) : cupones.length === 0 ? (
           <div className="text-center py-12">
             <div className="h-20 w-20 rounded-full bg-muted mx-auto flex items-center justify-center mb-4">
-              <Gift className="h-10 w-10 text-muted-foreground" />
+              <Gift className="h-10 w-10 text-muted-foreground" aria-hidden />
             </div>
-            <h3 className="text-lg font-semibold mb-2">Sin cupones</h3>
+            <h2 className="text-lg font-semibold mb-2">Sin cupones</h2>
             <p className="text-muted-foreground">
               No tienes cupones disponibles en este momento
             </p>
           </div>
         ) : (
           <div className="space-y-3">
-            <h3 className="font-semibold">Cupones disponibles ({cupones.length})</h3>
+            <h2 className="font-semibold">Cupones disponibles ({cupones.length})</h2>
             
             {cupones.map((cupon) => {
               const daysRemaining = getDaysRemaining(cupon.fecha_fin);
@@ -129,7 +130,7 @@ const PortalCupones = () => {
                   className="bg-card rounded-xl border border-border overflow-hidden"
                 >
                   {/* Coupon Header */}
-                  <div className="bg-gradient-to-r from-primary to-primary/80 p-4 text-white">
+                  <div className="bg-gradient-to-r from-primary to-primary/80 p-4 text-primary-foreground">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center">

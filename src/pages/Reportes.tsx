@@ -15,9 +15,11 @@ import { Panel } from "@/components/datos/FichaCampos";
 import { TablaReporte } from "@/components/reportes/TablaReporte";
 import { HistoricoProfit } from "@/components/reportes/HistoricoProfit";
 import { AnalisisVentas } from "@/components/reportes/AnalisisVentas";
-import { InsigniaProfit, colorFuente } from "@/components/reportes/comun";
+import { MetasVendedores } from "@/components/reportes/MetasVendedores";
+import { CalidadDatos } from "@/components/reportes/CalidadDatos";
+import { InsigniaProfit, colorFuente, periodoComparacion, Variacion, fechaCorta, TEXTO_COMPARACION } from "@/components/reportes/comun";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
-import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { supabase } from "@/lib/supabase";
@@ -30,6 +32,12 @@ type FuenteFila = "odoo" | "profit" | "ambas";
 interface FilaVenta { clave: string; etiqueta: string; detalle: string | null; documentos: number | null; clientes: number | null; cantidad: number | null; bruto_usd: number; nc_usd: number; neto_usd: number; profit_usd: number; financieras_usd: number; fuente: FuenteFila }
 interface FilaCobro { clave: string; etiqueta: string; detalle: string | null; cobros: number; clientes: number; monto_usd: number }
 interface FilaReverso { empresa: string; cliente: string; factura: string; factura_fecha: string; nota: string; nota_fecha: string; neto_usd: number; motivo: string | null; fuente: FuenteFila }
+// reporte_ventas_comparativo (20q): la venta del período, del anterior y del mismo período del año anterior
+interface FilaComparativo { clave: string; etiqueta: string; detalle: string | null; actual_usd: number; anterior_usd: number; anio_anterior_usd: number;
+  var_anterior_usd: number; var_anterior_pct: number | null; var_anio_usd: number; var_anio_pct: number | null;
+  facturas_actual: number | null; facturas_anterior: number | null; facturas_anio_anterior: number | null;
+  profit_actual_usd: number; profit_anterior_usd: number; profit_anio_anterior_usd: number; fuente: FuenteFila;
+  anterior_desde: string; anterior_hasta: string; anio_desde: string; anio_hasta: string }
 interface FilaInv { producto_id: string; sku: string; nombre: string; categoria: string; existencia: number; comprometido: number; disponible: number; vendido_unidades: number; vendido_usd: number; ultima_venta: string | null; cobertura_dias: number | null }
 
 const num = (v: unknown) => Number(v ?? 0);
@@ -69,18 +77,8 @@ function rango(p: Periodo, desde: string, hasta: string): [string, string] {
   }
 }
 // Período anterior para comparar: si son meses completos, los mismos meses justo antes (un año → el año anterior);
-// si no, el mismo número de días justo antes
-function anterior(desde: string, hasta: string): [string, string] {
-  const d = new Date(`${desde}T00:00:00`), h = new Date(`${hasta}T00:00:00`);
-  const finDeMes = new Date(h.getFullYear(), h.getMonth() + 1, 0).getDate() === h.getDate();
-  if (d.getDate() === 1 && finDeMes) {
-    const meses = (h.getFullYear() - d.getFullYear()) * 12 + h.getMonth() - d.getMonth() + 1;
-    return [iso(new Date(d.getFullYear(), d.getMonth() - meses, 1)), iso(new Date(d.getFullYear(), d.getMonth(), 0))];
-  }
-  const dias = Math.round((h.getTime() - d.getTime()) / 86400000) + 1;
-  const fin = new Date(d.getTime() - 86400000), ini = new Date(fin.getTime() - (dias - 1) * 86400000);
-  return [iso(ini), iso(fin)];
-}
+// si no, el mismo número de días justo antes (la misma regla que periodo_comparacion() en la base)
+const anterior = (desde: string, hasta: string) => periodoComparacion(desde, hasta, "anterior");
 const variacion = (actual: number, previo: number) => (previo ? ((actual - previo) / Math.abs(previo)) * 100 : null);
 
 // Color primario del tema ya resuelto: en atributos SVG (fill) var(--primary) no se resuelve
@@ -158,7 +156,7 @@ const Reportes = () => {
   const [desde, hasta] = rango(periodo, desdeP, hastaP);
   const [cargando, setCargando] = useState(true);
   const [ventas, setVentas] = useState<Record<string, FilaVenta[]>>({});
-  const [ventasPrev, setVentasPrev] = useState<FilaVenta[]>([]);
+  const [comparativo, setComparativo] = useState<Record<"empresa" | "vendedor", FilaComparativo[]>>({ empresa: [], vendedor: [] });
   const [meses, setMeses] = useState<FilaVenta[]>([]);
   const [reversos, setReversos] = useState<FilaReverso[]>([]);
   const [verReversos, setVerReversos] = useState(false);
@@ -182,7 +180,7 @@ const Reportes = () => {
   // Carga según la pestaña (cada consulta agrega en el servidor)
   useEffect(() => {
     if (tab === "profit") { setCargando(false); return; }   // la pestaña del histórico carga lo suyo
-    if (tab === "analisis") return;                           // el análisis también (e informa si está cargando)
+    if (tab === "analisis" || tab === "metas" || tab === "calidad") return;   // también (e informan si están cargando)
     let cancelado = false;
     (async () => {
       setCargando(true);
@@ -203,9 +201,11 @@ const Reportes = () => {
           // 2 carriles y las de líneas (categoría y producto, las más pesadas) en un tercero, una tras otra. Si una tabla
           // falla, las demás se muestran igual.
           const venta = (g: string, d: string, h: string) => () => rpc<FilaVenta>("reporte_ventas", { p_desde: d, p_hasta: h, p_agrupar: g, p_fuente: fuente });
+          // Comparativos (20q): período anterior y mismo período del año anterior, con las cifras de reporte_ventas
+          const comparar = (g: string) => () => rpc<FilaComparativo>("reporte_ventas_comparativo", { p_desde: desde, p_hasta: hasta, p_agrupar: g, p_fuente: fuente });
           const livianas: [string, () => Promise<unknown[]>][] = [
-            ["empresa", venta("empresa", desde, hasta)], ["mes", venta("mes", ini12, hasta)], ["prev", venta("empresa", pd, ph)],
-            ["vendedor", venta("vendedor", desde, hasta)], ["cliente", venta("cliente", desde, hasta)],
+            ["empresa", venta("empresa", desde, hasta)], ["mes", venta("mes", ini12, hasta)], ["comp_empresa", comparar("empresa")],
+            ["vendedor", venta("vendedor", desde, hasta)], ["cliente", venta("cliente", desde, hasta)], ["comp_vendedor", comparar("vendedor")],
             ["reversos", () => rpc<FilaReverso>("reporte_reversos", { p_desde: desde, p_hasta: hasta, p_fuente: fuente })],
           ];
           // Por categoría y producto la página solo muestra unidades y venta: sin conteos de documentos ni clientes (mucho más rápido)
@@ -222,7 +222,8 @@ const Reportes = () => {
           await Promise.all([carril(livianas), carril(livianas), carril(pesadas)]);
           if (cancelado) return;
           setVentas(Object.fromEntries(grupos.map((g) => [g, (out[g] ?? []) as FilaVenta[]])));
-          setVentasPrev((out.prev ?? []) as FilaVenta[]); setMeses((out.mes ?? []) as FilaVenta[]); setReversos((out.reversos ?? []) as FilaReverso[]);
+          setComparativo({ empresa: (out.comp_empresa ?? []) as FilaComparativo[], vendedor: (out.comp_vendedor ?? []) as FilaComparativo[] });
+          setMeses((out.mes ?? []) as FilaVenta[]); setReversos((out.reversos ?? []) as FilaReverso[]);
           if (fallas.length) toast({ title: `No se pudieron cargar ${fallas.length} de ${total} partes del reporte`, description: fallas[0], variant: "destructive" });
         } else if (tab === "cobranza") {
           const grupos = ["empresa", "banco", "vendedor", "cliente", "metodo"];
@@ -260,9 +261,22 @@ const Reportes = () => {
     return { neto, bruto, nc, docs, clientes, ticket: docs ? bruto / docs : 0, profit, financieras,
       conProfit: porEmpresa.some((f) => f.fuente !== "odoo"), clientesProfit };
   }, [ventas]);
-  const netoPrev = ventasPrev.reduce((s, f) => s + num(f.neto_usd), 0);
-  const prevConProfit = ventasPrev.some((f) => f.fuente !== "odoo");
+  // Comparativo del total (suma de las empresas visibles)
+  const comp = useMemo(() => {
+    const filas = comparativo.empresa;
+    const s = (c: (f: FilaComparativo) => unknown) => filas.reduce((a, f) => a + num(c(f)), 0);
+    const [ad, ah] = anterior(desde, hasta), [yd, yh] = periodoComparacion(desde, hasta, "anio_anterior");
+    return {
+      actual: s((f) => f.actual_usd), anterior: s((f) => f.anterior_usd), anio: s((f) => f.anio_anterior_usd),
+      facturas: [s((f) => f.facturas_actual), s((f) => f.facturas_anterior), s((f) => f.facturas_anio_anterior)],
+      profit: [s((f) => f.profit_actual_usd), s((f) => f.profit_anterior_usd), s((f) => f.profit_anio_anterior_usd)],
+      periodos: [[desde, hasta], [filas[0]?.anterior_desde ?? ad, filas[0]?.anterior_hasta ?? ah], [filas[0]?.anio_desde ?? yd, filas[0]?.anio_hasta ?? yh]] as [string, string][],
+    };
+  }, [comparativo, desde, hasta]);
+  const netoPrev = comp.anterior;
+  const prevConProfit = Math.abs(comp.profit[1]) > 0.004;
   const varVentas = variacion(totalVentas.neto, netoPrev);
+  const varAnio = variacion(totalVentas.neto, comp.anio);
   const [pdesde, phasta] = anterior(desde, hasta);
   // Primera columna de las tablas de ventas: etiqueta + insignia cuando la fila incluye Profit
   const conInsignia = (texto: string, f: FilaVenta) => (
@@ -313,14 +327,17 @@ const Reportes = () => {
   const fmtN = (v: unknown) => num(v).toLocaleString("es-VE", { maximumFractionDigits: 0 });
   const tonoVar = (v: number | null) => (v === null ? "tenue" as const : v >= 0 ? "positivo" as const : "negativo" as const);
   const textoVar = (v: number | null) => (v === null ? "sin datos del período anterior" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}% vs período anterior`);
+  const textoVarAnio = (v: number | null) => (v === null ? "sin datos del año anterior" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}% vs año anterior`);
 
   const pestanas = (
     <TabsList>
       <TabsTrigger value="ventas">Ventas</TabsTrigger>
       <TabsTrigger value="analisis">Análisis</TabsTrigger>
+      <TabsTrigger value="metas">Metas</TabsTrigger>
       <TabsTrigger value="cobranza">Cobranza</TabsTrigger>
       <TabsTrigger value="inventario"><span className="sm:hidden">Inventario</span><span className="hidden sm:inline">Inventario y rotación</span></TabsTrigger>
       <TabsTrigger value="profit"><span className="sm:hidden">Profit</span><span className="hidden sm:inline">Histórico Profit</span></TabsTrigger>
+      <TabsTrigger value="calidad"><span className="sm:hidden">Calidad</span><span className="hidden sm:inline">Calidad y cuadre</span></TabsTrigger>
     </TabsList>
   );
   const selectorPeriodo = (
@@ -349,22 +366,23 @@ const Reportes = () => {
   return (
     <MainLayout title="Reportes">
       <Tabs value={tab} onValueChange={cambiarTab}>
-        <BarraLista pestanas={pestanas}
+        <BarraLista pestanas={<div className="-mx-1 w-[calc(100%+0.5rem)] overflow-x-auto px-1 [scrollbar-width:none] sm:mx-0 sm:w-auto sm:px-0">{pestanas}</div>}
           filtros={tab === "inventario" ? (
             <Select value={String(diasRot)} onValueChange={(v) => setDiasRot(Number(v))}>
               <SelectTrigger className="h-8 w-52 text-[13px]" aria-label="Ventana de rotación"><SelectValue /></SelectTrigger>
               <SelectContent>{[30, 60, 90, 180].map((d) => <SelectItem key={d} value={String(d)}>Rotación: ventas de {d} días</SelectItem>)}</SelectContent>
             </Select>
-          ) : tab === "profit" ? null : selectorPeriodo}
+          ) : tab === "profit" || tab === "calidad" ? null : selectorPeriodo}
           acciones={cargando ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            : <span className="text-[11px] text-muted-foreground">USD · neto de IVA · fuente {tab === "ventas" || tab === "analisis" ? FUENTES[fuente].replace("Solo ", "") : tab === "profit" ? "Profit (solo lectura)" : "Odoo"}</span>} />
+            : <span className="text-[11px] text-muted-foreground">{tab === "calidad" ? "Solo lectura · se corrige en Odoo"
+              : <>USD · neto de IVA · fuente {tab === "ventas" || tab === "analisis" ? FUENTES[fuente].replace("Solo ", "") : tab === "profit" ? "Profit (solo lectura)" : "Odoo"}</>}</span>} />
 
         <TabsContent value="ventas" className="mt-0">
           <KpiStrip items={[
             { label: "Venta neta", valor: formatPrice(totalVentas.neto),
               detalle: <span className="inline-flex items-center gap-1">{totalVentas.conProfit && <InsigniaProfit />}{textoVar(varVentas)}{!totalVentas.conProfit && prevConProfit ? " (con Profit)" : ""}</span>,
               tono: tonoVar(varVentas),
-              titulo: `Facturas − notas de crédito, sin IVA ni saldos iniciales. Comparado con ${pdesde.split("-").reverse().join("/")} – ${phasta.split("-").reverse().join("/")}` },
+              titulo: `Facturas − notas de crédito, sin IVA ni saldos iniciales. Comparado con ${pdesde.split("-").reverse().join("/")} – ${phasta.split("-").reverse().join("/")} (${textoVar(varVentas)}) y con ${fechaCorta(comp.periodos[2][0])} – ${fechaCorta(comp.periodos[2][1])} (${textoVarAnio(varAnio)})` },
             { label: "Facturado", valor: formatPrice(totalVentas.bruto), detalle: <span className="inline-flex items-center gap-1">{totalVentas.conProfit && <InsigniaProfit />}{fmtN(totalVentas.docs)} facturas</span> },
             { label: "Notas de crédito", valor: formatPrice(totalVentas.nc), tono: totalVentas.nc < 0 ? "negativo" : "normal",
               detalle: totalVentas.conProfit ? <span className="inline-flex items-center gap-1"><InsigniaProfit />con devoluciones</span> : undefined },
@@ -391,6 +409,48 @@ const Reportes = () => {
             · {meses.length ? `${etiquetaMes(meses[0].clave)} – ${etiquetaMes(meses[meses.length - 1].clave)}` : "sin datos"}</span></>}>
             <GraficoVentas datos={meses.map((f) => ({ mes: f.clave, odoo: num(f.neto_usd) - num(f.profit_usd), profit: num(f.profit_usd) }))} formato={formatPrice} />
           </Panel>
+          <div className="grid gap-3 xl:grid-cols-2">
+            <Panel sinPadding titulo={<>Comparativo <span className="font-normal text-muted-foreground">· venta neta</span></>}>
+              <Table containerClassName="max-h-none">
+                <TableHeader><TableRow>
+                  <TableHead>Período</TableHead>
+                  <TableHead className="text-right">Venta neta</TableHead>
+                  <TableHead className="text-right">Variación</TableHead>
+                  <TableHead className="hidden text-right md:table-cell">Facturas</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {([["Actual", comp.actual], [TEXTO_COMPARACION.anterior, comp.anterior], [TEXTO_COMPARACION.anio_anterior, comp.anio]] as [string, number][]).map(([nombre, valor], i) => (
+                    <TableRow key={nombre}>
+                      <TableCell className="py-1.5">
+                        <span className="flex flex-wrap items-center gap-x-1.5">
+                          <span className={i === 0 ? "font-medium" : ""}>{nombre}</span>
+                          {Math.abs(comp.profit[i]) > 0.004 && <InsigniaProfit />}
+                        </span>
+                        <span className="block text-[11px] text-muted-foreground">{fechaCorta(comp.periodos[i][0])} – {fechaCorta(comp.periodos[i][1])}</span>
+                      </TableCell>
+                      <TableCell className={`whitespace-nowrap py-1.5 text-right tabular-nums ${i === 0 ? "font-semibold" : ""}`}>{formatPrice(valor)}</TableCell>
+                      <TableCell className="py-1.5 text-right">{i === 0 ? <span className="text-muted-foreground">—</span> : <Variacion actual={comp.actual} previo={valor} formato={formatPrice} />}</TableCell>
+                      <TableCell className="hidden whitespace-nowrap py-1.5 text-right tabular-nums md:table-cell">{fmtN(comp.facturas[i])}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <p className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">Variación = actual − período comparado (USD y %), con la misma definición de venta neta en los tres períodos. Las cifras con la insignia incluyen el histórico de Profit.</p>
+            </Panel>
+            <TablaReporte titulo={<>Comparativo por vendedor <span className="font-normal text-muted-foreground">· vs anterior y año anterior</span></>}
+              filas={comparativo.vendedor} exportar="ventas-comparativo-vendedor" limite={8} columnas={[
+                { clave: "etiqueta", titulo: "Vendedor", valor: (f) => f.etiqueta,
+                  render: (f) => <span className="inline-flex max-w-full items-center gap-1.5"><span className="truncate">{f.etiqueta}</span>{f.fuente !== "odoo" && <InsigniaProfit />}</span> },
+                { clave: "actual", titulo: "Actual", valor: (f) => num(f.actual_usd), render: (f) => formatPrice(num(f.actual_usd)), derecha: true },
+                { clave: "anterior", titulo: "Anterior", valor: (f) => num(f.anterior_usd), render: (f) => formatPrice(num(f.anterior_usd)), derecha: true, ocultarMovil: true },
+                { clave: "var_ant", titulo: "Var. %", valor: (f) => f.var_anterior_pct, render: (f) => <Variacion soloPct actual={num(f.actual_usd)} previo={num(f.anterior_usd)} formato={formatPrice} />, derecha: true },
+                { clave: "anio", titulo: "Año ant.", valor: (f) => num(f.anio_anterior_usd), render: (f) => formatPrice(num(f.anio_anterior_usd)), derecha: true, ocultarMovil: true },
+                { clave: "var_anio", titulo: "Var. % año", valor: (f) => f.var_anio_pct, render: (f) => <Variacion soloPct actual={num(f.actual_usd)} previo={num(f.anio_anterior_usd)} formato={formatPrice} />, derecha: true },
+                { clave: "var_ant_usd", titulo: "Variación vs anterior (USD)", valor: (f) => num(f.var_anterior_usd), soloExportar: true },
+                { clave: "var_anio_usd", titulo: "Variación vs año anterior (USD)", valor: (f) => num(f.var_anio_usd), soloExportar: true },
+                { clave: "fuente", titulo: "Fuente", valor: (f) => textoFuente(f.fuente), soloExportar: true },
+              ]} />
+          </div>
           <div className="grid gap-3 xl:grid-cols-2">
             {soloLectura && (
               <TablaReporte titulo="Por empresa" filas={ventas.empresa ?? []} exportar="ventas-por-empresa" metrica={(f) => num(f.neto_usd)} columnas={[
@@ -455,6 +515,10 @@ const Reportes = () => {
 
         <TabsContent value="analisis" className="mt-0">
           {tab === "analisis" && <AnalisisVentas desde={desde} hasta={hasta} fuente={fuente} onCargando={setCargando} />}
+        </TabsContent>
+
+        <TabsContent value="metas" className="mt-0">
+          {tab === "metas" && <MetasVendedores desde={desde} hasta={hasta} onCargando={setCargando} />}
         </TabsContent>
 
         <TabsContent value="cobranza" className="mt-0">
@@ -556,6 +620,10 @@ const Reportes = () => {
 
         <TabsContent value="profit" className="mt-0">
           <HistoricoProfit />
+        </TabsContent>
+
+        <TabsContent value="calidad" className="mt-0">
+          {tab === "calidad" && <CalidadDatos onCargando={setCargando} />}
         </TabsContent>
       </Tabs>
     </MainLayout>

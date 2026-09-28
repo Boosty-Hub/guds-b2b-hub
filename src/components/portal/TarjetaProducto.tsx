@@ -54,11 +54,12 @@ export const TarjetaProducto = ({ producto: p, cantidad, favorito, onFavorito, o
   const abrir = () => { sembrarFicha(p); onAbrir?.(); };
 
   return (
-    <article className={cn("relative flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-sm focus-within:ring-2 focus-within:ring-ring/40", className)}
+    <article className={cn("relative flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring", className)}
       data-testid="producto-card" data-producto-id={p.id}
       onMouseEnter={() => precargarFicha(p.id)}>
       <div className="relative aspect-[16/10] overflow-hidden border-b border-border/60 bg-white">
-        <ProductImage imageUrl={foto} alt={p.nombre} size="xl" prioridad={prioridad} className="absolute inset-0 h-full w-full rounded-none border-0" />
+        <ProductImage imageUrl={foto} alt={p.nombre} size="xl" prioridad={prioridad} className="absolute inset-0 h-full w-full rounded-none border-0"
+          sizes="(min-width: 1280px) 280px, (min-width: 1024px) 25vw, (min-width: 768px) 33vw, 50vw" />
         {p.en_oferta && p.porcentaje_descuento ? (
           <span className="absolute left-2 top-2 rounded bg-primary px-1.5 py-0.5 text-xs font-semibold tabular-nums text-primary-foreground">−{p.porcentaje_descuento}%</span>
         ) : null}
@@ -70,7 +71,7 @@ export const TarjetaProducto = ({ producto: p, cantidad, favorito, onFavorito, o
             aria-label={favorito ? `Quitar ${p.nombre} de favoritos` : `Agregar ${p.nombre} a favoritos`}
             className="absolute right-1.5 top-1.5 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-card/90 text-muted-foreground shadow-sm hover:text-foreground"
           >
-            <Heart className={cn("h-4 w-4", favorito && "fill-primary text-primary")} />
+            <Heart className={cn("h-4 w-4", favorito && "fill-primary text-primary")} aria-hidden />
           </button>
         )}
       </div>
@@ -86,7 +87,7 @@ export const TarjetaProducto = ({ producto: p, cantidad, favorito, onFavorito, o
         </h3>
         <p className="mt-1 truncate text-xs text-muted-foreground">
           {empaqueTexto(p)}
-          {!hay ? null : pocas ? <span className="text-amber-700"> · quedan {Math.floor(disponible).toLocaleString("es-VE")}</span>
+          {!hay ? null : pocas ? <span className="text-amber-700 dark:text-amber-400"> · quedan {Math.floor(disponible).toLocaleString("es-VE")}</span>
             : Number.isFinite(disponible) ? <span> · {Math.floor(disponible).toLocaleString("es-VE")} {unidades > 1 ? "und. " : ""}disp.</span> : null}
         </p>
 
@@ -105,15 +106,15 @@ export const TarjetaProducto = ({ producto: p, cantidad, favorito, onFavorito, o
               <p className="flex h-10 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">Agotado</p>
             ) : cantidad === 0 ? (
               <Button variant="outline" className="h-10 w-full gap-1.5 border-foreground/15 font-medium" onClick={onAgregar} aria-label={`Agregar ${p.nombre} al carrito`}>
-                <Plus className="h-4 w-4" />Agregar
+                <Plus className="h-4 w-4" aria-hidden />Agregar
               </Button>
             ) : (
               <div className="flex h-10 items-center justify-between rounded-md bg-foreground text-background">
                 <button type="button" className="flex h-10 w-10 items-center justify-center rounded-l-md hover:bg-background/10" onClick={() => onCambiar(-1)}
-                  aria-label={`Quitar uno de ${p.nombre}`}><Minus className="h-4 w-4" /></button>
+                  aria-label={`Quitar uno de ${p.nombre}`}><Minus className="h-4 w-4" aria-hidden /></button>
                 <span className="text-sm font-semibold tabular-nums" aria-live="polite">{cantidad}<span className="hidden sm:inline"> en carrito</span></span>
                 <button type="button" className="flex h-10 w-10 items-center justify-center rounded-r-md hover:bg-background/10" onClick={() => onCambiar(1)}
-                  aria-label={`Agregar uno de ${p.nombre}`}><Plus className="h-4 w-4" /></button>
+                  aria-label={`Agregar uno de ${p.nombre}`}><Plus className="h-4 w-4" aria-hidden /></button>
               </div>
             )}
           </div>

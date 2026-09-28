@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { TarjetaEntrega } from "@/components/delivery/TarjetaEntrega";
 import { CierreEntregaDialog } from "@/components/delivery/CierreEntregaDialog";
 import { useMisEntregas } from "@/components/delivery/useMisEntregas";
+import { usePingPosicion } from "@/components/delivery/usePingPosicion";
 import { ABIERTAS, type EntregaReparto } from "@/components/delivery/entregas";
 
 // Mis entregas: los documentos de entrega de Odoo asignados al repartidor, con dirección, teléfono y productos;
@@ -20,6 +21,8 @@ const DeliveryEntregas = () => {
 
   const pendientes = entregas.filter((e) => ABIERTAS.includes(e.estado));
   const completadas = entregas.filter((e) => !ABIERTAS.includes(e.estado));
+  // Seguimiento (20p): con una entrega en camino, la última posición llega a la oficina (GPS de bajo consumo)
+  usePingPosicion(entregas.some((e) => e.estado === "en_camino"));
 
   const salir = async (e: EntregaReparto) => {
     setSaliendo(e.id);

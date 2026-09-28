@@ -152,7 +152,7 @@ const PortalCatalogo = () => {
       {texto && (
         <button type="button" onClick={() => { setTexto(""); ultimoEnviado.current = ""; cambiarParams({ q: null }); }}
           className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Borrar búsqueda">
-          <X className="h-4 w-4" />
+          <X className="h-4 w-4" aria-hidden />
         </button>
       )}
     </div>
@@ -181,11 +181,11 @@ const PortalCatalogo = () => {
           <div className="flex gap-2">
             {buscador(inputMovil, "buscar-catalogo-movil")}
             <Button variant="outline" size="icon" className="relative h-10 w-10 shrink-0" onClick={() => setFiltrosAbiertos(true)} aria-label="Filtros y orden">
-              <SlidersHorizontal className="h-4 w-4" />
+              <SlidersHorizontal className="h-4 w-4" aria-hidden />
               {(soloDisponibles || orden !== "relevancia") && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" aria-hidden />}
             </Button>
           </div>
-          <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] md:-mx-6 md:px-6 [&::-webkit-scrollbar]:hidden" aria-label="Categorías">
+          <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] md:-mx-6 md:px-6 [&::-webkit-scrollbar]:hidden" role="group" aria-label="Categorías">
             {chipCategoria(null, "Todos")}
             {(categorias ?? []).map((c) => chipCategoria(c.id, c.etiqueta, c.nombre))}
           </div>
@@ -194,7 +194,7 @@ const PortalCatalogo = () => {
     >
       <div ref={contenedor} className="lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8" data-catalogo>
         {/* Categorías (escritorio) */}
-        <aside className="hidden lg:block">
+        <aside className="hidden lg:block" aria-label="Filtros del catálogo">
           <div className="sticky top-[5.5rem]">
             <h1 className="text-2xl font-semibold tracking-tight">Catálogo</h1>
             <p className="mt-1 text-sm text-muted-foreground tabular-nums">{nTodos != null ? `${nTodos} productos a la venta` : "Cargando…"}</p>
@@ -260,6 +260,8 @@ const PortalCatalogo = () => {
             </div>
           ) : (
             <>
+              {/* Las tarjetas llevan su nombre en h3: este h2 mantiene el orden de encabezados para los lectores de pantalla */}
+              <h2 className="sr-only">Productos</h2>
               <div className={cn("grid grid-cols-2 gap-3 transition-opacity md:grid-cols-3 lg:gap-4 xl:grid-cols-4", desactualizada && "opacity-60")}
                 aria-busy={desactualizada || undefined} data-testid="catalogo-grilla">
                 {productos.map((p, i) => {
@@ -284,7 +286,7 @@ const PortalCatalogo = () => {
                     {cargandoMas && <Loader2 className="h-4 w-4 animate-spin" />}Cargar más
                   </Button>
                 )}
-                {error && productos.length > 0 && <p className="text-sm text-destructive">{error}</p>}
+                {error && productos.length > 0 && <p className="text-sm text-destructive" role="alert">{error}</p>}
               </div>
             </>
           )}

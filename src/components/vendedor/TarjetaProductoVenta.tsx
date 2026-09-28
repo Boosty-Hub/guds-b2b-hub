@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
 import { opcionesDe, fechaCorta, type OpcionVenta, type ProductoVendedor } from "./tipos";
+import { flechasGrupoRadio } from "@/components/portal/accesibilidad";
 
 // Tarjeta de producto de la venta rápida: precio del cliente (servidor), IVA, disponible, empaques y un selector de cantidad
 // con número editable (no solo +/−: pedir 48 unidades no son 47 toques).
@@ -28,7 +29,7 @@ export function SelectorCantidad({ valor, max, onCambiar, etiqueta, className }:
       </button>
       <input
         type="text" inputMode="numeric" pattern="[0-9]*" value={texto} aria-label={`Cantidad de ${etiqueta}`}
-        className="h-9 w-11 min-w-0 border-x border-input bg-transparent text-center text-sm font-semibold tabular-nums outline-none focus:bg-muted/40"
+        className="h-9 w-11 min-w-0 border-x border-input bg-transparent text-center text-sm font-semibold tabular-nums outline-none focus:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         onChange={(e) => setTexto(e.target.value.replace(/\D/g, "").slice(0, 6))}
         onBlur={(e) => confirmar(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
@@ -92,11 +93,12 @@ export function TarjetaProductoVenta({ p, cantidadDe, maxDe, onCantidad, sugerid
           </p>
         )}
         {opciones.length > 1 && (
-          <div className="mt-1.5 flex flex-wrap gap-1" role="radiogroup" aria-label="Presentación">
-            {opciones.map((o) => (
+          <div className="mt-1.5 flex flex-wrap gap-1" role="radiogroup" aria-label="Presentación" onKeyDown={flechasGrupoRadio}>
+            {opciones.map((o, idx) => (
               <button key={o.tipo_empaque_id ?? "u"} type="button" role="radio" aria-checked={o.tipo_empaque_id === sel}
+                tabIndex={o.tipo_empaque_id === sel || (idx === 0 && !opciones.some((x) => x.tipo_empaque_id === sel)) ? 0 : -1}
                 onClick={() => setSel(o.tipo_empaque_id)}
-                className={cn("rounded-full border px-2 py-0.5 text-[11px]", o.tipo_empaque_id === sel ? "border-emerald-500 bg-emerald-500/10 font-medium text-emerald-800 dark:text-emerald-300" : "border-border text-muted-foreground")}>
+                className={cn("inline-flex min-h-6 items-center rounded-full border px-2 py-0.5 text-[11px]", o.tipo_empaque_id === sel ? "border-emerald-700 bg-emerald-500/10 font-medium text-emerald-800 dark:text-emerald-300" : "border-border text-muted-foreground")}>
                 {o.nombre ?? "Unidad"}{o.unidades > 1 ? ` ×${o.unidades}` : ""}{cantidadDe(o) > 0 ? ` · ${cantidadDe(o)}` : ""}
               </button>
             ))}
@@ -111,7 +113,7 @@ export function TarjetaProductoVenta({ p, cantidadDe, maxDe, onCantidad, sugerid
         {cant > 0 ? (
           <SelectorCantidad valor={cant} max={Math.max(cant, max)} onCambiar={(n) => onCantidad(opcion, n)} etiqueta={p.nombre} />
         ) : sugerida && sugerida > 0 && max > 0 ? (
-          <Button type="button" size="sm" className="h-9 w-full gap-1 bg-emerald-500 px-2 text-white hover:bg-emerald-600" disabled={agotado}
+          <Button type="button" size="sm" className="h-9 w-full gap-1 bg-emerald-700 px-2 text-white hover:bg-emerald-800" disabled={agotado}
             onClick={() => onCantidad(opcion, Math.min(max, sugerida))} data-testid="agregar-sugerida">
             <Plus className="h-3.5 w-3.5" />{Math.min(max, sugerida)}
           </Button>

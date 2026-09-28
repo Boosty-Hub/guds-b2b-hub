@@ -68,7 +68,7 @@ export function DeclararVentaForm({ almacenId, stock, onDeclarado }: Props) {
 
   return (
     <div className="space-y-4">
-      <Input placeholder="Buscar producto por nombre o SKU..." value={search} onChange={(e) => setSearch(e.target.value)} />
+      <Input placeholder="Buscar producto por nombre o SKU..." aria-label="Buscar producto por nombre o SKU" value={search} onChange={(e) => setSearch(e.target.value)} />
       <div className="max-h-80 overflow-y-auto rounded-lg border border-border">
         <Table>
           <TableHeader>
@@ -88,7 +88,8 @@ export function DeclararVentaForm({ almacenId, stock, onDeclarado }: Props) {
                 <TableCell className="text-right text-muted-foreground">{s.cantidad}</TableCell>
                 <TableCell className="text-right">
                   <Input
-                    type="number" min="0" max={s.cantidad} step="1" className="h-8 text-right"
+                    type="number" min="0" max={s.cantidad} step="1" className="h-8 text-right" inputMode="numeric"
+                    aria-label={`Cantidad vendida de ${s.nombre}`}
                     value={cantidades[s.producto_id] || ""}
                     onChange={(e) => setCantidad(s.producto_id, parseInt(e.target.value) || 0, s.cantidad)}
                   />
@@ -102,8 +103,8 @@ export function DeclararVentaForm({ almacenId, stock, onDeclarado }: Props) {
         </Table>
       </div>
       <div className="space-y-2">
-        <Label>Notas (opcional)</Label>
-        <Textarea rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Detalle adicional para el administrador..." />
+        <Label htmlFor="consignacion-notas">Notas (opcional)</Label>
+        <Textarea id="consignacion-notas" rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Detalle adicional para el administrador..." />
       </div>
       <Button onClick={declarar} disabled={saving || items.length === 0} className="gap-2">
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Declarar venta ({items.length} producto{items.length !== 1 ? "s" : ""})

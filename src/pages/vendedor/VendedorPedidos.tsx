@@ -129,10 +129,10 @@ const ListaPedidos = () => {
 
       <BarraLista busqueda={q} onBusqueda={setQ} placeholder="Buscar pedido o cliente..."
         contador={loading ? undefined : `${filtradas.length} registros`}
-        acciones={<Button size="sm" className="gap-1.5 bg-emerald-500 hover:bg-emerald-600" onClick={() => navigate("/vendedor/pedidos/nuevo")} data-testid="nuevo-pedido"><Plus className="h-3.5 w-3.5" />Nuevo Pedido</Button>} />
+        acciones={<Button size="sm" className="gap-1.5 bg-emerald-700 hover:bg-emerald-800" onClick={() => navigate("/vendedor/pedidos/nuevo")} data-testid="nuevo-pedido"><Plus className="h-3.5 w-3.5" />Nuevo Pedido</Button>} />
 
       <div className="rounded-lg border border-border bg-card">
-        {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
+        {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div>
         : ordenes.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay pedidos. Crea el primero con "Nuevo Pedido".</div>
         : filtradas.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Sin resultados{texto ? ` para "${q.trim()}"` : ""}</div>
         : (
@@ -181,7 +181,7 @@ const ListaPedidos = () => {
                   {pagination.pageItems.map((o) => (
                     <TableRow key={o.id} className="cursor-pointer" onClick={() => abrirDetalle(o)} data-testid="pedido-fila">
                       <TableCell className="whitespace-nowrap">
-                        <Link to={`/vendedor/pedidos/${o.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-emerald-600 hover:underline">{o.numero}</Link>
+                        <Link to={`/vendedor/pedidos/${o.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-emerald-700 hover:underline">{o.numero}</Link>
                         {antes(o) && <span className="ml-1.5 text-[11px] text-muted-foreground">antes {antes(o)}</span>}
                         {(o.ediciones ?? 0) > 0 && <span className="ml-1.5">{marcaEditado(o)}</span>}
                       </TableCell>

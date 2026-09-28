@@ -26,7 +26,9 @@ const RE_DIARIO_ND = /nota\s+(de\s+)?d[eé]bito|^nd\s/i;
 const CAMPOS_CLIENTE = ['name', 'vat', 'rif', 'cedula', 'email', 'phone', 'mobile', 'street', 'street2', 'city', 'state_id',
   'partner_latitude', 'partner_longitude', 'is_company', 'residence_type', 'user_id', 'property_payment_term_id',
   'credit_limit', 'credit_limit_value', 'econ_act_license', 'website', 'comment', 'create_date', 'active', 'company_id', 'write_date',
-  'property_product_pricelist'];
+  'property_product_pricelist',
+  // Clasificación comercial (R2 · 20q): tipo de cliente = Industria; canal y segmento del contacto; etiquetas
+  'industry_id', 'eu_partner_channel_id', 'eu_partner_segment_id', 'channel', 'segmentation', 'category_id'];
 // Reglas de listas de precios (fase 20a)
 const CAMPOS_REGLA = ['pricelist_id', 'applied_on', 'product_tmpl_id', 'product_id', 'categ_id', 'compute_price', 'fixed_price',
   'percent_price', 'price_discount', 'price_surcharge', 'base', 'min_quantity', 'date_start', 'date_end'];
@@ -114,6 +116,9 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       diasPlazo.set(t, Math.max(diasPlazo.get(t) ?? 0, l.nb_days || 0));
     }
     const nombrePlazo = new Map(plazos.map((p) => [p.id, typeof p.name === 'object' ? (p.name.es_VE || p.name.en_US) : p.name]));
+    // Etiquetas de contacto de Odoo (clasificación de clientes, R2 · 20q)
+    const etiquetaCliente = new Map((await odoo.leerTodo('res.partner.category', [], ['name']))
+      .map((t) => [t.id, txt(typeof t.name === 'object' ? (t.name.es_VE || t.name.en_US) : t.name)]));
     // Vendedores de Odoo (res.users) → usuarios de GUDS por nombre
     const usuariosGuds = await sql(`select id, nombre, apellido from usuarios where coalesce(activo, true)`);
     const usuarioPorNombre = new Map();
@@ -140,7 +145,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       d.proveedores = await odoo.leerTodo('res.partner', [['supplier_rank', '>', 0], ...deEmpresa], CAMPOS_PROVEEDOR, { empresa: cid });
       d.productos = await odoo.leerTodo('product.template', deEmpresa,
         ['name', 'default_code', 'description_sale', 'categ_id', 'uom_id', 'type', 'is_storable', 'sale_ok', 'active', 'company_id', 'taxes_id', 'write_date',
-          'standard_price'], { empresa: cid });
+          'standard_price', 'product_brand_id'], { empresa: cid });
       // Costo promedio (standard_price depende de la empresa, fase 20j): los productos compartidos se leen con la primera
       // empresa; en las demás se lee aparte su costo con el contexto de cada una
       d.costosCompartidos = i > 0 ? await odoo.leerTodo('product.template', [['company_id', '=', false]], ['standard_price'], { empresa: cid }) : [];
@@ -684,6 +689,26 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
             excluded.notas, excluded.activo, coalesce(excluded.lista_precios_id, clientes.lista_precios_id))`);
       }
 
+      // Clasificación comercial de Odoo (R2 · 20q): tipo de cliente (Industria), canal, segmento y etiquetas del contacto.
+      // Se mantiene en Odoo (el espejo impide editarla en GUDS); solo se escriben las filas que cambian.
+      const clasifClientes = d.clientes.map((p) => ({
+        odoo_id: p.id, tipo_cliente: txt(m2oNombre(p.industry_id), 100),
+        canal: txt(m2oNombre(p.eu_partner_channel_id), 100) || txt(p.channel, 100),
+        segmento: txt(m2oNombre(p.eu_partner_segment_id), 100) || txt(p.segmentation, 100),
+        etiquetas: (Array.isArray(p.category_id) ? p.category_id : []).map((id) => etiquetaCliente.get(id)).filter(Boolean),
+      }));
+      for (const lote of lotes(clasifClientes, 1000)) {
+        await escribir(`
+          with x as (
+            select x.odoo_id, x.tipo_cliente, x.canal, x.segmento,
+              case when jsonb_array_length(x.etiquetas) > 0 then array(select jsonb_array_elements_text(x.etiquetas)) end etiquetas
+            from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, tipo_cliente text, canal text, segmento text, etiquetas jsonb)
+          )
+          update clientes c set tipo_cliente = x.tipo_cliente, canal = x.canal, segmento = x.segmento, etiquetas = x.etiquetas
+          from x
+          where c.odoo_id = x.odoo_id and (c.tipo_cliente, c.canal, c.segmento, c.etiquetas) is distinct from (x.tipo_cliente, x.canal, x.segmento, x.etiquetas)`);
+      }
+
       for (const lote of lotes(productos, 500)) {
         await escribir(`
           with x as (
@@ -725,6 +750,15 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
               and not productos.oculto_tienda,
             excluded.tipo_odoo, excluded.vendible, excluded.controla_stock, excluded.impuesto_pct, excluded.impuesto_nombre)`);
       }
+
+      // Marca del producto en Odoo (R2 · 20q): se mantiene en Odoo; solo se escriben las filas que cambian
+      for (const lote of lotes(d.productos.map((p) => ({ odoo_id: p.id, marca: txt(m2oNombre(p.product_brand_id), 100) })), 1000)) {
+        await escribir(`
+          update productos p set marca = x.marca
+          from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, marca text)
+          where p.odoo_id = x.odoo_id and p.marca is distinct from x.marca`);
+      }
+      log(`    clasificación: ${clasifClientes.filter((c) => c.tipo_cliente).length} clientes con tipo · ${clasifClientes.filter((c) => c.canal || c.segmento).length} con canal o segmento · ${d.productos.filter((p) => m2oId(p.product_brand_id)).length} productos con marca`);
 
       // Costo promedio de Odoo por empresa (fase 20j): solo las filas que cambian; cada valor nuevo queda en el historial.
       // No va en productos.costo: esa columna la lee el catálogo público y queda siempre vacía.

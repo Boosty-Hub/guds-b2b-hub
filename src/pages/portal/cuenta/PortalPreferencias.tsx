@@ -4,6 +4,7 @@ import { PortalPagina } from "@/components/portal/PortalPagina";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useTemaPortal, type TemaPortal } from "@/hooks/useTemaPortal";
 import { cn } from "@/lib/utils";
+import { flechasGrupoRadio } from "@/components/portal/accesibilidad";
 
 // Preferencias del portal (F6), todas reales y guardadas en este navegador para el usuario: el tema (claro, oscuro o el
 // del sistema, con la clase `dark`) y la moneda en que se muestran los montos (el shell la recuerda por usuario).
@@ -24,6 +25,7 @@ const Opcion = ({ activa, onClick, children, testId }: { activa: boolean; onClic
     type="button"
     role="radio"
     aria-checked={activa}
+    tabIndex={activa ? 0 : -1}
     onClick={onClick}
     data-testid={testId}
     className={cn(
@@ -47,12 +49,12 @@ const PortalPreferencias = () => {
       descripcion="Se guardan en este navegador para tu usuario.">
       <div className="space-y-4 pb-2">
         <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="pref-tema">
-          <h2 id="pref-tema" className="mb-3 flex items-center gap-2 font-semibold"><Palette className="h-4 w-4" />Apariencia</h2>
-          <div className="space-y-2" role="radiogroup" aria-labelledby="pref-tema">
+          <h2 id="pref-tema" className="mb-3 flex items-center gap-2 font-semibold"><Palette className="h-4 w-4" aria-hidden />Apariencia</h2>
+          <div className="space-y-2" role="radiogroup" aria-labelledby="pref-tema" onKeyDown={flechasGrupoRadio}>
             {TEMAS.map((t) => (
               <Opcion key={t.id} activa={tema === t.id} onClick={() => setTema(t.id)} testId={`tema-${t.id}`}>
                 <span className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted"><t.icono className="h-4 w-4" /></span>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted"><t.icono className="h-4 w-4" aria-hidden /></span>
                   <span className="min-w-0">
                     <span className="block font-medium">{t.nombre}</span>
                     <span className="block text-xs text-muted-foreground">{t.detalle}</span>
@@ -64,12 +66,12 @@ const PortalPreferencias = () => {
         </section>
 
         <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="pref-moneda">
-          <h2 id="pref-moneda" className="mb-3 flex items-center gap-2 font-semibold"><DollarSign className="h-4 w-4" />Moneda de los montos</h2>
-          <div className="space-y-2" role="radiogroup" aria-labelledby="pref-moneda">
+          <h2 id="pref-moneda" className="mb-3 flex items-center gap-2 font-semibold"><DollarSign className="h-4 w-4" aria-hidden />Moneda de los montos</h2>
+          <div className="space-y-2" role="radiogroup" aria-labelledby="pref-moneda" onKeyDown={flechasGrupoRadio}>
             {MONEDAS.map((m) => (
               <Opcion key={m.id} activa={currency === m.id} onClick={() => setCurrency(m.id)} testId={`moneda-pref-${m.id.toLowerCase()}`}>
                 <span className="flex min-w-0 items-center gap-3">
-                  <span className="w-9 text-center text-base font-bold text-muted-foreground">{m.simbolo}</span>
+                  <span className="w-9 text-center text-base font-bold text-muted-foreground" aria-hidden>{m.simbolo}</span>
                   <span className="font-medium">{m.nombre}</span>
                 </span>
               </Opcion>

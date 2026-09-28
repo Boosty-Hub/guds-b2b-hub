@@ -171,7 +171,7 @@ const PortalFacturaDetalle = () => {
             {f.motivo_nota && !anulada && <p className="mt-3 text-sm text-muted-foreground">Motivo: {f.motivo_nota}</p>}
           </section>
 
-          <aside className="lg:sticky lg:top-[5.5rem] lg:col-start-2 lg:row-span-4 lg:row-start-1">{panelSaldo}</aside>
+          <aside className="lg:sticky lg:top-[5.5rem] lg:col-start-2 lg:row-span-4 lg:row-start-1" aria-label="Saldo de la factura">{panelSaldo}</aside>
 
           {/* Renglones */}
           <Panel className="lg:col-start-1" titulo="Detalle" descripcion={`${f.items.length} ${f.items.length === 1 ? "renglón" : "renglones"} · montos en ${enBs ? "bolívares" : "dólares"}`} cuerpoClassName="p-0 sm:p-0">

@@ -93,7 +93,7 @@ const VendedorPedidoNuevo = () => {
       <VendedorLayout title="Nuevo pedido" pantallaCompletaMovil>
         <BarraSuperiorMovil titulo="Nuevo pedido" volverA="/vendedor/pedidos" />
         <div className="flex flex-col items-center gap-2 py-16 text-sm text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
+          <Loader2 className="h-6 w-6 animate-spin text-emerald-700" />
           {cambiando ? `Cambiando a ${empresas.find((e) => e.id === empresaCliente)?.nombre_corto ?? "la empresa del cliente"}…` : null}
         </div>
       </VendedorLayout>
@@ -419,28 +419,28 @@ function TomarPedido({ cliente, usuarioId, duplicarId, onCambiarCliente, onDupli
         </div>
         <div className="flex gap-1.5" role="tablist">
           <button type="button" role="tab" aria-selected={tab === "catalogo"} onClick={() => setTab("catalogo")} data-testid="tab-catalogo"
-            className={cn("flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border text-sm font-medium", tab === "catalogo" ? "border-emerald-500 bg-emerald-500 text-white" : "border-border text-muted-foreground")}>
+            className={cn("flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border text-sm font-medium", tab === "catalogo" ? "border-emerald-700 bg-emerald-700 text-white" : "border-border text-muted-foreground")}>
             <Package className="h-4 w-4" />Catálogo
           </button>
           <button type="button" role="tab" aria-selected={tab === "compra"} onClick={() => setTab("compra")} data-testid="tab-compra"
-            className={cn("flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border text-sm font-medium", tab === "compra" ? "border-emerald-500 bg-emerald-500 text-white" : "border-border text-muted-foreground")}>
+            className={cn("flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border text-sm font-medium", tab === "compra" ? "border-emerald-700 bg-emerald-700 text-white" : "border-border text-muted-foreground")}>
             <History className="h-4 w-4" />Lo que compra{frecuentes.length ? ` (${frecuentes.length})` : ""}
           </button>
         </div>
         {tab === "catalogo" && (
           <div className="flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none]" data-testid="chips-categoria">
             <button type="button" onClick={() => setCategoria(null)}
-              className={cn("shrink-0 rounded-full border px-2.5 py-1 text-xs", !categoria ? "border-emerald-500 bg-emerald-500/10 font-medium text-emerald-800 dark:text-emerald-300" : "border-border text-muted-foreground")}>
+              className={cn("shrink-0 rounded-full border px-2.5 py-1 text-xs", !categoria ? "border-emerald-700 bg-emerald-500/10 font-medium text-emerald-800 dark:text-emerald-300" : "border-border text-muted-foreground")}>
               Todas
             </button>
             {categorias.map((c) => (
               <button key={c.id} type="button" onClick={() => setCategoria(categoria === c.id ? null : c.id)}
-                className={cn("shrink-0 rounded-full border px-2.5 py-1 text-xs", categoria === c.id ? "border-emerald-500 bg-emerald-500/10 font-medium text-emerald-800 dark:text-emerald-300" : "border-border text-muted-foreground")}>
+                className={cn("shrink-0 rounded-full border px-2.5 py-1 text-xs", categoria === c.id ? "border-emerald-700 bg-emerald-500/10 font-medium text-emerald-800 dark:text-emerald-300" : "border-border text-muted-foreground")}>
                 {c.etiqueta} <span className="text-muted-foreground">{c.n}</span>
               </button>
             ))}
             <button type="button" onClick={() => setSoloDisp((v) => !v)} aria-pressed={soloDisp}
-              className={cn("shrink-0 rounded-full border px-2.5 py-1 text-xs", soloDisp ? "border-emerald-500 bg-emerald-500/10 font-medium text-emerald-800 dark:text-emerald-300" : "border-border text-muted-foreground")}>
+              className={cn("shrink-0 rounded-full border px-2.5 py-1 text-xs", soloDisp ? "border-emerald-700 bg-emerald-500/10 font-medium text-emerald-800 dark:text-emerald-300" : "border-border text-muted-foreground")}>
               Solo con disponible
             </button>
           </div>
@@ -449,8 +449,8 @@ function TomarPedido({ cliente, usuarioId, duplicarId, onCambiarCliente, onDupli
 
       {tab === "catalogo" ? (
         <div className="overflow-hidden rounded-lg border border-border bg-card">
-          {errorCat ? <p className="p-4 text-sm text-destructive">No se pudo cargar el catálogo: {errorCat}</p>
-            : cargandoCat && productos.length === 0 ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
+          {errorCat ? <p className="p-4 text-sm text-destructive" role="alert">No se pudo cargar el catálogo: {errorCat}</p>
+            : cargandoCat && productos.length === 0 ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div>
             : productos.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground" data-testid="catalogo-vacio">Sin productos{qDeb ? ` para "${qDeb}"` : ""}.</p>
             : (
               <>
@@ -483,7 +483,7 @@ function TomarPedido({ cliente, usuarioId, duplicarId, onCambiarCliente, onDupli
             </div>
           )}
           <div className="overflow-hidden rounded-lg border border-border bg-card">
-            {!compras ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
+            {!compras ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div>
               : frecuentes.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground">Este cliente aún no tiene compras registradas.</p>
               : (
                 <>
@@ -502,7 +502,7 @@ function TomarPedido({ cliente, usuarioId, duplicarId, onCambiarCliente, onDupli
       envioInvalido={envioInvalido} cot={cot} cliente={cliente} />
   );
   const botonEnviar = (
-    <Button className="h-11 w-full gap-2 bg-emerald-500 text-base text-white hover:bg-emerald-600" onClick={enviar}
+    <Button className="h-11 w-full gap-2 bg-emerald-700 text-base text-white hover:bg-emerald-800" onClick={enviar}
       disabled={enviando || nProductos === 0 || envioInvalido || !!cot.error} data-testid="enviar-pedido">
       {enviando ? <><Loader2 className="h-4 w-4 animate-spin" />Enviando…</> : <><ShoppingCart className="h-4 w-4" />Enviar pedido</>}
     </Button>
@@ -521,7 +521,7 @@ function TomarPedido({ cliente, usuarioId, duplicarId, onCambiarCliente, onDupli
         {/* Barra fija: productos y total; abre la revisión */}
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]" data-testid="barra-pedido">
           <button type="button" onClick={() => setRevisar(true)} disabled={nProductos === 0}
-            className="flex h-12 w-full items-center justify-between gap-3 rounded-lg bg-emerald-500 px-4 text-white disabled:bg-muted disabled:text-muted-foreground" data-testid="revisar-pedido">
+            className="flex h-12 w-full items-center justify-between gap-3 rounded-lg bg-emerald-700 px-4 text-white disabled:bg-muted disabled:text-muted-foreground" data-testid="revisar-pedido">
             <span className="text-sm">{nProductos === 0 ? "Agrega productos" : `${nProductos} ${nProductos === 1 ? "producto" : "productos"}`}</span>
             <span className="flex items-center gap-2 text-base font-semibold tabular-nums">{totalTexto}{nProductos > 0 && <ChevronRight className="h-4 w-4" />}</span>
           </button>
@@ -550,7 +550,7 @@ function TomarPedido({ cliente, usuarioId, duplicarId, onCambiarCliente, onDupli
         {avisoDuplicado}
         <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-3 xl:grid-cols-[minmax(0,1fr)_400px]">
           {catalogo}
-          <aside className="sticky top-14 max-h-[calc(100vh-4.5rem)] overflow-y-auto rounded-lg border border-border bg-card" data-testid="panel-pedido">
+          <aside className="sticky top-14 max-h-[calc(100vh-4.5rem)] overflow-y-auto rounded-lg border border-border bg-card" data-testid="panel-pedido" aria-label="Resumen del pedido">
             <div className="flex items-center justify-between border-b border-border bg-muted/30 px-3 py-2">
               <h2 className="text-[13px] font-semibold">Pedido <span className="font-normal text-muted-foreground">({nProductos})</span></h2>
               {nProductos > 0 && <button type="button" onClick={vaciar} className="text-xs text-muted-foreground underline">Vaciar</button>}
@@ -614,9 +614,9 @@ function PanelPedido({ lineas, lineaDe, onCambiar, borrador, actualizar, envioIn
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="min-w-0 space-y-1">
-          <Label className="text-xs">Forma de pago</Label>
+          <Label htmlFor="pedido-forma-pago" className="text-xs">Forma de pago</Label>
           <Select value={borrador.metodo} onValueChange={(v) => actualizar((b) => ({ ...b, metodo: v }))}>
-            <SelectTrigger className="h-9" data-testid="forma-pago"><SelectValue /></SelectTrigger>
+            <SelectTrigger id="pedido-forma-pago" aria-label="Forma de pago" className="h-9" data-testid="forma-pago"><SelectValue /></SelectTrigger>
             <SelectContent>{METODOS.map((m) => <SelectItem key={m.valor} value={m.valor}>{m.etiqueta}</SelectItem>)}</SelectContent>
           </Select>
         </div>

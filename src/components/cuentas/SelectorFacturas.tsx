@@ -69,7 +69,7 @@ export function SelectorFacturas({ facturas, montoDisponible, asignaciones, onCh
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-10"></TableHead>
+              <TableHead className="w-10"><span className="sr-only">Incluir</span></TableHead>
               <TableHead>Factura</TableHead>
               <TableHead>Fecha</TableHead>
               <TableHead className="text-right">Saldo</TableHead>
@@ -82,7 +82,7 @@ export function SelectorFacturas({ facturas, montoDisponible, asignaciones, onCh
               return (
                 <TableRow key={f.id}>
                   <TableCell>
-                    <Checkbox checked={monto > 0.009} onCheckedChange={(c) => toggle(f, !!c)} />
+                    <Checkbox checked={monto > 0.009} onCheckedChange={(c) => toggle(f, !!c)} aria-label={`Incluir la factura ${f.numero}`} />
                   </TableCell>
                   <TableCell className="font-mono text-sm text-primary">{f.numero}</TableCell>
                   <TableCell className="text-muted-foreground">
@@ -91,7 +91,8 @@ export function SelectorFacturas({ facturas, montoDisponible, asignaciones, onCh
                   <TableCell className="text-right">{formatPrice(f.saldo_usd)}</TableCell>
                   <TableCell className="text-right">
                     <Input
-                      type="number" min="0" step="0.01" className="h-8 text-right"
+                      type="number" min="0" step="0.01" className="h-8 text-right" inputMode="decimal"
+                      aria-label={`Monto a aplicar a la factura ${f.numero}`}
                       value={monto || ""}
                       onChange={(e) => setMonto(f.id, parseFloat(e.target.value) || 0, f.saldo_usd)}
                     />

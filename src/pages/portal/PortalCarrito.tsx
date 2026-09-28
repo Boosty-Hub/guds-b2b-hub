@@ -499,8 +499,8 @@ const PortalCarrito = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Banco / cuenta destino *</Label>
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <Label id="checkout-banco-titulo">Banco / cuenta destino *</Label>
+                  <div className="grid gap-2 sm:grid-cols-2" role="group" aria-labelledby="checkout-banco-titulo">
                     {bancosFiltrados.map((b) => (
                       <button
                         key={b.id}
@@ -550,10 +550,11 @@ const PortalCarrito = () => {
                     <Input id="ref-checkout" placeholder="Ej: 123456789" value={referenciaPago} onChange={(e) => setReferenciaPago(e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Comprobante *</Label>
-                    <input ref={comprobanteInputRef} type="file" accept="application/pdf,image/jpeg,image/png" className="hidden" onChange={handleComprobanteSelect} />
+                    <Label id="checkout-comprobante-titulo">Comprobante *</Label>
+                    <input ref={comprobanteInputRef} type="file" accept="application/pdf,image/jpeg,image/png" className="hidden" onChange={handleComprobanteSelect} aria-labelledby="checkout-comprobante-titulo" />
                     <button
                       type="button"
+                      aria-describedby="checkout-comprobante-titulo"
                       onClick={() => comprobanteInputRef.current?.click()}
                       className="flex h-10 w-full items-center justify-center gap-2 rounded-md border border-dashed border-border px-3 text-sm text-muted-foreground transition-colors hover:border-foreground/40"
                     >
@@ -577,7 +578,7 @@ const PortalCarrito = () => {
         </div>
 
         {/* Resumen (escritorio: columna fija a la derecha) */}
-        <aside className="mt-4 lg:sticky lg:top-[5.5rem] lg:mt-0">
+        <aside className="mt-4 lg:sticky lg:top-[5.5rem] lg:mt-0" aria-label="Resumen del pedido">
           <Panel titulo="Resumen del pedido" descripcion={`${cart.length} ${cart.length === 1 ? "producto" : "productos"}`}>
             <ResumenCotizacion {...cotizacionEstado} claseTotal="text-foreground"
               vacio={user?.cliente_id ? undefined : "Tu usuario no tiene una cuenta de cliente asociada: no podemos calcular el total. Comunícate con tu ejecutivo."} />

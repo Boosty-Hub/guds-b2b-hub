@@ -70,7 +70,7 @@ const VendedorRetenciones = () => {
         <div className="space-y-6">
           <div className="max-w-sm space-y-2">
             <Select value={clienteId} onValueChange={elegirCliente}>
-              <SelectTrigger><SelectValue placeholder="Elegí un cliente" /></SelectTrigger>
+              <SelectTrigger aria-label="Cliente"><SelectValue placeholder="Elige un cliente" /></SelectTrigger>
               <SelectContent>
                 {clientes.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre_negocio}</SelectItem>)}
               </SelectContent>

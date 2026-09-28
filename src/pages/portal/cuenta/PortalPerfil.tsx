@@ -171,6 +171,7 @@ const PortalPerfil = () => {
             </div>
             <input
               type="file"
+              aria-label="Foto de perfil"
               ref={fileInputRef}
               onChange={handlePhotoUpload}
               accept="image/*"
@@ -191,50 +192,60 @@ const PortalPerfil = () => {
           {/* Form */}
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <User className="h-4 w-4" />
+              <Label htmlFor="perfil-nombre" className="flex items-center gap-2">
+                <User className="h-4 w-4" aria-hidden />
                 Nombre
               </Label>
               <Input
+                id="perfil-nombre"
                 value={formData.nombre}
                 onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                autoComplete="given-name"
                 placeholder="Tu nombre"
               />
             </div>
 
             <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <User className="h-4 w-4" />
+              <Label htmlFor="perfil-apellido" className="flex items-center gap-2">
+                <User className="h-4 w-4" aria-hidden />
                 Apellido
               </Label>
               <Input
+                id="perfil-apellido"
                 value={formData.apellido}
                 onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
+                autoComplete="family-name"
                 placeholder="Tu apellido"
               />
             </div>
 
             <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <Mail className="h-4 w-4" />
+              <Label htmlFor="perfil-email" className="flex items-center gap-2">
+                <Mail className="h-4 w-4" aria-hidden />
                 Email
               </Label>
               <Input
+                id="perfil-email"
                 value={formData.email}
                 disabled
+                autoComplete="email"
+                aria-describedby="perfil-email-nota"
                 className="bg-muted"
               />
-              <p className="text-xs text-muted-foreground">El email no puede ser modificado</p>
+              <p id="perfil-email-nota" className="text-xs text-muted-foreground">El email no puede ser modificado</p>
             </div>
 
             <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <Phone className="h-4 w-4" />
+              <Label htmlFor="perfil-telefono" className="flex items-center gap-2">
+                <Phone className="h-4 w-4" aria-hidden />
                 Teléfono
               </Label>
               <Input
+                id="perfil-telefono"
                 value={formData.telefono}
                 onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
+                type="tel"
+                autoComplete="tel"
                 placeholder="Tu teléfono"
               />
             </div>
@@ -243,10 +254,10 @@ const PortalPerfil = () => {
           {/* Business Info (Read Only) */}
           {cliente && (
             <div className="bg-muted rounded-xl p-4 space-y-3">
-              <h3 className="font-semibold flex items-center gap-2">
-                <Building2 className="h-4 w-4" />
+              <h2 className="font-semibold flex items-center gap-2">
+                <Building2 className="h-4 w-4" aria-hidden />
                 Datos del Negocio
-              </h3>
+              </h2>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <p className="text-muted-foreground">Negocio</p>

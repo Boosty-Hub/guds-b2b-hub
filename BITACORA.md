@@ -10,6 +10,32 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-28 · Seguimiento de entregas y cuadre con Odoo (D6/D8), clasificación, metas y calidad de datos (R2/R7/R8b), accesibilidad (F7)
+
+- **Delivery D6** (`…20p_delivery_seguimiento.sql`): la app del repartidor manda su posición mientras tiene reparto en curso
+  (cada 2,5 min o 200 m, en lote; solo la lee administración; se borra a los 90 días). Pestaña **En curso** con mapa de repartidores,
+  paradas y recorrido del día. **Incidencias** que se abren solas al cerrar incompleta, rechazada o reprogramada: reprogramar (vuelve
+  a la cola como 2.º intento), reasignar o resolver con nota. **Devolución por almacén** con cantidad recibida por producto (nota
+  obligatoria si llega menos; página `/admin/delivery/devoluciones`, en el menú bajo Logística). **Indicadores** por período y
+  repartidor (completas, rechazos, a tiempo, salida→entrega, motivos).
+- **Delivery D8** (`…20p_delivery_cuadre_odoo.sql`): en cada sincronización se cruza cada documento con entrega en GUDS contra
+  Odoo (abierta, validada sin cierre en GUDS, cantidades distintas, cancelada o cuadrada), con enlace al documento en Odoo.
+  La escritura de entregas sigue en `simular` hasta el piloto.
+- **Reportes R2/R7/R8b** (`…20q_*`): la sincronización trae marca de producto y tipo, canal, segmento y etiquetas del cliente (hoy
+  Odoo los tiene casi vacíos, flanco 44); equivalencias de categorías Profit ↔ Odoo para validar; comparativo contra período y año
+  anterior; pestaña **Metas** (cumplimiento y proyección por días hábiles) y **Calidad y cuadre** (cruce Profit ↔ Odoo, cobros sin
+  aplicar, clientes sin RIF o sin condición de pago, productos sin costo, etc.).
+- **Portales F7** (accesibilidad y rendimiento, sin PWA por decisión): axe WCAG 2.2 AA de 22 violaciones críticas a 0 en cliente,
+  vendedor y tema oscuro; Lighthouse accesibilidad 100 en las 6 rutas medidas; rendimiento móvil 82–87 (fotos al tamaño en que se
+  pintan, carrusel y fechas fuera del arranque, CLS en 0). Contraste reforzado solo en los portales (`html.portal-aa`), etiquetas y
+  nombres accesibles, foco que vuelve a quien abrió el diálogo, teclado en pestañas y grupos de opciones.
+- Flancos cerrados al integrar: el indicador de sincronización de la cabecera ya no consulta sin permiso (daba 403 a roles como
+  Almacén) y el menú no marca dos enlaces a la vez.
+- Verificado: pruebas de base (331 casos, todos pasan), `tsc`, `vite build` y Playwright en admin (delivery y reportes, 1440 y 390),
+  portal del cliente y vendedor sin errores ni desborde.
+- Pendiente: rendimiento ≥ 90 (paquete principal y consultas duplicadas del arranque), piloto de entregas en Odoo, la fuente
+  Plus Jakarta Sans nunca carga (decisión de aspecto) y los flancos 42–46 del plan espejo.
+
 ## 2026-09-28 · Finanzas y cuenta del cliente (F5–F6) y herramientas del vendedor (V2–V5)
 
 - **Portal del cliente F5–F6** (agente, `…20m_finanzas_cuenta_portal.sql`, `…20m_retencion_fichas_cliente.sql`): estado de cuenta

@@ -113,7 +113,7 @@ const VendedorPedidoDetalle = () => {
   if (cargando) {
     return (
       <VendedorLayout title="Pedido">
-        <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
+        <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div>
       </VendedorLayout>
     );
   }
@@ -197,7 +197,7 @@ const VendedorPedidoDetalle = () => {
 
   const botonDuplicar = puedeDuplicar && (
     <Button size="sm" variant={noVigente ? "default" : "outline"} onClick={duplicar} data-testid="duplicar-pedido"
-      className={cn("h-9 gap-1.5", noVigente && "bg-emerald-500 text-white hover:bg-emerald-600")}>
+      className={cn("h-9 gap-1.5", noVigente && "bg-emerald-700 text-white hover:bg-emerald-800")}>
       <Copy className="h-3.5 w-3.5" />{noVigente ? "Duplicar y corregir" : "Duplicar"}
     </Button>
   );
@@ -231,7 +231,7 @@ const VendedorPedidoDetalle = () => {
           {(puedeEditar || puedeDuplicar) && (
             <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
               {puedeEditar && (
-                <Button size="sm" className="h-9 gap-1.5 bg-emerald-500 text-white hover:bg-emerald-600" onClick={() => setEditar(true)} data-testid="detalle-editar">
+                <Button size="sm" className="h-9 gap-1.5 bg-emerald-700 text-white hover:bg-emerald-800" onClick={() => setEditar(true)} data-testid="detalle-editar">
                   <Pencil className="h-3.5 w-3.5" />Editar
                 </Button>
               )}

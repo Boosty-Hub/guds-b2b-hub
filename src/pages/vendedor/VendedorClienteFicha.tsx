@@ -81,7 +81,7 @@ const VendedorClienteFicha = () => {
   }, `${window.location.origin}/portal/pagos`) : ""), [ficha, user]);
 
   if (cargando) {
-    return <VendedorLayout title="Cliente"><div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div></VendedorLayout>;
+    return <VendedorLayout title="Cliente"><div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div></VendedorLayout>;
   }
   if (!ficha) {
     const otras = soloLectura ? [] : empresas.filter((e) => e.id !== seleccion);
@@ -148,7 +148,7 @@ const VendedorClienteFicha = () => {
             </div>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-            <Button asChild={!desactivado} size="sm" className="h-10 gap-1.5 bg-emerald-500 text-white hover:bg-emerald-600" disabled={desactivado} data-testid="ficha-nuevo-pedido">
+            <Button asChild={!desactivado} size="sm" className="h-10 gap-1.5 bg-emerald-700 text-white hover:bg-emerald-800" disabled={desactivado} data-testid="ficha-nuevo-pedido">
               {desactivado ? <span><ShoppingCart className="h-4 w-4" />Nuevo pedido</span> : <Link to={`/vendedor/pedidos/nuevo?cliente=${c.id}`}><ShoppingCart className="h-4 w-4" />Nuevo pedido</Link>}
             </Button>
             <Button asChild={!desactivado} size="sm" variant="outline" className="h-10 gap-1.5" disabled={desactivado} data-testid="ficha-registrar-cobro">
@@ -361,7 +361,7 @@ const VendedorClienteFicha = () => {
             <Button variant="outline" onClick={copiar} className="gap-1.5" data-testid="copiar-estado-cuenta">
               {copiado ? <><Check className="h-4 w-4" />Copiado</> : <><Copy className="h-4 w-4" />Copiar texto</>}
             </Button>
-            <Button asChild className="gap-1.5 bg-emerald-500 text-white hover:bg-emerald-600">
+            <Button asChild className="gap-1.5 bg-emerald-700 text-white hover:bg-emerald-800">
               <a href={enlaceWhatsApp(telWa, textoCuenta)} target="_blank" rel="noopener noreferrer" data-testid="enviar-estado-cuenta"><MessageCircle className="h-4 w-4" />Enviar por WhatsApp</a>
             </Button>
           </DialogFooter>

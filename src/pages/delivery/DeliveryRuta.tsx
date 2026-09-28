@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMisEntregas } from "@/components/delivery/useMisEntregas";
 import { usePosicion } from "@/components/delivery/usePosicion";
+import { usePingPosicion } from "@/components/delivery/usePingPosicion";
 import { CierreEntregaDialog } from "@/components/delivery/CierreEntregaDialog";
 import { Mapa, type MarcadorMapa } from "@/components/mapas/Mapa";
 import { distanciaKm, fmtKm } from "@/components/mapas/geo";
@@ -41,6 +42,8 @@ const DeliveryRuta = () => {
   const actual = abiertas.find((e) => e.estado === "en_camino") ?? abiertas[0] ?? null;
   const hayMapa = abiertas.length > 0;
   const { pos, estado: estadoGps } = usePosicion(hayMapa);
+  // Seguimiento (20p): con paradas abiertas, la última posición llega a la oficina cada 2–3 min (o al moverse > 200 m)
+  usePingPosicion(hayMapa, pos);
   const numero = (e: EntregaReparto) => paradas.findIndex((x) => x.id === e.id) + 1;
 
   useEffect(() => {
@@ -163,6 +166,11 @@ const DeliveryRuta = () => {
                 {estadoGps === "pidiendo" ? "Buscando tu ubicación…" : estadoGps === "denegado"
                   ? "No diste permiso de ubicación: actívalo en el navegador para verte en el mapa y medir distancias."
                   : "No se pudo leer tu ubicación (GPS apagado o sin señal)."}
+              </p>
+            )}
+            {hayMapa && estadoGps === "ok" && (
+              <p className="text-[11px] text-muted-foreground" data-aviso="seguimiento">
+                Mientras tengas paradas abiertas y esta pantalla esté abierta, la oficina ve tu última ubicación (cada 2–3 min).
               </p>
             )}
 

@@ -118,7 +118,7 @@ const VendedorCartera = () => {
           <div className="flex w-full gap-1.5 overflow-x-auto pb-0.5 sm:w-auto [scrollbar-width:none]">
             {FILTROS.map((f) => (
               <Button key={f.valor} size="sm" variant={filtro === f.valor ? "default" : "outline"} onClick={() => setFiltro(f.valor)}
-                className={cn("h-8 shrink-0", filtro === f.valor && "bg-emerald-500 text-white hover:bg-emerald-600")} data-testid={`filtro-${f.valor}`}>
+                className={cn("h-8 shrink-0", filtro === f.valor && "bg-emerald-700 text-white hover:bg-emerald-800")} data-testid={`filtro-${f.valor}`}>
                 {f.etiqueta}
               </Button>
             ))}
@@ -127,7 +127,7 @@ const VendedorCartera = () => {
         contador={cargando ? undefined : `${lista.length} clientes${tramo ? ` · ${TRAMOS.find((x) => x.clave === tramo)?.etiqueta}` : ""}`}
         acciones={
           <Select value={orden} onValueChange={(v) => setOrden(v as Orden)}>
-            <SelectTrigger className="h-8 w-[170px] text-[13px]" data-testid="orden-cartera"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-8 w-[170px] text-[13px]" aria-label="Ordenar clientes" data-testid="orden-cartera"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="prioridad">Prioridad de cobro</SelectItem>
               <SelectItem value="vencido">Mayor vencido</SelectItem>
@@ -139,8 +139,8 @@ const VendedorCartera = () => {
         } />
 
       <div className="rounded-lg border border-border bg-card">
-        {cargando ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-500" /></div>
-          : error ? <p className="p-4 text-sm text-destructive">No se pudo cargar la cartera: {error}</p>
+        {cargando ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div>
+          : error ? <p className="p-4 text-sm text-destructive" role="alert">No se pudo cargar la cartera: {error}</p>
           : lista.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground">{clientes.length ? "Ningún cliente con ese filtro." : "No tienes clientes activos en tu cartera."}</p>
           : (
             <>

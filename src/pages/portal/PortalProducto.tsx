@@ -12,6 +12,8 @@ import { PortalPagina } from "@/components/portal/PortalPagina";
 import { usePortal } from "@/components/portal/contextoPortal";
 import { TarjetaProducto, empaquePorDefecto } from "@/components/portal/TarjetaProducto";
 import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
+import { srcSetImagen, urlImagenAncho } from "@/components/portal/ProductImage";
+import { prefiereMenosMovimiento } from "@/components/portal/accesibilidad";
 import { EstadoVacio, Panel, PillTono, fechaCorta, iniciales, unidadTexto } from "@/components/portal/sistema";
 import { textoIva } from "@/lib/iva";
 import { useCarritoPortal } from "@/hooks/useCarritoPortal";
@@ -196,12 +198,22 @@ const PortalProducto = () => {
               {empaques.length > 0 && (
                 <fieldset className="mt-4">
                   <legend className="mb-2 text-sm font-medium text-foreground">{empaques.length > 1 ? "Elige el empaque" : "Se vende por"}</legend>
-                  <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Empaque">
-                    {empaques.map((e) => {
+                  <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Empaque"
+                    onKeyDown={(ev) => {
+                      const paso = ev.key === "ArrowRight" || ev.key === "ArrowDown" ? 1 : ev.key === "ArrowLeft" || ev.key === "ArrowUp" ? -1 : 0;
+                      if (!paso) return;
+                      ev.preventDefault();
+                      const i = Math.max(0, empaques.findIndex((x) => x.tipo_empaque_id === tipoSel));
+                      const j = (i + paso + empaques.length) % empaques.length;
+                      setEmpaqueId(empaques[j].tipo_empaque_id);
+                      ev.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[j]?.focus();
+                    }}>
+                    {empaques.map((e, idx) => {
                       const sel = e.tipo_empaque_id === tipoSel;
                       const u = Math.max(1, Number(e.tipo_empaque.unidades));
+                      const enfocable = sel || (idx === 0 && !empaques.some((x) => x.tipo_empaque_id === tipoSel));
                       return (
-                        <button key={e.id} type="button" role="radio" aria-checked={sel} onClick={() => setEmpaqueId(e.tipo_empaque_id)}
+                        <button key={e.id} type="button" role="radio" aria-checked={sel} tabIndex={enfocable ? 0 : -1} onClick={() => setEmpaqueId(e.tipo_empaque_id)}
                           className={cn("flex min-h-[3.25rem] items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
                             sel ? "border-foreground bg-muted/60 ring-1 ring-foreground" : "border-border hover:border-foreground/30")}
                           data-testid="ficha-empaque" data-tipo-empaque-id={e.tipo_empaque_id} data-precio={e.precio}>
@@ -226,15 +238,15 @@ const PortalProducto = () => {
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="flex h-11 items-center rounded-lg border border-border bg-background">
                     <button type="button" className="flex h-11 w-11 items-center justify-center rounded-l-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-                      onClick={() => fijarCantidad(cantidad - 1)} disabled={cantidad <= 1 || agotado} aria-label="Quitar uno"><Minus className="h-4 w-4" /></button>
+                      onClick={() => fijarCantidad(cantidad - 1)} disabled={cantidad <= 1 || agotado} aria-label="Quitar uno"><Minus className="h-4 w-4" aria-hidden /></button>
                     <input id="ficha-cantidad" inputMode="numeric" pattern="[0-9]*" value={textoCantidad} disabled={agotado || tope <= 0}
                       onChange={(e) => setTextoCantidad(e.target.value.replace(/\D/g, "").slice(0, 5))}
                       onBlur={() => fijarCantidad(Number(textoCantidad))}
                       onKeyDown={(e) => { if (e.key === "Enter") { fijarCantidad(Number(textoCantidad)); } }}
-                      className="h-11 w-16 border-x border-border bg-transparent text-center text-base font-semibold tabular-nums outline-none focus:bg-muted/40"
+                      className="h-11 w-16 border-x border-border bg-transparent text-center text-base font-semibold tabular-nums outline-none focus:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                       aria-describedby="ficha-tope" data-testid="ficha-cantidad" />
                     <button type="button" className="flex h-11 w-11 items-center justify-center rounded-r-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-                      onClick={() => fijarCantidad(cantidad + 1)} disabled={cantidad >= tope || agotado} aria-label="Agregar uno"><Plus className="h-4 w-4" /></button>
+                      onClick={() => fijarCantidad(cantidad + 1)} disabled={cantidad >= tope || agotado} aria-label="Agregar uno"><Plus className="h-4 w-4" aria-hidden /></button>
                   </div>
                   <p className="text-sm tabular-nums text-muted-foreground">
                     Subtotal <span className="font-semibold text-foreground" data-testid="ficha-subtotal">{formatPrice(precio * cantidad)}</span>
@@ -343,7 +355,7 @@ const Galeria = ({ fotos, nombre, categoria }: { fotos: string[]; nombre: string
   const irA = (i: number) => {
     const el = pista.current; if (!el) return;
     const j = Math.max(0, Math.min(fotos.length - 1, i));
-    el.scrollTo({ left: j * el.clientWidth, behavior: "smooth" });
+    el.scrollTo({ left: j * el.clientWidth, behavior: prefiereMenosMovimiento() ? "auto" : "smooth" });
     setIndice(j);
   };
 
@@ -361,13 +373,17 @@ const Galeria = ({ fotos, nombre, categoria }: { fotos: string[]; nombre: string
   return (
     <div className="min-w-0 lg:sticky lg:top-[5.5rem] lg:self-start" data-testid="ficha-galeria">
       <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-border bg-white sm:aspect-square lg:max-h-[560px]">
-        <div ref={pista} className="flex h-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        <div ref={pista} className="flex h-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain rounded-xl [scrollbar-width:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-scrollbar]:hidden"
           onScroll={(e) => { const el = e.currentTarget; setIndice(Math.round(el.scrollLeft / Math.max(1, el.clientWidth))); }}
-          aria-roledescription="carrusel" aria-label={`Fotos de ${nombre}`}>
+          onKeyDown={(e) => {
+            if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); irA(indice + (e.key === "ArrowRight" ? 1 : -1)); }
+          }}
+          tabIndex={0} role="region" aria-roledescription="carrusel" aria-label={`Fotos de ${nombre}`}>
           {fotos.map((url, i) => (
-            <div key={url + i} className="flex h-full w-full shrink-0 snap-center items-center justify-center p-4 sm:p-6" aria-roledescription="foto" aria-label={`${i + 1} de ${fotos.length}`}>
+            <div key={url + i} className="flex h-full w-full shrink-0 snap-center items-center justify-center p-4 sm:p-6" role="group" aria-roledescription="foto" aria-label={`${i + 1} de ${fotos.length}`}>
               {!rotas[i] && (
-                <img src={url} alt={fotos.length > 1 ? `${nombre}, foto ${i + 1}` : nombre} width={800} height={800}
+                <img src={urlImagenAncho(url, 800)} srcSet={srcSetImagen(url)} sizes="(min-width: 1024px) 560px, 100vw"
+                  alt={fotos.length > 1 ? `${nombre}, foto ${i + 1}` : nombre} width={800} height={800}
                   loading={i === 0 ? "eager" : "lazy"} decoding="async" {...(i === 0 ? { fetchpriority: "high" } : {})}
                   className="h-full w-full object-contain" onError={() => setRotas((r) => ({ ...r, [i]: true }))} />
               )}
@@ -378,7 +394,7 @@ const Galeria = ({ fotos, nombre, categoria }: { fotos: string[]; nombre: string
           <>
             <button type="button" onClick={() => irA(indice - 1)} disabled={indice === 0} aria-label="Foto anterior"
               className="absolute left-2 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 shadow-sm disabled:opacity-0 sm:flex">
-              <ChevronLeft className="h-5 w-5" />
+              <ChevronLeft className="h-5 w-5" aria-hidden />
             </button>
             <button type="button" onClick={() => irA(indice + 1)} disabled={indice >= fotos.length - 1} aria-label="Foto siguiente"
               className="absolute right-2 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 shadow-sm disabled:opacity-0 sm:flex">
@@ -395,7 +411,7 @@ const Galeria = ({ fotos, nombre, categoria }: { fotos: string[]; nombre: string
           {fotos.map((url, i) => (
             <button key={url + i} type="button" onClick={() => irA(i)} aria-label={`Ver foto ${i + 1} de ${fotos.length}`} aria-current={i === indice || undefined}
               className={cn("h-16 w-16 shrink-0 overflow-hidden rounded-lg border bg-white p-1 transition-colors", i === indice ? "border-foreground ring-1 ring-foreground" : "border-border hover:border-foreground/40")}>
-              <img src={url} alt="" width={64} height={64} loading="lazy" decoding="async" className="h-full w-full object-contain" />
+              <img src={urlImagenAncho(url, 160)} alt="" width={64} height={64} loading="lazy" decoding="async" className="h-full w-full object-contain" />
             </button>
           ))}
         </div>

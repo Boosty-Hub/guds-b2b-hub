@@ -24,12 +24,15 @@ export function EstadoSyncOdoo({ className }: { className?: string }) {
   const [estado, setEstado] = useState<Estado | null>(null);
   const [, setAhora] = useState(Date.now());
   const esperando = useRef(false);
+  // La función exige configuración o dashboard (ver); sin ellos no se consulta (evita el 403 en roles limitados, p. ej. Almacén)
+  const visible = can("configuracion", "ver") || can("dashboard", "ver");
 
   const cargar = useCallback(async () => {
+    if (!visible) return null;
     const { data, error } = await supabase.rpc("estado_sync_odoo");
     if (!error && Array.isArray(data) && data[0]) setEstado(data[0] as Estado);
     return (data as Estado[] | null)?.[0] ?? null;
-  }, []);
+  }, [visible]);
 
   useEffect(() => {
     cargar();
@@ -59,7 +62,7 @@ export function EstadoSyncOdoo({ className }: { className?: string }) {
     esperando.current = false;
   };
 
-  if (!estado) return null;
+  if (!visible || !estado) return null;
   const minutos = estado.ultima_ok ? Math.max(0, Math.round((Date.now() - new Date(estado.ultima_ok).getTime()) / 60000)) : null;
   const error = estado.ultima_estado === "error";
   const atrasado = minutos === null || (enHorario() ? minutos > 45 : minutos > 24 * 60);

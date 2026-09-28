@@ -32,7 +32,7 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | # | Fase | Estado |
 |---|---|---|
 | 0 | Preparación: respaldo, foto de esquema, scripts viejos retirados, credenciales a `.env.local` | ✅ 2026-09-27 |
-| 1 | Multiempresa: tablas, permisos, selector, numeración por empresa, marca Odoo | ✅ 2026-09-27 (falta publicar el frontend) |
+| 1 | Multiempresa: tablas, permisos, selector, numeración por empresa, marca Odoo | ✅ 2026-09-27 (publicado) |
 | 2 | Importador nuevo (API) y reimportación limpia separada por empresa | ✅ 2026-09-27 |
 | 3 | Maestros: productos (precio desde órdenes), listas de precios, clientes, proveedores, vendedores, bancos, impuestos | ✅ 2026-09-27 |
 | 4 | Ventas y CxC: órdenes, facturas, NC, ND, pagos con aplicación a facturas, antigüedad, retenciones recibidas | ✅ 2026-09-27 |
@@ -340,10 +340,10 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 8 | ~~Cliente de cada almacén de consignación se identifica por nombre~~ | ✅ Fase 6: nombre → entregas → manual; 46 consignaciones sin cliente para confirmar a mano desde el detalle del almacén |
 | 9 | 16 vendedores con correo de relleno `@guds.test` | Cuando GUDS pase los correos (decisión 4) |
 | 10 | El widget de soporte "Ticket" responde 403 (`widget-listar-tickets`) | Revisar con Boosty (no es de esta plataforma) |
-| 11 | Frontend multiempresa sin publicar: la versión desplegada funciona en modo "Ambas" (solo consulta) | Al publicar |
+| 11 | ~~Frontend multiempresa sin publicar~~ | ✅ Publicado en `portal.guds-supply.com` (Netlify, rama main) |
 | 12 | ¿Se permite crear productos en GUDS? Existirían solo en GUDS (no en Odoo). Hoy la pantalla lo permite | Decisión de GUDS |
-| 13 | Las listas de precios de Odoo están vacías (0 reglas); las listas de GUDS siguen siendo propias de GUDS (precios negociados) | Revisar si GUDS carga listas en Odoo |
-| 14 | Impuestos y términos de pago de Odoo no se espejan como tablas (se usan el IVA de configuración y la condición de pago del cliente) | Fase 4 (líneas de factura) |
+| 13 | ~~Listas de precios de Odoo vacías~~ | ✅ Se sincronizan listas, reglas y la lista de cada cliente (20a); hoy Odoo no tiene reglas y su precio de lista es $1 de relleno |
+| 14 | ~~Impuestos de Odoo no espejados~~ | ✅ IVA de cada producto desde Odoo, por grupo de tasa como Odoo (20a/20b); IVA por línea de los pedidos de Odoo |
 | 15 | El motivo de nota de crédito (`motivos` en Odoo) está vacío en todas las NC | Informativo (se importa si lo cargan) |
 | 16 | 6 pagos a proveedores en Odoo sin proveedor (se importan sin proveedor; salen en CxP → Pagos con "—") | Informativo / contabilidad |
 | 17 | Facturas sin cliente reconocible en Odoo (GUDS 9, Quirutec 2) no entran a GUDS; los cobros sin cliente ya se ven como depósitos por identificar (los otros 2 son borradores/cancelados en 0) | Contabilidad (asignarles cliente en Odoo) |
@@ -355,7 +355,7 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 23 | Los ajustes de inventario sin lote no existen hoy (los 3.505 tienen lote); si aparecen, quedan igual en `ajustes_inventario` | Informativo |
 | 24 | **Configuración en Odoo (GUDS)**: el diario "Banco Banesco USA" usa la misma cuenta contable que "Banco Banesco (VED)"; su saldo contable no se puede separar (GUDS muestra el del extracto con aviso). Los diarios de "Saldos iniciales anticipo" también comparten cuenta | Avisar a contabilidad de GUDS |
 | 25 | 674 líneas de extracto bancario por conciliar en Odoo | Informativo para contabilidad; visible por banco en GUDS |
-| 26 | **Correo de autenticación**: Supabase no tiene SMTP propio (el correo por defecto solo llega al equipo y 2/hora) y la `site_url` es `localhost:3000` (debe ser `https://gudsupply.netlify.app`). "Olvidé mi contraseña" no llega a clientes; por eso las claves de contactos son temporales generadas por GUDS | Configurar un SMTP (Resend/SendGrid) y la URL del sitio — requiere cuenta de GUDS |
+| 26 | ~~Correo de autenticación sin SMTP y `site_url` en localhost~~ | ✅ SMTP de Resend y dominio `portal.guds-supply.com` (28-sep) |
 | 27 | Pedidos de GUDS completados antes de la Fase 9b quedan comprometiendo stock hasta pasar a Odoo | Fase 9b (envío de pedidos a Odoo) |
 | 28 | Límites de crédito editados en GUDS quedan pendientes de enviar a Odoo | Fase 9 |
 | 29 | Contactos creados en GUDS no existen en Odoo | Fase 9 (crearlos como contacto hijo, marcados "(GUDS)") |
@@ -365,9 +365,14 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 33 | **Envío**: GUDS cobra $50 en pedidos menores de $500. Decisión (28-sep): va como línea de servicio. En Odoo no hay un servicio vendible de envío | Contabilidad crea el servicio en Odoo (cuenta de ingresos + IVA) y se configura su código en Políticas de venta; mientras tanto va como nota |
 | 34 | S00927 (prueba) quedó con almacén G-CONSIGNADO REPRESENTACIONES FAW; los envíos nuevos usan P-01 | Si se confirma, cambiar almacén en Odoo (GUDS no edita en Odoo) |
 | 35 | ~~Vendedor y repartidor veían toda la empresa; vendedor podía autoaprobar; cualquiera borraba fotos de productos; cliente insertaba pagos "verificados"; empaque sin precio a precio unitario~~ | ✅ migraciones 19i–19k |
-| 36 | **Impuestos**: GUDS aplica IVA 16 % a todo; en Odoo cada producto tiene su impuesto (IVA efectivo ~6,7 % por exentos). El total que ve el vendedor/cliente no coincide con Odoo | Sincronizar el impuesto por producto y calcular totales en el servidor (plan de portales, etapa 2) |
-| 37 | La sincronización escribe sin triggers: los cambios que vienen de Odoo (confirmado, despachado, facturado) no generan notificaciones | Emitir notificaciones desde el sync (plan de portales, etapa 1) |
-| 38 | La cola de delivery son órdenes, no los documentos de entrega de Odoo; dirección fiscal en vez de la de entrega; 0 clientes con coordenadas | Plan de portales, D1–D2 |
+| 36 | ~~Impuestos: GUDS aplicaba 16 % a todo~~ | ✅ Etapa 2 (20a/20b); validado contra pedidos reales de Odoo |
+| 37 | ~~La sincronización no generaba notificaciones~~ | ✅ Eventos del pedido con triggers que corren también con la sincronización (20d) |
+| 38 | ~~Cola de delivery con órdenes; sin coordenadas~~ | ✅ Documentos de entrega de Odoo (19v), ubicaciones y rutas (20f) |
 | 39 | ~~Saldos bancarios legibles por cualquier usuario con sesión; funciones internas y aprobación de registros ejecutables sin sesión~~ | ✅ 19l, 19q |
 | 40 | En Odoo, el diario "Banco Banesco USA" de GUDS tiene la cuenta de Banesco en bolívares (mismo número); las cuentas extranjeras llevan ceros a la izquierda (20 dígitos) | Corregir en Odoo; mientras tanto esa cuenta no se publica a clientes |
-| 41 | Correo de Auth: dominio verificado en el proveedor, pero Supabase sin SMTP configurado | Cargar la clave SMTP del proveedor en Supabase |
+| 41 | ~~Correo de Auth sin SMTP~~ | ✅ Resend configurado en Supabase (28-sep) |
+| 42 | **Cobros de Odoo con parte sin aplicar**: 261 cobros con al menos 1 USD sin aplicar a facturas (~245 mil USD). No aparecen como saldo a favor ni en el admin ni en el portal | Decisión: mostrarlos como saldo a favor o conciliarlos primero en Odoo (lista en Reportes → Calidad y cuadre) |
+| 43 | 64 documentos marcados anulados que Odoo aún tiene con saldo ("por cruzar" con su NC) | Contabilidad los cruza en Odoo; en GUDS no se pueden pagar |
+| 44 | Clasificación comercial casi vacía en Odoo: marca (`product_brand_id`) sin datos, Industria cargada en 3 clientes, canal y segmento vacíos | Cargarla en Odoo; GUDS ya la sincroniza (20q) |
+| 45 | 48 productos con ventas en categorías marcadas inactivas en GUDS (todas las de Quirutec) y 241 clientes sin condición de pago | Corregir en Categorías de GUDS y en Odoo (lista en Calidad y cuadre) |
+| 46 | Ningún vendedor tiene teléfono cargado (el ejecutivo de cuenta del portal sale sin WhatsApp) | Cargar el celular de cada vendedor |
