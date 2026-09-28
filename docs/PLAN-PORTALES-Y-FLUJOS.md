@@ -83,7 +83,8 @@ ofrece diarios contables de Odoo como cuentas de pago.
   "Pendiente de aprobación".
 - **F4 · Mis pedidos (2–3 d)**: línea de tiempo (§3), número GUDS y de Odoo, factura y despacho, "volver a pedir".
 - **F5 · Finanzas (4–5 d)**: estado de cuenta con antigüedad (misma lógica que el admin), facturas y su detalle, "Cómo pagar"
-  (cuentas oficiales con copiar), asistente de declaración por factura con varios métodos y comprobante.
+  con **todas las cuentas bancarias** y sus datos completos traídos de Odoo (número, banco, titular, RIF; botón copiar), y
+  asistente de declaración por factura: el cliente indica **a qué cuenta pagó**, método, monto, referencia y comprobante.
 - **F6 · Cuenta (3–4 d)**: retenciones, consignación, empresa y ejecutivo de cuenta, contactos, direcciones, notificaciones reales.
 - **F7 · Calidad (2–3 d)**: accesibilidad WCAG 2.2 AA, Lighthouse móvil ≥ 90, PWA.
 
@@ -130,9 +131,12 @@ rechazada implica devolución y nota de crédito. Seguridad y evidencia: **resue
   evidencias en el admin.
 - **D5 · Sin señal**: PWA con bandeja de salida (IndexedDB), cierres sin duplicar al volver la señal.
 - **D6 · Seguimiento e incidencias**: mapa en vivo, re-cola de reprogramadas, devoluciones confirmadas por almacén, KPIs.
-- **D7 · Conciliación con Odoo (solo lectura)**: el sync compara lo validado en Odoo con el resultado de GUDS.
-- **D8 · Escritura en Odoo (opcional, con aprobación explícita)**: notas/adjuntos en el documento o validación desde GUDS; nunca
-  borrar.
+- **D7 · Entregado en GUDS → entregado en Odoo** (decisión 28-sep): al cerrar la entrega en GUDS se valida el documento de
+  entrega en Odoo con las cantidades entregadas (incompleta: solo lo entregado), se adjuntan foto y firma y se deja una nota
+  "(GUDS)"; al reprogramar se cambia la fecha prevista. Si alguien lo valida directo en Odoo, la sincronización cierra la entrega
+  en GUDS con la insignia **"Actualizado desde Odoo"**. Requiere usuario de API dedicado con permisos de Inventario, simulación
+  y un piloto con un documento acordado. Nunca borrar; un rechazo deja el documento abierto para que administración decida.
+- **D8 · Conciliación**: el sync compara lo validado en Odoo con el resultado de GUDS y marca discrepancias.
 
 ## 7. Reportes frente al Excel (R0–R8)
 
@@ -145,7 +149,9 @@ Artículo), matriz Año × Mes, filtros cruzados, dimensiones (línea, sub-líne
 el detalle. "Facturado" y "NC" están inflados por facturas erróneas revertidas con NC por el mismo monto.
 
 - **R0 · Definiciones** (venta neta, costo, exclusiones, corte Profit→Odoo). **R8a · Neteo de reversos** (mejora rápida).
-- **R1 · Histórico de Profit** en `ventas_historicas` (desde la caché del Excel o una extracción de Profit).
+- **R1 · Histórico de Profit** (decisión 28-sep: **todo**, dic-2020 → may-2026) en una tabla aparte de solo lectura, con insignia
+  **"Profit"** en cada reporte. Suma a todos los reportes de ventas; no entra en cuentas por cobrar, stock, pedidos ni en la
+  sincronización con Odoo, que sigue siendo el sistema en operación.
 - **R2 · Clasificación comercial** (dimensiones que faltan, en Odoo o en GUDS). **R3 · Costo y margen** (leer el costo de Odoo;
   proteger quién lo ve).
 - **R4 · Motor tipo cubo** (agrupar por varios niveles con subtotales). **R5 · Pestaña "Análisis"** que reproduce las vistas del
@@ -155,45 +161,63 @@ el detalle. "Facturado" y "NC" están inflados por facturas erróneas revertidas
 
 | Etapa | Contenido | Por qué primero |
 |---|---|---|
-| 0 · Bloqueantes | F0, resto de V0 y D0, R8a | Operaciones básicas rotas, datos falsos, cifras inconsistentes |
-| 1 · Estados y shell | Contrato de estados (§3) + F1, F4, V1 + notificaciones desde el sync | La aprobación ya está en producción: los tres portales deben mostrarla igual |
-| 2 · Vender bien | F2, F3, V2 + **impuesto por producto desde Odoo** (común) | El total debe cuadrar con Odoo antes de más pedidos |
+| 0 · Bloqueantes | F0, resto de V0 y D0, R8a, **datos bancarios desde Odoo**, **correo (SMTP) y URL del sitio** | Operaciones básicas rotas, datos falsos, cifras inconsistentes; sin correo los clientes no recuperan su clave |
+| 1 · Estados y shell | Contrato de estados (§3) + F1, F4, V1 + notificaciones desde el sync + **sistema visual común** (admin, portales y login) | La aprobación ya está en producción: los tres portales deben mostrarla igual |
+| 2 · Vender bien | F2, F3, V2 + **impuesto por producto y listas de precios desde Odoo** (común) | El total debe cuadrar con Odoo antes de más pedidos |
 | 3 · Finanzas | F5, V3, V4 | Deuda, facturas y cobros con evidencia |
-| 4 · Delivery | D1 → D4 | Cola real de Odoo, ubicaciones, rutas, cierres con evidencia |
+| 4 · Delivery | D1 → D4, D7 | Cola real de Odoo, ubicaciones, rutas, cierres con evidencia y entregado en Odoo |
 | 5 · Analítica | R0, R1, R3, R4, R5 | Recuperar lo que daba el Excel (histórico + margen + vistas) |
-| 6 · Madurez | F6, F7, V5, V6, D5–D8, R2, R6–R8b | Sin señal, PWA, escritura opcional en Odoo, clasificación y metas |
+| 6 · Madurez | F6, F7, V5, V6, D5, D6, D8, R2, R6–R8b | Sin señal, PWA, conciliación, clasificación y metas |
 
-## 9. Decisiones que necesita el negocio (consolidadas)
+## 9. Decisiones del negocio
 
-**Precios, impuestos y envío**
-1. Impuestos: ¿se sincroniza el IVA de cada producto desde Odoo? (recomendado; hoy GUDS aplica 16 % a todo).
-2. Listas de precios: ¿se migran las de Odoo (por cliente, en Bs y USD) o GUDS vende a precio base y Odoo corrige al confirmar?
-3. Envío: la decisión es línea de servicio; **contabilidad debe crear en Odoo el servicio "Envío"** (cuenta de ingresos + IVA) y
-   configurar su código. ¿Aplican los $50 (< $500) a pedidos de vendedores B2B, o depende de zona/cliente?
-4. Precio por empaque: se corrigió a `precio_base × unidades` (Odoo vende por unidad); confirmar que es la regla.
+### 9.1 Tomadas (28-sep)
 
-**Pedidos y crédito**
-5. ¿El cliente paga antes o después de la aprobación? (propuesta: después, contra la cotización/factura).
-6. Crédito: ¿sigue abierto (la aprobación manual es el control) o cupo por cliente? ¿Bloqueo o aviso con deuda vencida > N días?
-7. SLA de aprobación; ¿el cliente/vendedor puede cancelar o editar mientras está pendiente?
+| # | Decisión | Qué implica (verificado en Odoo, solo lectura) |
+|---|---|---|
+| 1 | **Impuestos**: el IVA de cada producto viene de Odoo | Etapa 2: importar los impuestos de cada producto por empresa y calcular el impuesto por línea en el servidor; se elimina el 16 % fijo |
+| 2 | **Listas de precios**: las de Odoo | Odoo tiene 4 listas (USD y Bs por empresa) **sin reglas**, y los 449 clientes de cada empresa usan la lista USD: hoy el precio de Odoo es el precio de lista del producto, el mismo que usa GUDS. El sync importará listas y reglas para aplicarlas en cuanto se carguen en Odoo |
+| 3 | **Envío en pedidos del vendedor**: no, salvo que se estipule | Sin envío automático en pedidos del vendedor; el vendedor (o el admin al aprobar) puede agregar un cargo de envío, que viaja a Odoo como la misma línea de servicio |
+| 4 | **Cuentas bancarias**: todas, con sus datos, para que el cliente pague y luego declare a cuál pagó | Los 18 diarios bancarios de Odoo tienen número de cuenta, banco y titular, pero el importador no los lee (en GUDS 0 de 18 tienen número). El sync los traerá y el portal los mostrará. Los diarios contables (saldos iniciales, cierre de anticipos) no se publican; lo que no está en Odoo (Zelle, pago móvil) se completa en Bancos |
+| 5 | **Entrega**: se valida en GUDS al entregar y GUDS marca el documento como entregado en Odoo; si se valida en Odoo, el sync lo refleja como "Actualizado desde Odoo" | D7. Todos los almacenes son de 1 paso y 437 de 458 productos vendibles facturan **lo entregado**: al validar en la entrega, la factura sale después de entregar y una entrega incompleta factura solo lo entregado (sin nota de crédito). Ver 9.2 |
+| 6 | **Histórico de Profit**: todo, con insignia "Profit", solo lectura | R1. Aporta a todos los reportes; no toca la operación con Odoo |
 
-**Cobros y datos**
-8. Cuentas bancarias oficiales que se publican al cliente y cuáles reciben cobros (marcar `recibe_cobros`).
-9. ¿El vendedor puede recibir efectivo? ¿Propone la aplicación a facturas? ¿Tasa BCV de la fecha del pago?
-10. Fotos y descripciones del catálogo (hoy 2 de 105 productos con foto): ¿quién las carga o se traen de Odoo?
-11. Multiempresa para el cliente: ¿dos tiendas con su marca o un portal con la empresa como filtro? Canal de soporte real.
+### 9.2 Consecuencias que hay que confirmar
 
-**Delivery**
-12. ¿Cuándo se valida en Odoo: al salir el camión o al confirmar la entrega? Qué entra en la cola; ¿rutas mixtas GUDS+Quirutec?
-13. Mapas: Mapbox (mapas) + Google (sugerir coordenadas) + enlaces a Google Maps/Waze ≈ US$0/mes con el volumen actual
-    (verificar tarifas). Evidencia obligatoria por resultado; ¿cédula del receptor? Retención de evidencias y paso a plan Pro.
-14. Nivel de escritura en Odoo para entregas y con qué usuario API (propuesta: usuario dedicado, no la key personal que vence a
-    los 90 días). Tratamiento de incompletas y rechazos (reintento o anulación + NC). Limpiar en Odoo las entregas "listas"
-    viejas y las direcciones de sucursal.
+- **a. Momento de facturar**: hoy el almacén valida en Odoo al despachar y la factura sale el mismo día. Con la decisión 5 el
+  almacén debe **dejar de validar al despachar** y la factura sale tras la entrega. Contabilidad debe confirmar qué documento
+  acompaña la mercancía en tránsito (nota de entrega o guía de despacho).
+- **b. Usuario de API dedicado** en Odoo con permisos de Ventas e Inventario (la key actual es personal y vence a los 90 días,
+  lo que también detendría la sincronización). Lo crea el administrador de Odoo.
+- **c. Entrega incompleta**: ¿Odoo deja un pendiente para re-entregar o se cierra sin pendiente? Propuesta: según el motivo
+  (faltó en el camión → pendiente; el cliente no lo quiso → sin pendiente).
+- **d. Rechazo total**: ¿quién decide entre reintentar o anular (y en qué plazo)? GUDS no anula en Odoo.
+- **e. Precio por empaque**: la regla de julio (P4) decía "precio por caja", pero con el catálogo de Odoo el precio es **por
+  unidad** (p. ej. un chocolate de 40 g a $0,53, que Odoo vende por unidades). Solo 3 productos tienen empaque de varias
+  unidades; desde 19k valen precio × unidades. Confirmar.
 
-**Reportes**
-15. ¿Se importa el histórico de Profit y desde qué año? Definición de venta neta (ND, NC financieras, reversos).
-16. Costo para el margen y quién lo ve; clasificación comercial (dónde se mantiene); mapeo de vendedores Profit → Odoo; metas.
+### 9.3 Pendientes (con la propuesta por defecto)
+
+1. **Pago y aprobación**: el cliente paga después de aprobado, contra la cotización o factura.
+2. **Crédito**: sigue abierto (la aprobación manual es el control); aviso, no bloqueo, si tiene deuda vencida > 30 días.
+3. **Pendientes de aprobar**: aprobación el mismo día hábil; el cliente o vendedor puede **cancelar** mientras está pendiente,
+   no editar (cancela y vuelve a pedir).
+4. **Vendedor y efectivo**: puede registrar cobros en efectivo con comprobante; propone a qué facturas aplica y administración
+   confirma; tasa BCV de la fecha del pago.
+5. **Catálogo**: fotos y descripciones se cargan en Odoo y GUDS las trae (hoy 2 de 105 productos con foto).
+6. **Multiempresa del cliente**: un solo portal con selector GUDS / Quirutec y la marca de cada una.
+7. **Soporte**: WhatsApp de atención y ejecutivo de cuenta (el vendedor asignado) visibles en el portal.
+8. **Cola de delivery**: ventas desde almacenes propios y reposiciones a consignación; rutas mixtas GUDS + Quirutec permitidas.
+9. **Mapas**: Mapbox + sugerencias de Google + navegación con Google Maps/Waze (≈ US$0/mes al volumen actual). Evidencia:
+   completo = foto + firma + nombre; incompleto = lo mismo + motivo por producto; rechazo = foto + motivo; reprogramado = fecha +
+   motivo. Cédula del receptor opcional. Evidencias 24 meses (plan Pro de Supabase cuando se acerque 1 GB).
+10. **El cliente ve la evidencia** de sus entregas y el vendedor la de sus clientes.
+11. **Limpieza en Odoo** antes de arrancar delivery: entregas "listas" de hace más de 30 días, direcciones por sucursal y
+    teléfonos (lo hace el equipo en Odoo, que manda).
+12. **Reportes**: venta neta sin notas de débito cambiarias, reversos por error neteados y NC financieras aparte; costo = costo
+    promedio de Odoo, visible solo para administración; clasificación comercial (línea, sub-línea, marca, tipo de cliente) en
+    Odoo; mapeo de vendedores Profit → Odoo propuesto por GUDS y validado por ustedes; clientes históricos sin pareja solo con
+    nombre y RIF; metas por vendedor y mes en USD, cargadas por administración.
 
 ## 10. Anexos (locales, fuera de git)
 
