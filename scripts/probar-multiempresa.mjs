@@ -757,6 +757,215 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
         and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))))) t`));
 }
 
+// ── Delivery D2/D3 (20f): ubicaciones de entrega (pin o GPS del cierre), rutas por día y aviso al repartidor ──
+{
+  const docs = await sql(`select t.id, t.odoo_id, t.numero from transferencias t where t.empresa_id = '${guds.id}' and t.tipo = 'entrega' and t.estado = 'lista'
+    and t.cliente_id is not null and exists (select 1 from transferencia_items ti where ti.transferencia_id = t.id and ti.cantidad_hecha > 0)
+    and not exists (select 1 from entregas e where e.transferencia_odoo_id = t.odoo_id and e.estado in ('asignada', 'en_camino')) order by t.numero limit 2`);
+  const repReal = (await sql(`select u.auth_id from usuarios u join usuario_empresas ue on ue.usuario_id = u.id and ue.empresa_id = '${guds.id}'
+    where u.role = 'delivery' and u.activo and u.auth_id is not null order by u.created_at limit 1`))[0]?.auth_id;
+  const [conSucursal] = await sql(`select t.id, t.odoo_id, d.id direccion_id from transferencias t join cliente_direcciones d on d.odoo_id = t.partner_odoo_id and d.cliente_id = t.cliente_id
+    where t.empresa_id = '${guds.id}' and t.tipo = 'entrega' and t.estado = 'lista'
+      and not exists (select 1 from entregas e where e.transferencia_odoo_id = t.odoo_id and e.estado in ('asignada', 'en_camino')) limit 1`);
+  const sesion = (uid) => `perform set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
+    perform set_config('request.headers', '{"x-empresa-id":"${guds.id}"}', true);`;
+  const HOY = `(now() at time zone 'America/Caracas')::date`;
+  const REP = '00000000-0000-0000-0000-00000000d20f';
+  const repFalso = `insert into usuarios (id, email, nombre, apellido, role, rol_id, activo) select '${REP}', 'prueba.20f@guds.test', 'Prueba', 'Repartidor', 'delivery', r.id, true
+      from roles r where lower(r.nombre) = 'delivery' limit 1;
+    insert into usuario_empresas (usuario_id, empresa_id, por_defecto) values ('${REP}', '${guds.id}', true);`;
+  if (docs.length === 2 && repReal) {
+    const [a, b] = docs;
+    const idRep = `(select id from usuarios where auth_id = '${repReal}')`;
+    const ent = (doc) => `(select id from entregas where transferencia_odoo_id = ${doc.odoo_id} and estado in ('asignada', 'en_camino'))`;
+    const asignar = (doc, rep = idRep) => `${sesion(admin)} perform public.asignar_entrega_documento('${doc.id}', ${rep}, 'normal');`;
+    const pinDe = (doc, lat = 10.5, lng = -66.9) => `insert into ubicaciones_entrega (cliente_id, direccion_id, latitud, longitud, fuente, confirmada, confirmada_at)
+      select cliente_id, direccion_id, ${lat}, ${lng}, 'pin', true, now() from entregas where id = ${ent(doc)} on conflict do nothing;`;
+    const evidencia = (doc) => `insert into storage.objects (bucket_id, name) select 'evidencias-entrega', e.id || '/foto-20f.jpg' from entregas e where e.id = ${ent(doc)};`;
+    const rechazarConGps = (doc, gps) => `${evidencia(doc)} ${sesion(repReal)}
+      perform set_config('guds.p20f_r', public.cerrar_entrega(${ent(doc)}, 'rechazada', jsonb_build_object('motivo', 'precio', 'foto', ${ent(doc)} || '/foto-20f.jpg', 'gps', ${gps}))::text, true);`;
+    const ultima = (doc) => `(select id from entregas where transferencia_odoo_id = ${doc.odoo_id} order by created_at desc limit 1)`;
+    const publicar = (orden) => `${sesion(admin)} perform public.publicar_ruta_reparto(${idRep}, ${HOY}, array[${orden.map((d) => ent(d)).join(', ')}]::uuid[]);`;
+
+    await caso('Delivery 20f: el repartidor solo ve las ubicaciones de sus paradas (tabla y mis_entregas_reparto)', (r) => r?.mio === 1 && r?.otra === 0 && r?.rpc === 1,
+      como({ uid: repReal, empresa: guds.id, previo: `${asignar(a)} ${pinDe(a)}
+          perform set_config('guds.p20f_otro', (select c.id from clientes c where c.id <> (select cliente_id from entregas where id = ${ent(a)})
+            and not exists (select 1 from ubicaciones_entrega u where u.cliente_id = c.id) order by c.id limit 1)::text, true);
+          insert into ubicaciones_entrega (cliente_id, latitud, longitud, fuente, confirmada, confirmada_at) values (current_setting('guds.p20f_otro')::uuid, 10.6, -66.8, 'pin', true, now());` },
+        `select row_to_json(t)::text from (select
+          (select count(*) from ubicaciones_entrega where cliente_id = (select cliente_id from entregas where id = ${ent(a)})) mio,
+          (select count(*) from ubicaciones_entrega where cliente_id = current_setting('guds.p20f_otro')::uuid) otra,
+          (select count(*) from jsonb_array_elements(public.mis_entregas_reparto()) x where x->>'numero' = '${a.numero}' and (x->'ubicacion'->>'lat')::numeric = 10.5) rpc) t`));
+    if (vendGuds) {
+      await caso('Delivery 20f: un vendedor no guarda ubicaciones de entrega', 'Solo administración',
+        como({ uid: vendGuds, empresa: guds.id }, `select public.guardar_ubicacion_entrega('${cliGuds}', null, 10.5, -66.9)::text`));
+      await caso('Delivery 20f: un vendedor no escribe directo en ubicaciones_entrega', 'permission denied',
+        como({ uid: vendGuds, empresa: guds.id }, `with x as (insert into ubicaciones_entrega (cliente_id, latitud, longitud, fuente) values ('${cliGuds}', 10.5, -66.9, 'pin') returning id) select row_to_json(x)::text from x`));
+    }
+    const CLI = '00000000-0000-0000-0000-00000000c20f';
+    await caso('Delivery 20f: un cliente no guarda ni confirma ubicaciones', 'Solo administración',
+      como({ uid: CLI, empresa: guds.id, previo: `insert into auth.users (id, email, aud, role) values ('${CLI}', 'prueba.cliente.20f@guds.test', 'authenticated', 'authenticated');
+          insert into usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${CLI}', 'prueba.cliente.20f@guds.test', 'Prueba', 'cliente', '${cliGuds}', true);` },
+        `select public.guardar_ubicacion_entrega('${cliGuds}', null, 10.5, -66.9)::text`));
+    await caso('Delivery 20f: el GPS de una entrega crea la ubicación propuesta (sin confirmar)', (r) => r?.fuente === 'gps_entrega' && r?.confirmada === false && Number(r?.latitud) === 10.491234 && Number(r?.cierre_lat) === 10.491234 && r?.res === 'propuesta',
+      como({ empresa: guds.id, previo: `${asignar(a)} ${rechazarConGps(a, `jsonb_build_object('lat', 10.4912341, 'lng', -66.8765432, 'precision', 14)`)}` },
+        `select row_to_json(t)::text from (select u.fuente, u.confirmada, u.latitud, e.cierre_lat, current_setting('guds.p20f_r')::jsonb->>'ubicacion' res
+          from entregas e join ubicaciones_entrega u on u.entrega_id = e.id where e.id = ${ultima(a)}) t`));
+    await caso('Delivery 20f: el GPS no pisa una ubicación confirmada (queda solo en la entrega)', (r) => r?.fuente === 'pin' && Number(r?.latitud) === 10.5 && Number(r?.cierre_lat) === 10.49 && r?.res === 'ya_confirmada',
+      como({ empresa: guds.id, previo: `${asignar(a)} ${pinDe(a)} ${rechazarConGps(a, `jsonb_build_object('lat', 10.49, 'lng', -66.87, 'precision', 10)`)}` },
+        `select row_to_json(t)::text from (select u.fuente, u.latitud, e.cierre_lat, current_setting('guds.p20f_r')::jsonb->>'ubicacion' res
+          from entregas e join ubicaciones_entrega u on u.cliente_id = e.cliente_id and u.direccion_id is not distinct from e.direccion_id where e.id = ${ultima(a)}) t`));
+    await caso('Delivery 20f: un GPS impreciso (> 500 m) no propone ubicación', (r) => r?.res === 'impreciso' && r?.n === 0,
+      como({ empresa: guds.id, previo: `${asignar(a)} ${rechazarConGps(a, `jsonb_build_object('lat', 10.49, 'lng', -66.87, 'precision', 2500)`)}` },
+        `select row_to_json(t)::text from (select current_setting('guds.p20f_r')::jsonb->>'ubicacion' res, (select count(*) from ubicaciones_entrega where entrega_id = ${ultima(a)}) n) t`));
+    await caso('Delivery 20f: el admin confirma con un clic la ubicación propuesta', (r) => r?.confirmada === true && r?.quien === true,
+      como({ empresa: guds.id, previo: `${asignar(a)} ${rechazarConGps(a, `jsonb_build_object('lat', 10.49, 'lng', -66.87, 'precision', 20)`)}
+          ${sesion(admin)} perform public.confirmar_ubicacion_entrega((select id from ubicaciones_entrega where entrega_id = ${ultima(a)}));` },
+        `select row_to_json(t)::text from (select confirmada, confirmada_por is not null quien from ubicaciones_entrega where entrega_id = ${ultima(a)}) t`));
+    await caso('Delivery 20f: una ubicación fuera de Venezuela (lat/lng invertidas) se rechaza', 'fuera de Venezuela',
+      como({ empresa: guds.id }, `select public.guardar_ubicacion_entrega('${cliGuds}', null, -66.9, 10.5)::text`));
+    await caso('Delivery 20f: el repartidor no puede publicar ni ordenar su ruta', 'Solo administración',
+      como({ uid: repReal, empresa: guds.id, previo: asignar(a) }, `select public.publicar_ruta_reparto(${idRep}, ${HOY}, array[${ent(a)}]::uuid[])::text`));
+    await caso('Delivery 20f: el repartidor no cambia orden_ruta directo (0 filas)', (r, err) => r === null && !err,
+      como({ uid: repReal, empresa: guds.id, previo: asignar(a) }, `with x as (update entregas set orden_ruta = 7 where id = ${ent(a)} returning id) select row_to_json(x)::text from x`));
+    await caso('Delivery 20f: el admin publica la ruta: guarda orden_ruta y avisa al repartidor', (r) => r?.ob === 1 && r?.oa === 2 && r?.v === 1 && r?.n === 1,
+      como({ uid: repReal, empresa: guds.id, previo: `${asignar(a)} ${asignar(b)} ${publicar([b, a])}` },
+        `select row_to_json(t)::text from (select (select orden_ruta from entregas where id = ${ent(b)}) ob, (select orden_ruta from entregas where id = ${ent(a)}) oa,
+          (select version from rutas_reparto where repartidor_id = ${idRep} and fecha = ${HOY}) v,
+          (select count(*) from notificaciones where usuario_id = ${idRep} and titulo = 'Ruta publicada' and link = '/delivery/ruta') n) t`));
+    await caso('Delivery 20f: al cambiar el orden avisa "Ruta actualizada" y el repartidor lo ve en ese orden', (r) => r?.v === 2 && r?.n === 1 && r?.orden === `${a.numero},${b.numero}`,
+      como({ uid: repReal, empresa: guds.id, previo: `${asignar(a)} ${asignar(b)} ${publicar([b, a])} ${publicar([b, a])} ${publicar([a, b])}` },
+        `select row_to_json(t)::text from (select
+          (select string_agg(x->>'numero', ',' order by o) from jsonb_array_elements(public.mis_entregas_reparto()) with ordinality z(x, o) where x->>'numero' in ('${a.numero}', '${b.numero}')) orden,
+          (select version from rutas_reparto where repartidor_id = ${idRep} and fecha = ${HOY}) v,
+          (select count(*) from notificaciones where usuario_id = ${idRep} and titulo = 'Ruta actualizada') n) t`));
+    await caso('Delivery 20f: no se publica en la ruta una entrega de otro repartidor', 'no son entregas abiertas de este repartidor',
+      como({ empresa: guds.id, previo: `${repFalso} ${asignar(a, `'${REP}'`)}` }, `select public.publicar_ruta_reparto(${idRep}, ${HOY}, array[${ent(a)}]::uuid[])::text`));
+    await caso('Delivery 20f: al reasignar la entrega sale de la ruta planificada', (r) => r?.fecha_ruta === null && r?.orden_ruta === null,
+      como({ empresa: guds.id, previo: `${repFalso} ${asignar(a)} ${publicar([a])} ${asignar(a, `'${REP}'`)}` },
+        `select row_to_json(t)::text from (select fecha_ruta, orden_ruta from entregas where id = ${ent(a)}) t`));
+    if (vendGuds) {
+      await caso('Delivery 20f: un vendedor no cambia el punto de salida', 'Solo administración',
+        como({ uid: vendGuds, empresa: guds.id }, `select public.guardar_punto_salida(10.5, -66.9, 'Prueba')::text`));
+    }
+  }
+  if (conSucursal && repReal) {
+    await caso('Delivery 20f: la entrega guarda la sucursal (dirección de entrega) del documento de Odoo', (r) => r?.ok === true,
+      como({ empresa: guds.id, previo: `${sesion(admin)} perform public.asignar_entrega_documento('${conSucursal.id}', (select id from usuarios where auth_id = '${repReal}'), 'normal');` },
+        `select row_to_json(t)::text from (select direccion_id = '${conSucursal.direccion_id}' ok from entregas where transferencia_odoo_id = ${conSucursal.odoo_id} and estado = 'asignada') t`));
+  }
+  await caso('Delivery 20f: anon no ejecuta las funciones y nadie ejecuta las internas', (r) => r?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace and (
+      (p.proname in ('guardar_ubicacion_entrega', 'confirmar_ubicacion_entrega', 'borrar_ubicacion_entrega', 'guardar_punto_salida', 'ruta_reparto_admin', 'publicar_ruta_reparto')
+        and has_function_privilege('anon', p.oid, 'execute'))
+      or (p.proname in ('registrar_gps_cierre', 'direccion_destino_transferencia', 'puede_editar_ubicaciones')
+        and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))))) t`));
+  await caso('Delivery 20f: sin sesión no se leen ubicaciones ni rutas', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select count(*)::text from ubicaciones_entrega`));
+}
+
+// ── Histórico de Profit (20g): solo lectura, por empresa y con el permiso de reportes; suma a los reportes sin cambiar Odoo ──
+{
+  const [{ lote }] = await sql(`select public.profit_lote_vigente() lote`);
+  const resuelto = (obj) => Promise.resolve(obj.error ? obj : { ok: JSON.stringify(obj) });
+  const valor = async (q, empresa = 'todas') => { const r = await como({ empresa }, q); return r.ok ? JSON.parse(r.ok) : { error: r.error }; };
+  if (!lote) {
+    casos.push({ ok: '✗', caso: 'Profit: hay un lote vigente del histórico', resultado: 'sin carga (node scripts/importar-historico-profit.mjs)' });
+  } else {
+    const cuentaHist = `select row_to_json(t)::text from (select count(*) n from public.ventas_historicas) t`;
+    if (vendGuds) {
+      await caso('Profit: un vendedor no lee ventas_historicas', (r, err) => r?.n === 0 || /permission denied/.test(err || ''),
+        como({ uid: vendGuds, empresa: guds.id }, cuentaHist));
+      await caso('Profit: un vendedor no lee el resumen por documento ni las equivalencias', (r) => r?.docs === 0 && r?.vend === 0,
+        como({ uid: vendGuds, empresa: guds.id }, `select row_to_json(t)::text from (select (select count(*) from public.profit_documentos) docs,
+          (select count(*) from public.profit_vendedores) vend) t`));
+      await caso('Profit: un vendedor no ve el estado del histórico', 'permiso para ver reportes',
+        como({ uid: vendGuds, empresa: guds.id }, `select public.estado_historico_profit()::text`));
+      await caso('Profit: un vendedor no puede guardar equivalencias', 'Solo administración',
+        como({ uid: vendGuds, empresa: guds.id }, `select public.guardar_profit_vendedores('[{"id":"00000000-0000-0000-0000-000000000000","vendedor_odoo":null}]'::jsonb)::text`));
+    }
+    // Cliente del portal: uno real o, si no hay, un perfil de cliente temporal dentro del bloque (se deshace con él)
+    const cliReal = (await sql(`select auth_id from usuarios where role = 'cliente' and auth_id is not null and cliente_id is not null and activo limit 1`))[0]?.auth_id;
+    const authLibre = cliReal ? null : (await sql(`select a.id from auth.users a where not exists (select 1 from usuarios u where u.auth_id = a.id) limit 1`))[0]?.id;
+    const cliUid = cliReal || authLibre;
+    if (cliUid) {
+      const previoCli = authLibre ? `insert into public.usuarios (auth_id, email, nombre, role, cliente_id, activo)
+        values ('${authLibre}', 'prueba-20g@guds.test', 'Prueba 20g', 'cliente', '${cliGuds}', true);` : '';
+      await caso('Profit: un cliente no lee ventas_historicas', (r, err) => r?.n === 0 || /permission denied/.test(err || ''),
+        como({ uid: cliUid, empresa: guds.id, previo: previoCli }, cuentaHist));
+    }
+    await caso('Profit: anónimo no lee el histórico', 'permission denied', como({ rol: 'anon', uid: null, empresa: guds.id }, cuentaHist));
+    await caso('Profit: el admin en GUDS lee solo el histórico de GUDS', (r) => r?.n > 0 && r?.otras === 0,
+      como(E, `select row_to_json(t)::text from (select count(*) n, count(*) filter (where empresa_id <> '${guds.id}') otras from public.ventas_historicas) t`));
+    await caso('Profit: el costo de referencia no se lee por la API', 'permission denied',
+      como(E, `select sum(costo_usd)::text from public.ventas_historicas`));
+
+    // Nadie modifica el histórico por la API (ni con una función security definer)
+    const idLinea = (await sql(`select id from ventas_historicas where lote = ${lote} and empresa_id = '${guds.id}' limit 1`))[0].id;
+    await caso('Profit: el admin no puede editar una línea del histórico', 'permission denied',
+      como(E, `with x as (update public.ventas_historicas set neto_usd = 0 where id = ${idLinea} returning id) select row_to_json(x)::text from x`));
+    await caso('Profit: el admin no puede borrar el histórico', 'permission denied',
+      como(E, `with x as (delete from public.ventas_historicas where id = ${idLinea} returning id) select row_to_json(x)::text from x`));
+    await caso('Profit: ni una función security definer escribe en el histórico', 'solo lectura',
+      como({ empresa: guds.id, previo: `create function pg_temp.tocar_hist(p bigint) returns int language sql security definer as 'update public.ventas_historicas set neto_usd = neto_usd where id = p returning 1';` },
+        `select row_to_json(t)::text from (select pg_temp.tocar_hist(${idLinea}) n) t`));
+    await caso('Profit: nadie edita las equivalencias directamente (solo con la función)', 'permission denied',
+      como(E, `with x as (update public.profit_vendedores set vendedor_odoo = 'X' returning id) select row_to_json(x)::text from x`));
+
+    // El reporte suma Odoo + Profit y la venta de Odoo no cambia (mayo 2026 tiene las dos fuentes)
+    const rep = (fuente, desde, hasta, emp = 'todas') => valor(`select row_to_json(t)::text from (select coalesce(round(sum(neto_usd), 2), 0) neto,
+      coalesce(round(sum(profit_usd), 2), 0) profit, coalesce(round(sum(financieras_usd), 2), 0) fin, count(*) filas
+      from public.reporte_ventas('${desde}', '${hasta}', 'empresa', '${fuente}')) t`, emp);
+    const [ambas, odoo, profit] = [await rep('ambas', '2026-05-01', '2026-05-31'), await rep('odoo', '2026-05-01', '2026-05-31'), await rep('profit', '2026-05-01', '2026-05-31')];
+    await caso('Profit: el reporte de mayo 2026 suma Odoo + Profit', (r) => Math.abs(Number(r.ambas.neto) - Number(r.odoo.neto) - Number(r.profit.neto)) < 0.02
+      && Number(r.profit.neto) > 0 && Number(r.odoo.neto) !== 0 && Math.abs(Number(r.ambas.profit) - Number(r.profit.neto)) < 0.02, resuelto({ ambas, odoo, profit }));
+    const odooDirecto = Number((await sql(`with rev as (select fa.id f, nc.id n from facturas nc join facturas fa on fa.id = nc.factura_origen_id
+        where nc.tipo = 'nota_credito' and fa.tipo = 'factura' and nc.estado = 'posted' and fa.estado = 'posted'
+          and fa.moneda is not distinct from nc.moneda and abs(abs(nc.total) - abs(fa.total)) < 0.01)
+      select coalesce(round(sum(case when total<>0 then subtotal*total_usd/total end),2),0) n from facturas
+      where estado='posted' and tipo in ('factura','nota_credito') and not es_saldo_inicial and not coalesce(es_nota_debito,false)
+        and fecha_emision between '2026-05-01' and '2026-05-31' and id not in (select f from rev union select n from rev)`))[0].n);
+    await caso('Profit: la venta de Odoo no cambia al agregar Profit (mayo 2026)', (r) => Math.abs(Number(r.odoo.neto) - r.directo) < 0.02
+      && Math.abs(Number(r.ambas.neto) - Number(r.ambas.profit) - r.directo) < 0.02, resuelto({ odoo, ambas, directo: odooDirecto }));
+    const venta2025 = (await sql(`select e.nombre_corto, round(sum(neto_usd) filter (where tratamiento = 'venta'), 2) venta,
+      round(sum(neto_usd) filter (where tratamiento = 'financiera'), 2) fin from ventas_historicas v join empresas e on e.id = v.empresa_id
+      where lote = ${lote} and fecha between '2025-01-01' and '2025-12-31' group by 1`));
+    const esperado = (emp) => venta2025.find((x) => x.nombre_corto === emp);
+    await caso('Profit: 2025 en GUDS = facturas − devoluciones de Profit, con las notas financieras aparte', (r) => Number(r.rep.neto) === Number(r.esp.venta)
+      && Number(r.rep.fin) === Number(r.esp.fin) && r.rep.filas === 1, resuelto({ rep: await rep('ambas', '2025-01-01', '2025-12-31', guds.id), esp: esperado('GUDS') }));
+    await caso('Profit: una fuente no válida se rechaza', 'Fuente no válida',
+      como(E, `select count(*)::text from public.reporte_ventas('2025-01-01', '2025-12-31', 'mes', 'otra')`));
+    await caso('Profit: los reversos del histórico aparecen con su fuente', (r) => r?.profit > 0 && r?.fuera === 0,
+      como({ empresa: 'todas' }, `select row_to_json(t)::text from (select count(*) filter (where fuente = 'profit') profit,
+        count(*) filter (where fuente = 'profit' and not (factura_fecha between '2025-01-01' and '2025-12-31' or nota_fecha between '2025-01-01' and '2025-12-31')) fuera
+        from public.reporte_reversos('2025-01-01', '2025-12-31')) t`));
+
+    // Equivalencias de vendedores: solo administración y en la empresa activa (el bloque se deshace: no queda validado)
+    const pv = (await sql(`select id, vendedor_odoo from profit_vendedores where empresa_id = '${guds.id}' and vendedor_odoo is not null limit 1`))[0];
+    if (pv) {
+      const cambio = lit(JSON.stringify([{ id: pv.id, vendedor_odoo: pv.vendedor_odoo }]));
+      await caso('Profit: en "Ambas" no se editan equivalencias', 'Modo consulta',
+        como({ empresa: 'todas' }, `select public.guardar_profit_vendedores(${cambio}::jsonb)::text`));
+      const previoValidar = `create function pg_temp.p20g_validar(p jsonb, v uuid) returns text language plpgsql as $f$
+        declare n int; r text;
+        begin
+          n := public.guardar_profit_vendedores(p);
+          select row_to_json(t)::text into r from (select n, estado, revisado_por is not null quien from public.profit_vendedores where id = v) t;
+          return r;
+        end $f$;`;
+      await caso('Profit: el admin valida una equivalencia en su empresa', (r) => r?.n === 1 && r?.estado === 'validado' && r?.quien,
+        como({ empresa: guds.id, previo: previoValidar }, `select pg_temp.p20g_validar(${cambio}::jsonb, '${pv.id}')`));
+      await caso('Profit: no se asigna un vendedor que no existe en Odoo', 'no existe en Odoo',
+        como(E, `select public.guardar_profit_vendedores(${lit(JSON.stringify([{ id: pv.id, vendedor_odoo: 'NADIE INVENTADO' }]))}::jsonb)::text`));
+    }
+    await caso('Profit: las funciones de carga no se ejecutan desde la API', (r) => r?.n === 0,
+      como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace
+        and p.proname in ('profit_iniciar_carga', 'profit_publicar_carga', 'profit_emparejar', 'profit_proponer_vendedores', 'profit_parejas_clientes',
+          'profit_parejas_productos', 'profit_palabras', 'trg_ventas_historicas_solo_lectura')
+        and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))) t`));
+  }
+}
+
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {
   const pol = await sql(String.raw`select tablename || '.' || policyname p, coalesce(qual,'') || ' ' || coalesce(with_check,'') t from pg_policies where schemaname = 'public'`);

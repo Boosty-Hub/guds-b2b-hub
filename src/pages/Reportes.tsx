@@ -13,6 +13,7 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { Panel } from "@/components/datos/FichaCampos";
 import { TablaReporte } from "@/components/reportes/TablaReporte";
+import { HistoricoProfit } from "@/components/reportes/HistoricoProfit";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { usePagination } from "@/hooks/use-pagination";
@@ -22,10 +23,11 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { useEmpresa } from "@/contexts/EmpresaContext";
 import { useToast } from "@/hooks/use-toast";
 
-// ── Tipos de las funciones de reporte (migración 18u) ──
-interface FilaVenta { clave: string; etiqueta: string; detalle: string | null; documentos: number; clientes: number; cantidad: number | null; bruto_usd: number; nc_usd: number; neto_usd: number }
+// ── Tipos de las funciones de reporte (migraciones 18u y 20g: Odoo + histórico de Profit) ──
+type FuenteFila = "odoo" | "profit" | "ambas";
+interface FilaVenta { clave: string; etiqueta: string; detalle: string | null; documentos: number | null; clientes: number | null; cantidad: number | null; bruto_usd: number; nc_usd: number; neto_usd: number; profit_usd: number; financieras_usd: number; fuente: FuenteFila }
 interface FilaCobro { clave: string; etiqueta: string; detalle: string | null; cobros: number; clientes: number; monto_usd: number }
-interface FilaReverso { empresa: string; cliente: string; factura: string; factura_fecha: string; nota: string; nota_fecha: string; neto_usd: number; motivo: string | null }
+interface FilaReverso { empresa: string; cliente: string; factura: string; factura_fecha: string; nota: string; nota_fecha: string; neto_usd: number; motivo: string | null; fuente: FuenteFila }
 interface FilaInv { producto_id: string; sku: string; nombre: string; categoria: string; existencia: number; comprometido: number; disponible: number; vendido_unidades: number; vendido_usd: number; ultima_venta: string | null; cobertura_dias: number | null }
 
 const num = (v: unknown) => Number(v ?? 0);
@@ -33,25 +35,62 @@ const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 const MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 const etiquetaMes = (k: string) => { const [y, m] = k.split("-"); return `${MESES[Number(m) - 1]} ${y.slice(2)}`; };
 
-type Periodo = "mes" | "mes_anterior" | "trimestre" | "anio" | "12m" | "personalizado";
-const PERIODOS: Record<Periodo, string> = {
-  mes: "Este mes", mes_anterior: "Mes anterior", trimestre: "Últimos 3 meses", anio: "Año en curso", "12m": "Últimos 12 meses", personalizado: "Personalizado",
+// Fuente de las ventas: Odoo (en operación desde mayo 2026) y el histórico de Profit (dic-2020 → may-2026, solo lectura)
+type Fuente = "ambas" | "odoo" | "profit";
+const FUENTES: Record<Fuente, string> = { ambas: "Odoo + Profit", odoo: "Solo Odoo", profit: "Solo Profit" };
+const HISTORIAL_DESDE = "2020-12-01";
+const textoFuente = (f: FuenteFila) => (f === "ambas" ? "Odoo + Profit" : f === "profit" ? "Profit" : "Odoo");
+// Colores por fuente (paleta validada para daltonismo en claro y oscuro): Odoo rojo, Profit azul
+const COLOR_FUENTE = { odoo: ["#e34948", "#e66767"], profit: ["#2a78d6", "#3987e5"] } as const;
+const colorFuente = (f: "odoo" | "profit") => {
+  const oscuro = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  return COLOR_FUENTE[f][oscuro ? 1 : 0];
 };
+
+/** Insignia de los números que incluyen el histórico de Profit */
+function InsigniaProfit({ className }: { className?: string }) {
+  return (
+    <span title="Incluye el histórico de Profit (solo lectura)"
+      className={`inline-flex h-4 shrink-0 items-center gap-1 rounded border border-border px-1 text-[10px] font-medium leading-none text-muted-foreground ${className ?? ""}`}>
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: colorFuente("profit") }} aria-hidden />Profit
+    </span>
+  );
+}
+
+type Periodo = "mes" | "mes_anterior" | "trimestre" | "anio" | "12m" | "24m" | "todo" | "personalizado" | `a${number}`;
+const ANIO_ACTUAL = new Date().getFullYear();
+const PERIODOS: [Periodo, string][] = [
+  ["mes", "Este mes"], ["mes_anterior", "Mes anterior"], ["trimestre", "Últimos 3 meses"], ["anio", "Año en curso"],
+  ["12m", "Últimos 12 meses"], ["24m", "Últimos 24 meses"],
+  // Años completos anteriores (con el histórico de Profit hay ventas desde dic-2020)
+  ...Array.from({ length: Math.max(0, ANIO_ACTUAL - 2021) }, (_, i): [Periodo, string] => [`a${ANIO_ACTUAL - 1 - i}`, `Año ${ANIO_ACTUAL - 1 - i}`]),
+  ["todo", "Todo el historial"], ["personalizado", "Personalizado"],
+];
+const esPeriodo = (v: string | null): v is Periodo => !!v && PERIODOS.some(([k]) => k === v);
 function rango(p: Periodo, desde: string, hasta: string): [string, string] {
   const hoy = new Date();
   const y = hoy.getFullYear(), m = hoy.getMonth();
+  if (/^a\d{4}$/.test(p)) return [`${p.slice(1)}-01-01`, `${p.slice(1)}-12-31`];
   switch (p) {
     case "mes": return [iso(new Date(y, m, 1)), iso(hoy)];
     case "mes_anterior": return [iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))];
     case "trimestre": return [iso(new Date(y, m - 2, 1)), iso(hoy)];
     case "anio": return [iso(new Date(y, 0, 1)), iso(hoy)];
     case "12m": return [iso(new Date(y, m - 11, 1)), iso(hoy)];
+    case "24m": return [iso(new Date(y, m - 23, 1)), iso(hoy)];
+    case "todo": return [HISTORIAL_DESDE, iso(hoy)];
     default: return [desde, hasta];
   }
 }
-// Período anterior de igual duración (para comparar)
+// Período anterior para comparar: si son meses completos, los mismos meses justo antes (un año → el año anterior);
+// si no, el mismo número de días justo antes
 function anterior(desde: string, hasta: string): [string, string] {
   const d = new Date(`${desde}T00:00:00`), h = new Date(`${hasta}T00:00:00`);
+  const finDeMes = new Date(h.getFullYear(), h.getMonth() + 1, 0).getDate() === h.getDate();
+  if (d.getDate() === 1 && finDeMes) {
+    const meses = (h.getFullYear() - d.getFullYear()) * 12 + h.getMonth() - d.getMonth() + 1;
+    return [iso(new Date(d.getFullYear(), d.getMonth() - meses, 1)), iso(new Date(d.getFullYear(), d.getMonth(), 0))];
+  }
   const dias = Math.round((h.getTime() - d.getTime()) / 86400000) + 1;
   const fin = new Date(d.getTime() - 86400000), ini = new Date(fin.getTime() - (dias - 1) * 86400000);
   return [iso(ini), iso(fin)];
@@ -81,13 +120,53 @@ function GraficoMeses({ datos, formato }: { datos: { mes: string; valor: number 
   );
 }
 
+// Venta neta por mes, apilada por fuente (Odoo / Profit). Con una sola fuente no hay leyenda: el título la nombra.
+function GraficoVentas({ datos, formato }: { datos: { mes: string; odoo: number; profit: number }[]; formato: (v: number) => string }) {
+  const hayOdoo = datos.some((d) => Math.abs(d.odoo) > 0.004), hayProfit = datos.some((d) => Math.abs(d.profit) > 0.004);
+  const series = [
+    ...(hayProfit ? [{ clave: "profit" as const, nombre: "Profit (histórico)" }] : []),
+    ...(hayOdoo || !hayProfit ? [{ clave: "odoo" as const, nombre: "Odoo" }] : []),
+  ];
+  const superficie = "hsl(var(--card))";
+  return (
+    <div className="w-full px-2 py-2">
+      {series.length > 1 && (
+        <div className="mb-1 flex flex-wrap items-center gap-3 px-2 text-[11px] text-muted-foreground" aria-label="Leyenda">
+          {series.map((s) => (
+            <span key={s.clave} className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm" style={{ background: colorFuente(s.clave) }} aria-hidden />{s.nombre}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="h-44 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={datos} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+            <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border" />
+            <XAxis dataKey="mes" tickLine={false} axisLine={false} fontSize={11} tickFormatter={etiquetaMes} minTickGap={12} />
+            <YAxis tickLine={false} axisLine={false} fontSize={11} width={56} tickFormatter={(v) => (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : String(v))} />
+            <Tooltip cursor={{ fill: "hsl(var(--muted))" }} labelFormatter={(l: string) => etiquetaMes(l)}
+              formatter={(v: number, n: string) => [formato(v), n]}
+              contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))", color: "hsl(var(--foreground))" }} />
+            {series.map((s, i) => (
+              <Bar key={s.clave} dataKey={s.clave} name={s.nombre} stackId="fuente" fill={colorFuente(s.clave)} maxBarSize={48} isAnimationActive={false}
+                stroke={superficie} strokeWidth={1} radius={i === series.length - 1 ? [4, 4, 0, 0] : 0} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 const Reportes = () => {
   const { formatPrice } = useCurrency();
   const { soloLectura, seleccion } = useEmpresa();
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState(params.get("tab") || "ventas");
-  const [periodo, setPeriodo] = useState<Periodo>("mes");
+  const [periodo, setPeriodoEstado] = useState<Periodo>(esPeriodo(params.get("periodo")) ? (params.get("periodo") as Periodo) : "mes");
+  const [fuente, setFuenteEstado] = useState<Fuente>((["ambas", "odoo", "profit"] as const).find((f) => f === params.get("fuente")) ?? "ambas");
   const [desdeP, setDesdeP] = useState(iso(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
   const [hastaP, setHastaP] = useState(iso(new Date()));
   const [desde, hasta] = rango(periodo, desdeP, hastaP);
@@ -105,15 +184,25 @@ const Reportes = () => {
   const [filtroInv, setFiltroInv] = useState<"todos" | "quiebre" | "inmovilizado">("todos");
   const [qInv, setQInv] = useState("");
 
-  const cambiarTab = (t: string) => { setTab(t); params.set("tab", t); setParams(params, { replace: true }); };
+  // Pestaña, período y fuente quedan en la URL (para compartir el reporte)
+  const enUrl = (clave: string, valor: string, porDefecto: string) => {
+    if (valor === porDefecto) params.delete(clave); else params.set(clave, valor);
+    setParams(params, { replace: true });
+  };
+  const cambiarTab = (t: string) => { setTab(t); enUrl("tab", t, "ventas"); };
+  const setPeriodo = (p: Periodo) => { setPeriodoEstado(p); enUrl("periodo", p, "mes"); };
+  const setFuente = (f: Fuente) => { setFuenteEstado(f); enUrl("fuente", f, "ambas"); };
 
   // Carga según la pestaña (cada consulta agrega en el servidor)
   useEffect(() => {
+    if (tab === "profit") { setCargando(false); return; }   // la pestaña del histórico carga lo suyo
     let cancelado = false;
     (async () => {
       setCargando(true);
       const [pd, ph] = anterior(desde, hasta);
-      const ini12 = iso(new Date(new Date(`${hasta}T00:00:00`).getFullYear(), new Date(`${hasta}T00:00:00`).getMonth() - 11, 1));
+      // Gráfico mensual: los 12 meses hasta el fin del período, o el período completo si es más largo
+      const h = new Date(`${hasta}T00:00:00`);
+      const ini12 = [iso(new Date(h.getFullYear(), h.getMonth() - 11, 1)), iso(new Date(`${desde.slice(0, 7)}-01T00:00:00`))].sort()[0];
       const rpc = async <T,>(fn: string, args: Record<string, unknown>) => {
         const { data, error } = await supabase.rpc(fn, args);
         if (error) throw error;
@@ -123,15 +212,31 @@ const Reportes = () => {
         if (tab === "ventas") {
           // "empresa" da los totales con un solo redondeo (y la tabla por empresa en modo "Ambas")
           const grupos = ["empresa", "vendedor", "cliente", "producto", "categoria"];
-          const [res, prev, m, rev] = await Promise.all([
-            Promise.all(grupos.map((g) => rpc<FilaVenta>("reporte_ventas", { p_desde: desde, p_hasta: hasta, p_agrupar: g }))),
-            rpc<FilaVenta>("reporte_ventas", { p_desde: pd, p_hasta: ph, p_agrupar: "empresa" }),
-            rpc<FilaVenta>("reporte_ventas", { p_desde: ini12, p_hasta: hasta, p_agrupar: "mes" }),
-            rpc<FilaReverso>("reporte_reversos", { p_desde: desde, p_hasta: hasta }),
-          ]);
+          // Con el histórico de Profit un período largo pesa y la base tiene pocos núcleos: las consultas por documento van en
+          // 2 carriles y las de líneas (categoría y producto, las más pesadas) en un tercero, una tras otra. Si una tabla
+          // falla, las demás se muestran igual.
+          const venta = (g: string, d: string, h: string) => () => rpc<FilaVenta>("reporte_ventas", { p_desde: d, p_hasta: h, p_agrupar: g, p_fuente: fuente });
+          const livianas: [string, () => Promise<unknown[]>][] = [
+            ["empresa", venta("empresa", desde, hasta)], ["mes", venta("mes", ini12, hasta)], ["prev", venta("empresa", pd, ph)],
+            ["vendedor", venta("vendedor", desde, hasta)], ["cliente", venta("cliente", desde, hasta)],
+            ["reversos", () => rpc<FilaReverso>("reporte_reversos", { p_desde: desde, p_hasta: hasta, p_fuente: fuente })],
+          ];
+          // Por categoría y producto la página solo muestra unidades y venta: sin conteos de documentos ni clientes (mucho más rápido)
+          const lineas = (g: string) => () => rpc<FilaVenta>("reporte_ventas", { p_desde: desde, p_hasta: hasta, p_agrupar: g, p_fuente: fuente, p_conteos: false });
+          const pesadas: [string, () => Promise<unknown[]>][] = [["categoria", lineas("categoria")], ["producto", lineas("producto")]];
+          const out: Record<string, unknown[]> = {};
+          const fallas: string[] = [];
+          const carril = async (cola: [string, () => Promise<unknown[]>][]) => {
+            for (let t = cola.shift(); t && !cancelado; t = cola.shift()) {
+              try { out[t[0]] = await t[1](); } catch (e) { out[t[0]] = []; fallas.push((e as Error).message); }
+            }
+          };
+          const total = livianas.length + pesadas.length;
+          await Promise.all([carril(livianas), carril(livianas), carril(pesadas)]);
           if (cancelado) return;
-          setVentas(Object.fromEntries(grupos.map((g, i) => [g, res[i]])));
-          setVentasPrev(prev); setMeses(m); setReversos(rev);
+          setVentas(Object.fromEntries(grupos.map((g) => [g, (out[g] ?? []) as FilaVenta[]])));
+          setVentasPrev((out.prev ?? []) as FilaVenta[]); setMeses((out.mes ?? []) as FilaVenta[]); setReversos((out.reversos ?? []) as FilaReverso[]);
+          if (fallas.length) toast({ title: `No se pudieron cargar ${fallas.length} de ${total} partes del reporte`, description: fallas[0], variant: "destructive" });
         } else if (tab === "cobranza") {
           const grupos = ["empresa", "banco", "vendedor", "cliente", "metodo"];
           const [res, prev, m] = await Promise.all([
@@ -142,7 +247,7 @@ const Reportes = () => {
           if (cancelado) return;
           setCobros(Object.fromEntries(grupos.map((g, i) => [g, res[i]])));
           setCobrosPrev(prev); setMesesCobro(m);
-        } else {
+        } else if (tab === "inventario") {
           const r = await rpc<FilaInv>("reporte_inventario", { p_dias: diasRot });
           if (cancelado) return;
           setInv(r);
@@ -155,20 +260,31 @@ const Reportes = () => {
     })();
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, desde, hasta, diasRot, soloLectura, seleccion]);
+  }, [tab, desde, hasta, diasRot, soloLectura, seleccion, fuente]);
 
   // ── Ventas ──
   const totalVentas = useMemo(() => {
     const porEmpresa = ventas.empresa ?? [];
-    const neto = porEmpresa.reduce((s, f) => s + num(f.neto_usd), 0);
-    const bruto = porEmpresa.reduce((s, f) => s + num(f.bruto_usd), 0);
-    const nc = porEmpresa.reduce((s, f) => s + num(f.nc_usd), 0);
-    const docs = porEmpresa.reduce((s, f) => s + num(f.documentos), 0);
+    const suma = (c: (f: FilaVenta) => unknown) => porEmpresa.reduce((s, f) => s + num(c(f)), 0);
+    const [neto, bruto, nc, docs, profit, financieras] = [suma((f) => f.neto_usd), suma((f) => f.bruto_usd), suma((f) => f.nc_usd),
+      suma((f) => f.documentos), suma((f) => f.profit_usd), suma((f) => f.financieras_usd)];
     const clientes = (ventas.cliente ?? []).filter((f) => num(f.bruto_usd) > 0).length;
-    return { neto, bruto, nc, docs, clientes, ticket: docs ? bruto / docs : 0 };
+    const clientesProfit = (ventas.cliente ?? []).some((f) => num(f.bruto_usd) > 0 && f.fuente !== "odoo");
+    return { neto, bruto, nc, docs, clientes, ticket: docs ? bruto / docs : 0, profit, financieras,
+      conProfit: porEmpresa.some((f) => f.fuente !== "odoo"), clientesProfit };
   }, [ventas]);
   const netoPrev = ventasPrev.reduce((s, f) => s + num(f.neto_usd), 0);
+  const prevConProfit = ventasPrev.some((f) => f.fuente !== "odoo");
   const varVentas = variacion(totalVentas.neto, netoPrev);
+  const [pdesde, phasta] = anterior(desde, hasta);
+  // Primera columna de las tablas de ventas: etiqueta + insignia cuando la fila incluye Profit
+  const conInsignia = (texto: string, f: FilaVenta) => (
+    <span className="inline-flex max-w-full items-center gap-1.5"><span className="truncate">{texto}</span>{f.fuente !== "odoo" && <InsigniaProfit />}</span>
+  );
+  const columnasFuente = [
+    { clave: "fuente", titulo: "Fuente", valor: (f: FilaVenta) => textoFuente(f.fuente), soloExportar: true },
+    { clave: "profit", titulo: "Parte de Profit (USD)", valor: (f: FilaVenta) => num(f.profit_usd), soloExportar: true },
+  ];
 
   // ── Cobranza ──
   const totalCobros = useMemo(() => {
@@ -215,15 +331,22 @@ const Reportes = () => {
     <TabsList>
       <TabsTrigger value="ventas">Ventas</TabsTrigger>
       <TabsTrigger value="cobranza">Cobranza</TabsTrigger>
-      <TabsTrigger value="inventario">Inventario y rotación</TabsTrigger>
+      <TabsTrigger value="inventario"><span className="sm:hidden">Inventario</span><span className="hidden sm:inline">Inventario y rotación</span></TabsTrigger>
+      <TabsTrigger value="profit"><span className="sm:hidden">Profit</span><span className="hidden sm:inline">Histórico Profit</span></TabsTrigger>
     </TabsList>
   );
   const selectorPeriodo = (
     <>
       <Select value={periodo} onValueChange={(v) => setPeriodo(v as Periodo)}>
         <SelectTrigger className="h-8 w-44 text-[13px]" aria-label="Período"><SelectValue /></SelectTrigger>
-        <SelectContent>{Object.entries(PERIODOS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+        <SelectContent>{PERIODOS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
       </Select>
+      {tab === "ventas" && (
+        <Select value={fuente} onValueChange={(v) => setFuente(v as Fuente)}>
+          <SelectTrigger className="h-8 w-36 text-[13px]" aria-label="Fuente de las ventas"><SelectValue /></SelectTrigger>
+          <SelectContent>{(Object.keys(FUENTES) as Fuente[]).map((k) => <SelectItem key={k} value={k}>{FUENTES[k]}</SelectItem>)}</SelectContent>
+        </Select>
+      )}
       {periodo === "personalizado" && (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <Input type="date" value={desdeP} max={hastaP} onChange={(e) => setDesdeP(e.target.value)} className="h-8 w-36 text-[13px]" aria-label="Desde" />
@@ -244,73 +367,99 @@ const Reportes = () => {
               <SelectTrigger className="h-8 w-52 text-[13px]" aria-label="Ventana de rotación"><SelectValue /></SelectTrigger>
               <SelectContent>{[30, 60, 90, 180].map((d) => <SelectItem key={d} value={String(d)}>Rotación: ventas de {d} días</SelectItem>)}</SelectContent>
             </Select>
-          ) : selectorPeriodo}
-          acciones={cargando ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : <span className="text-[11px] text-muted-foreground">USD · neto de IVA · fuente Odoo</span>} />
+          ) : tab === "profit" ? null : selectorPeriodo}
+          acciones={cargando ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            : <span className="text-[11px] text-muted-foreground">USD · neto de IVA · fuente {tab === "ventas" ? FUENTES[fuente].replace("Solo ", "") : tab === "profit" ? "Profit (solo lectura)" : "Odoo"}</span>} />
 
         <TabsContent value="ventas" className="mt-0">
           <KpiStrip items={[
-            { label: "Venta neta", valor: formatPrice(totalVentas.neto), detalle: textoVar(varVentas), tono: tonoVar(varVentas), titulo: "Facturas − notas de crédito, sin IVA ni saldos iniciales" },
-            { label: "Facturado", valor: formatPrice(totalVentas.bruto), detalle: `${fmtN(totalVentas.docs)} facturas` },
-            { label: "Notas de crédito", valor: formatPrice(totalVentas.nc), tono: totalVentas.nc < 0 ? "negativo" : "normal" },
-            { label: "Clientes con compra", valor: fmtN(totalVentas.clientes) },
-            { label: "Ticket promedio", valor: formatPrice(totalVentas.ticket), detalle: "por factura" },
+            { label: "Venta neta", valor: formatPrice(totalVentas.neto),
+              detalle: <span className="inline-flex items-center gap-1">{totalVentas.conProfit && <InsigniaProfit />}{textoVar(varVentas)}{!totalVentas.conProfit && prevConProfit ? " (con Profit)" : ""}</span>,
+              tono: tonoVar(varVentas),
+              titulo: `Facturas − notas de crédito, sin IVA ni saldos iniciales. Comparado con ${pdesde.split("-").reverse().join("/")} – ${phasta.split("-").reverse().join("/")}` },
+            { label: "Facturado", valor: formatPrice(totalVentas.bruto), detalle: <span className="inline-flex items-center gap-1">{totalVentas.conProfit && <InsigniaProfit />}{fmtN(totalVentas.docs)} facturas</span> },
+            { label: "Notas de crédito", valor: formatPrice(totalVentas.nc), tono: totalVentas.nc < 0 ? "negativo" : "normal",
+              detalle: totalVentas.conProfit ? <span className="inline-flex items-center gap-1"><InsigniaProfit />con devoluciones</span> : undefined },
+            { label: "Clientes con compra", valor: fmtN(totalVentas.clientes), detalle: totalVentas.clientesProfit ? <InsigniaProfit /> : undefined },
+            { label: "Ticket promedio", valor: formatPrice(totalVentas.ticket), detalle: <span className="inline-flex items-center gap-1">{totalVentas.conProfit && <InsigniaProfit />}por factura</span> },
+            ...(Math.abs(totalVentas.financieras) > 0.004 ? [{ label: "Notas financieras", valor: formatPrice(totalVentas.financieras),
+              detalle: <span className="inline-flex items-center gap-1"><InsigniaProfit />aparte de la venta</span>, tono: "tenue" as const,
+              titulo: "Notas de crédito y débito de Profit (descuentos, acuerdos comerciales, ajustes de precio, anulaciones): no entran en la venta neta" }] : []),
           ]} />
+          {totalVentas.conProfit && (
+            <p className="-mt-1 mb-2 text-xs text-muted-foreground">
+              <InsigniaProfit className="mr-1 align-[-2px]" />
+              Incluye {formatPrice(totalVentas.profit)} del histórico de Profit (hasta may-2026, solo lectura): facturas − devoluciones; las notas
+              financieras de Profit van aparte y las facturas anuladas con devolución total no cuentan.
+            </p>
+          )}
           {reversos.length > 0 && (
             <p className="-mt-1 mb-3 text-xs text-muted-foreground">
-              No se cuentan {fmtN(reversos.length)} facturas anuladas por completo con su nota de crédito ({formatPrice(reversos.reduce((s, r) => s + num(r.neto_usd), 0))}).
+              No se cuentan {fmtN(reversos.length)} facturas anuladas por completo con su nota de crédito o devolución ({formatPrice(reversos.reduce((s, r) => s + num(r.neto_usd), 0))}).
               <Button variant="link" size="sm" className="h-auto px-1 py-0 text-xs" onClick={() => setVerReversos(true)}>Ver lista</Button>
             </p>
           )}
-          <Panel sinPadding className="mb-3" titulo="Venta neta por mes (últimos 12 meses)">
-            <GraficoMeses datos={meses.map((f) => ({ mes: f.clave, valor: num(f.neto_usd) }))} formato={formatPrice} />
+          <Panel sinPadding className="mb-3" titulo={<>Venta neta por mes <span className="font-normal text-muted-foreground">
+            · {meses.length ? `${etiquetaMes(meses[0].clave)} – ${etiquetaMes(meses[meses.length - 1].clave)}` : "sin datos"}</span></>}>
+            <GraficoVentas datos={meses.map((f) => ({ mes: f.clave, odoo: num(f.neto_usd) - num(f.profit_usd), profit: num(f.profit_usd) }))} formato={formatPrice} />
           </Panel>
           <div className="grid gap-3 xl:grid-cols-2">
             {soloLectura && (
               <TablaReporte titulo="Por empresa" filas={ventas.empresa ?? []} exportar="ventas-por-empresa" metrica={(f) => num(f.neto_usd)} columnas={[
-                { clave: "etiqueta", titulo: "Empresa", valor: (f) => f.etiqueta },
+                { clave: "etiqueta", titulo: "Empresa", valor: (f) => f.etiqueta, render: (f) => conInsignia(f.etiqueta, f) },
                 { clave: "documentos", titulo: "Facturas", valor: (f) => num(f.documentos), derecha: true },
                 { clave: "neto", titulo: "Venta neta", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
+                ...columnasFuente,
+                { clave: "financieras", titulo: "Notas financieras Profit (aparte)", valor: (f) => num(f.financieras_usd), soloExportar: true },
               ]} />
             )}
             <TablaReporte titulo="Por vendedor" filas={ventas.vendedor ?? []} exportar="ventas-por-vendedor" metrica={(f) => num(f.neto_usd)} columnas={[
-              { clave: "etiqueta", titulo: "Vendedor (Odoo)", valor: (f) => f.etiqueta },
+              { clave: "etiqueta", titulo: "Vendedor", valor: (f) => f.etiqueta, render: (f) => conInsignia(f.etiqueta, f) },
               { clave: "documentos", titulo: "Facturas", valor: (f) => num(f.documentos), derecha: true },
               { clave: "clientes", titulo: "Clientes", valor: (f) => num(f.clientes), derecha: true, secundaria: true },
               { clave: "nc", titulo: "NC", valor: (f) => num(f.nc_usd), render: (f) => formatPrice(num(f.nc_usd)), derecha: true, ocultarMovil: true },
               { clave: "neto", titulo: "Venta neta", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
+              ...columnasFuente,
+              { clave: "financieras", titulo: "Notas financieras Profit (aparte)", valor: (f) => num(f.financieras_usd), soloExportar: true },
             ]} />
             <TablaReporte titulo="Por categoría" filas={ventas.categoria ?? []} exportar="ventas-por-categoria" metrica={(f) => num(f.neto_usd)} columnas={[
-              { clave: "etiqueta", titulo: "Categoría", valor: (f) => f.etiqueta.trim() },
+              { clave: "etiqueta", titulo: "Categoría", valor: (f) => f.etiqueta.trim(), render: (f) => conInsignia(f.etiqueta.trim(), f) },
               { clave: "detalle", titulo: "Productos", valor: (f) => f.detalle, secundaria: true },
               { clave: "cantidad", titulo: "Unidades", valor: (f) => num(f.cantidad), render: (f) => fmtN(f.cantidad), derecha: true },
               { clave: "neto", titulo: "Venta neta", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
+              ...columnasFuente,
             ]} />
             <TablaReporte titulo="Top clientes" filas={ventas.cliente ?? []} exportar="ventas-por-cliente" metrica={(f) => num(f.neto_usd)} columnas={[
-              { clave: "etiqueta", titulo: "Cliente", valor: (f) => f.etiqueta },
+              { clave: "etiqueta", titulo: "Cliente", valor: (f) => f.etiqueta, render: (f) => conInsignia(f.etiqueta, f) },
               { clave: "detalle", titulo: "RIF · ciudad", valor: (f) => f.detalle, secundaria: true },
               { clave: "documentos", titulo: "Facturas", valor: (f) => num(f.documentos), derecha: true },
               { clave: "neto", titulo: "Venta neta", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
+              ...columnasFuente,
+              { clave: "financieras", titulo: "Notas financieras Profit (aparte)", valor: (f) => num(f.financieras_usd), soloExportar: true },
             ]} />
             <TablaReporte titulo="Top productos" filas={ventas.producto ?? []} exportar="ventas-por-producto" metrica={(f) => num(f.neto_usd)} columnas={[
-              { clave: "etiqueta", titulo: "Producto", valor: (f) => f.etiqueta },
+              { clave: "etiqueta", titulo: "Producto", valor: (f) => f.etiqueta, render: (f) => conInsignia(f.etiqueta, f) },
               { clave: "detalle", titulo: "SKU", valor: (f) => f.detalle, render: (f) => <span className="font-mono text-xs">{f.detalle}</span>, secundaria: true },
               { clave: "cantidad", titulo: "Unidades", valor: (f) => num(f.cantidad), render: (f) => fmtN(f.cantidad), derecha: true },
               { clave: "neto", titulo: "Venta neta", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
+              ...columnasFuente,
             ]} />
           </div>
           <Dialog open={verReversos} onOpenChange={setVerReversos}>
             <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
               <DialogHeader>
-                <DialogTitle>Facturas anuladas con nota de crédito</DialogTitle>
-                <DialogDescription>Factura y nota de crédito por el mismo monto: se excluyen ambas de la venta, lo facturado y el ticket.</DialogDescription>
+                <DialogTitle>Facturas anuladas por completo</DialogTitle>
+                <DialogDescription>Factura y nota de crédito (o devolución total en Profit) por el mismo monto: se excluyen ambas de la venta, lo facturado y el ticket.</DialogDescription>
               </DialogHeader>
               <TablaReporte titulo={`${fmtN(reversos.length)} pares`} filas={reversos} exportar="facturas-anuladas" limite={50} columnas={[
                 { clave: "empresa", titulo: "Empresa", valor: (f) => f.empresa, secundaria: true },
-                { clave: "cliente", titulo: "Cliente", valor: (f) => f.cliente },
+                { clave: "cliente", titulo: "Cliente", valor: (f) => f.cliente,
+                  render: (f) => <span className="inline-flex max-w-full items-center gap-1.5"><span className="truncate">{f.cliente}</span>{f.fuente === "profit" && <InsigniaProfit />}</span> },
                 { clave: "factura", titulo: "Factura", valor: (f) => f.factura, render: (f) => <span className="whitespace-nowrap">{f.factura} <span className="text-muted-foreground">· {f.factura_fecha.split("-").reverse().join("/")}</span></span> },
                 { clave: "nota", titulo: "Nota de crédito", valor: (f) => f.nota, render: (f) => <span className="whitespace-nowrap">{f.nota} <span className="text-muted-foreground">· {f.nota_fecha.split("-").reverse().join("/")}</span></span>, ocultarMovil: true },
                 { clave: "motivo", titulo: "Motivo", valor: (f) => f.motivo || "—", ocultarMovil: true },
                 { clave: "neto", titulo: "Neto", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
+                { clave: "fuente", titulo: "Fuente", valor: (f) => textoFuente(f.fuente), soloExportar: true },
               ]} />
             </DialogContent>
           </Dialog>
@@ -411,6 +560,10 @@ const Reportes = () => {
               <DataTablePagination pagination={pgInv} />
             </Panel>
           </div>
+        </TabsContent>
+
+        <TabsContent value="profit" className="mt-0">
+          <HistoricoProfit />
         </TabsContent>
       </Tabs>
     </MainLayout>

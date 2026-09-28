@@ -94,31 +94,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               debe_cambiar_clave: !!userData.debe_cambiar_clave,
             });
           } else {
-            // Usuario autenticado pero sin registro en tabla usuarios - crear registro
-            const { data: newUser } = await supabase
-              .from('usuarios')
-              .insert({
-                auth_id: session.user.id,
-                email: session.user.email,
-                nombre: session.user.email?.split('@')[0] || 'Usuario',
-                role: 'cliente',
-                activo: true,
-              })
-              .select('*')
-              .single();
-
-            if (newUser) {
-              setUser({
-                id: newUser.id,
-                email: newUser.email,
-                nombre: newUser.nombre,
-                apellido: newUser.apellido || '',
-                role: (newUser.role as UserRole) || 'cliente',
-                avatar: newUser.avatar_url || undefined,
-                cliente_id: newUser.cliente_id || undefined,
-                telefono: newUser.telefono || undefined,
-              });
-            }
+            // Cuenta sin perfil en GUDS: los perfiles los crea GUDS (acceso de contactos, registro aprobado, usuarios del
+            // admin). No se crea uno por defecto: se cierra la sesión.
+            await supabase.auth.signOut();
+            setUser(null);
           }
         } else {
           console.log('No hay sesión activa');
@@ -221,39 +200,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log('Datos de usuario:', { userData, userError });
 
       if (userError || !userData) {
-        console.log('Usuario no encontrado, creando perfil...');
-        // Si no existe en la tabla usuarios, crear el registro
-        const { data: newUser, error: createError } = await supabase
-          .from('usuarios')
-          .insert({
-            auth_id: authData.user.id,
-            email: authData.user.email,
-            nombre: authData.user.email?.split('@')[0] || 'Usuario',
-            role: 'cliente',
-            activo: true,
-          })
-          .select('*')
-          .single();
-
-        console.log('Nuevo usuario creado:', { newUser, createError });
-
-        if (createError || !newUser) {
-          console.error('Error creando usuario:', createError);
-          return { success: false, error: "Error al crear perfil de usuario" };
-        }
-
-        const role = (newUser.role as UserRole) || 'cliente';
-        setUser({
-          id: newUser.id,
-          email: newUser.email,
-          nombre: newUser.nombre,
-          apellido: newUser.apellido || '',
-          role: role,
-          avatar: newUser.avatar_url || undefined,
-          cliente_id: newUser.cliente_id || undefined,
-          telefono: newUser.telefono || undefined,
-        });
-        return { success: true, role };
+        // Cuenta sin perfil en GUDS: no se crea uno por defecto (los perfiles los crea GUDS)
+        await supabase.auth.signOut();
+        return { success: false, error: "Tu cuenta no tiene acceso configurado en GUDS. Pide acceso a tu ejecutivo de cuenta." };
       }
 
       // Usuario existente: bloquear si está desactivado

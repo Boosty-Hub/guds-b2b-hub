@@ -14,6 +14,8 @@ export interface ColumnaReporte<T> {
   ocultarMovil?: boolean;
   /** Columna secundaria: solo en pantallas muy anchas (en la rejilla de 2 columnas no cabe) */
   secundaria?: boolean;
+  /** Solo en el CSV (p. ej. la fuente, que en pantalla va como insignia) */
+  soloExportar?: boolean;
 }
 
 /** Tabla de un reporte agrupado: ordenable, exportable, con participación (%) sobre `metrica` y "ver todos". */
@@ -37,6 +39,7 @@ export function TablaReporte<T>({ titulo, filas, columnas, metrica, exportar, li
     ...columnas.map((c) => ({ titulo: c.titulo, valor: (f: T) => c.valor(f) })),
     ...(metrica ? [{ titulo: "% del total", valor: (f: T) => (total ? Number(((metrica(f) / total) * 100).toFixed(2)) : 0) }] : []),
   ]);
+  const enPantalla = columnas.filter((c) => !c.soloExportar);
 
   return (
     <Panel sinPadding className={className} titulo={titulo}
@@ -48,7 +51,7 @@ export function TablaReporte<T>({ titulo, filas, columnas, metrica, exportar, li
           <Table containerClassName="max-h-none">
             <TableHeader>
               <TableRow>
-                {columnas.map((c) => (
+                {enPantalla.map((c) => (
                   <EncabezadoOrdenable key={c.clave} clave={c.clave} orden={orden} onOrdenar={alternar} alinear={c.derecha ? "derecha" : "izquierda"}
                     className={cn(c.ocultarMovil && "hidden md:table-cell", c.secundaria && "hidden 2xl:table-cell")}>{c.titulo}</EncabezadoOrdenable>
                 ))}
@@ -60,7 +63,7 @@ export function TablaReporte<T>({ titulo, filas, columnas, metrica, exportar, li
                 const pct = metrica && total ? (metrica(f) / total) * 100 : 0;
                 return (
                   <TableRow key={i}>
-                    {columnas.map((c, j) => (
+                    {enPantalla.map((c, j) => (
                       <TableCell key={c.clave} className={cn("whitespace-nowrap", c.derecha && "text-right", j === 0 && "max-w-[240px] truncate font-medium", c.ocultarMovil && "hidden md:table-cell", c.secundaria && "hidden 2xl:table-cell")}
                         title={j === 0 ? String(c.valor(f) ?? "") : undefined}>
                         {c.render ? c.render(f) : c.valor(f) ?? "—"}

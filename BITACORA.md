@@ -10,6 +10,23 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-28 · Delivery con mapa y rutas, histórico de Profit en reportes y cierres de seguridad
+
+- **Delivery D2/D3** (agente, `…20f_ubicaciones_rutas.sql`): ubicaciones propias de GUDS por cliente y sucursal (la sincronización
+  no las toca); el pin lo pone una persona en el mapa (la búsqueda de Mapbox solo centra) y el GPS del cierre propone la ubicación
+  cuando no hay una confirmada. Planificador de rutas por día y repartidor con mapa, orden manual o por cercanía desde el punto de
+  salida, publicación con aviso y hoja de ruta imprimible; "Mi ruta" del repartidor con mapa y navegación. Nada se escribe en Odoo.
+- **Histórico de Profit (R1)** (agente, `…20g_historico_profit.sql`, `scripts/importar-historico-profit.mjs`): 130.271 líneas de
+  ventas de dic-2020 a may-2026 extraídas de la caché del Excel, cuadradas al centavo mes por mes; solo lectura. Reportes suma Odoo +
+  Profit (o solo uno) con la insignia "Profit", NC financieras aparte, reversos neteados; periodos hasta todo el historial.
+  Pestaña "Histórico Profit" con el estado de la carga y las equivalencias de vendedores (55, 18 con propuesta; las valida el
+  dueño). Emparejamiento: clientes 86 % de la venta (por RIF, nombre o factura compartida), productos 95,6 %.
+- **Seguridad**: lectura de `configuracion` sin sesión limitada a lo público (20h); el registro público de cuentas de Supabase Auth
+  estaba abierto aunque la app no lo usa (ahora desactivado) y al entrar con una cuenta sin perfil la app le creaba uno de "cliente"
+  (política `usuarios_insert_own`, 20i): ahora se cierra la sesión con un aviso.
+- Verificado: pruebas de base (196 casos) y Playwright en delivery (admin y repartidor, con GPS simulado), reportes con histórico e
+  inicio de sesión.
+
 ## 2026-09-28 · Portal del cliente rediseñado (F1), línea de tiempo del pedido y avisos desde Odoo
 
 - **Línea de tiempo y avisos** (`…20d_eventos_pedido.sql`, `…20e_aviso_factura_pedido.sql`): `orden_eventos` registra cada hito
