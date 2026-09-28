@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, CalendarDays, ChevronDown, ChevronUp, MapPin, Navigation, Phone, Truck, ClipboardCheck, Loader2 } from "lucide-react";
 import { fechaCorta, fechaHora } from "@/components/delivery/fechas";
 import {
-  ESTADO_ENTREGA, CLS_REPOSICION, etiquetaMotivo, telefonos, enlaceMaps, enlaceWaze, fmtCantidad, fmtDia, MOTIVOS_LINEA, type EntregaReparto,
+  ESTADO_ENTREGA, CLS_REPOSICION, etiquetaMotivo, telefonos, navegacion, fmtCantidad, fmtDia, MOTIVOS_LINEA, type EntregaReparto,
 } from "@/components/delivery/entregas";
 
 const ESTADO_ODOO: Record<string, string> = { lista: "Listo", en_espera: "En espera", parcial: "Parcial", borrador: "Borrador", hecha: "Hecho", cancelada: "Cancelado" };
@@ -117,10 +117,10 @@ export function TarjetaEntrega({ e, idx, onSalir, onCerrar, ocupado }: {
                 {tels.length ? <a href={`tel:${tels[0]}`}><Phone className="mr-1 h-4 w-4" />Llamar</a> : <span><Phone className="mr-1 h-4 w-4" />Llamar</span>}
               </Button>
               <Button asChild variant="outline" className="h-11">
-                <a href={enlaceMaps(e.direccion, e.ciudad, e.region)} target="_blank" rel="noopener noreferrer"><MapPin className="mr-1 h-4 w-4" />Maps</a>
+                <a href={navegacion(e).maps} target="_blank" rel="noopener noreferrer"><MapPin className="mr-1 h-4 w-4" />Maps</a>
               </Button>
               <Button asChild variant="outline" className="h-11">
-                <a href={enlaceWaze(e.direccion, e.ciudad, e.region)} target="_blank" rel="noopener noreferrer"><Navigation className="mr-1 h-4 w-4" />Waze</a>
+                <a href={navegacion(e).waze} target="_blank" rel="noopener noreferrer"><Navigation className="mr-1 h-4 w-4" />Waze</a>
               </Button>
             </div>
             {e.estado === "asignada" && onSalir && (

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -7,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertTriangle, Eye, Loader2, UserPlus } from "lucide-react";
+import { AlertTriangle, Eye, ListChecks, Loader2, MapPin, MapPinned, Route, UserPlus } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
@@ -24,6 +25,13 @@ import {
 } from "@/components/delivery/DetalleEntregaDialog";
 import { fechaCorta, fechaHora, diaCaracas } from "@/components/delivery/fechas";
 import { ABIERTAS, etiquetaMotivo, fmtCantidad, fmtDia, telefonos } from "@/components/delivery/entregas";
+import { usePermissions } from "@/contexts/PermissionsContext";
+import { EditorUbicacionDialog } from "@/components/delivery/EditorUbicacionDialog";
+import { UbicacionesPanel, type DestinoPendiente } from "@/components/delivery/UbicacionesPanel";
+import { PlanificadorRutas } from "@/components/delivery/PlanificadorRutas";
+import {
+  cargarUbicaciones, claveDestino, estadoUbicacion, ETIQUETA_UBICACION, type DestinoEntrega, type DireccionCliente, type Ubicacion,
+} from "@/components/delivery/ubicaciones";
 
 // Delivery (fase 19v): la cola son los DOCUMENTOS DE ENTREGA DE ODOO tal cual (stock.picking de salida, por empresa) y las
 // reposiciones a consignación (traslado interno hacia un almacén de consignación: se entrega en el cliente del almacén).
@@ -31,13 +39,14 @@ import { ABIERTAS, etiquetaMotivo, fmtCantidad, fmtDia, telefonos } from "@/comp
 // o incompleto se valida en Odoo por la cola de escrituras (modo simular / activo en configuración).
 interface Repartidor { id: string; nombre: string; apellido: string | null; empresas: string[] }
 
-const DESTINO = "almacen_destino:almacenes!transferencias_almacen_destino_id_fkey(nombre, tipo, cliente:clientes(nombre_negocio))";
+const DESTINO = "almacen_destino:almacenes!transferencias_almacen_destino_id_fkey(nombre, tipo, cliente_id, cliente:clientes(nombre_negocio))";
 const SEL_DOC = `id, empresa_id, odoo_id, numero, tipo, origen, estado, contacto, fecha_programada, fecha_realizada, direccion_entrega, ciudad_entrega,
-  region_entrega, telefono_entrega, notas, odoo_sync_at, almacen:almacenes!transferencias_almacen_origen_id_fkey(nombre, tipo), ${DESTINO},
+  region_entrega, telefono_entrega, notas, odoo_sync_at, cliente_id, partner_odoo_id, almacen:almacenes!transferencias_almacen_origen_id_fkey(nombre, tipo), ${DESTINO},
   cliente:clientes(nombre_negocio), items:transferencia_items(id, odoo_id, nombre_producto, cantidad_demandada, cantidad_hecha, estado, unidad)`;
 const SEL_ENT = `id, transferencia_id, transferencia_odoo_id, orden_id, doc_numero, empresa_id, estado, prioridad, repartidor_id, created_at,
   fecha_asignacion, fecha_inicio_entrega, fecha_entrega, fecha_cierre, receptor_nombre, notas, motivo_fallo, motivo_codigo, motivo_detalle,
   reprogramada_para, deja_pendiente, lineas, origen_cierre, firma_url, foto_entrega_url, doc_direccion,
+  cliente_id, direccion_id, fecha_ruta, orden_ruta, cierre_lat, cierre_lng, cierre_precision_m,
   repartidor:usuarios!entregas_repartidor_id_fkey(nombre, apellido), orden:ordenes(numero, direccion_entrega, cliente:clientes(nombre_negocio)),
   cliente:clientes!entregas_cliente_id_fkey(nombre_negocio), documento:transferencias!entregas_transferencia_id_fkey(${SEL_DOC})`;
 const DIAS_HISTORIAL = 90;
@@ -103,10 +112,28 @@ const Delivery = () => {
   const [anular, setAnular] = useState<EntregaAdmin | null>(null);
   const [motivoAnular, setMotivoAnular] = useState("");
   const [saving, setSaving] = useState(false);
+  // 20f: vistas Cola / Rutas / Ubicaciones (en la URL, ?vista=rutas), ubicaciones de entrega y editor en el mapa
+  const [params, setParams] = useSearchParams();
+  const seccion = (["rutas", "ubicaciones"].includes(params.get("vista") ?? "") ? params.get("vista") : "cola") as "cola" | "rutas" | "ubicaciones";
+  const cambiarVista = (v: string) => setParams((p) => { const n = new URLSearchParams(p); if (v === "cola") n.delete("vista"); else n.set("vista", v); return n; }, { replace: true });
+  const { can } = usePermissions();
+  const puedeUbicar = can("delivery", "editar") || can("clientes", "editar");
+  const [direcciones, setDirecciones] = useState<DireccionCliente[]>([]);
+  const [ubicaciones, setUbicaciones] = useState<Map<string, Ubicacion>>(new Map());
+  const [editarUbic, setEditarUbic] = useState<DestinoEntrega | null>(null);
+  const [recargaRutas, setRecargaRutas] = useState(0);
+
+  const recargarUbicaciones = useCallback(async () => {
+    try { setUbicaciones(await cargarUbicaciones()); }
+    catch (e) { toast({ title: "No se pudieron cargar las ubicaciones", description: (e as Error).message, variant: "destructive" }); }
+  }, [toast]);
 
   const cargar = useCallback(async () => {
     setLoading(true);
     const desde = new Date(Date.now() - DIAS_HISTORIAL * 86400000).toISOString();
+    recargarUbicaciones();
+    supabase.from("cliente_direcciones").select("id, odoo_id, cliente_id, nombre, direccion, ciudad, estado").limit(5000)
+      .then(({ data }) => setDirecciones((data as DireccionCliente[] | null) ?? []));
     const [rRes, dRes, iRes, eRes, wRes] = await Promise.all([
       supabase.from("usuarios").select("id, nombre, apellido, empresas:usuario_empresas(empresa_id)").eq("role", "delivery").eq("activo", true).order("nombre"),
       supabase.from("transferencias").select(SEL_DOC).eq("tipo", "entrega").not("estado", "in", "(hecha,cancelada)").order("fecha_programada", { ascending: true }),
@@ -125,8 +152,46 @@ const Delivery = () => {
       (eRes.data as unknown as EntregaAdmin[] | null) ?? [],
       (wRes.data as unknown as EscrituraOdoo[] | null) ?? []));
     setLoading(false);
-  }, [toast]);
+  }, [toast, recargarUbicaciones]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  // Destino de cada documento: el cliente (o el de su almacén de consignación) y la sucursal si el contacto del documento
+  // en Odoo es una dirección de entrega del cliente
+  const dirPorOdoo = useMemo(() => new Map(direcciones.filter((d) => d.odoo_id != null).map((d) => [d.odoo_id!, d])), [direcciones]);
+  const dirPorId = useMemo(() => new Map(direcciones.map((d) => [d.id, d])), [direcciones]);
+  const destinoFila = useCallback((f: FilaDoc): DestinoEntrega | null => {
+    const d = f.doc, e = f.entrega;
+    let cliente_id: string | null = null, direccion_id: string | null = null;
+    if (d) {
+      cliente_id = (esReposicion(d) ? d.almacen_destino?.cliente_id : d.cliente_id) ?? null;
+      const x = d.tipo === "entrega" && d.partner_odoo_id != null ? dirPorOdoo.get(d.partner_odoo_id) : undefined;
+      if (x && x.cliente_id === cliente_id) direccion_id = x.id;
+    }
+    if (!cliente_id && e?.cliente_id) { cliente_id = e.cliente_id; direccion_id = e.direccion_id ?? null; }
+    if (!cliente_id) return null;
+    const dir = direccion_id ? dirPorId.get(direccion_id) : undefined;
+    return {
+      cliente_id, direccion_id, cliente: clienteFila(f), sucursal: dir?.nombre ?? null,
+      direccion: d?.direccion_entrega ?? dir?.direccion ?? e?.doc_direccion ?? null, ciudad: d?.ciudad_entrega ?? dir?.ciudad ?? null, region: d?.region_entrega ?? dir?.estado ?? null,
+    };
+  }, [dirPorOdoo, dirPorId]);
+  const ubicacionFila = (f: FilaDoc) => { const d = destinoFila(f); return d ? ubicaciones.get(claveDestino(d.cliente_id, d.direccion_id)!) ?? null : null; };
+  // Destinos de los documentos que hay que llevar (sin cortes de consignación ni borradores), para "Sin ubicación"
+  const pendientes = useMemo<DestinoPendiente[]>(() => {
+    const m = new Map<string, DestinoPendiente>();
+    for (const f of filas) {
+      if (!(f.situacion === "asignada" || f.situacion === "en_camino" || (f.situacion === "por_asignar" && tipoDe(f) !== "corte" && f.doc?.estado !== "borrador"))) continue;
+      const d = destinoFila(f);
+      if (!d) continue;
+      const k = claveDestino(d.cliente_id, d.direccion_id)!;
+      const p = m.get(k) ?? m.set(k, { clave: k, destino: d, docs: [] }).get(k)!;
+      p.docs.push({ numero: numeroFila(f), empresa: empresas.find((x) => x.id === (f.doc?.empresa_id ?? f.entrega?.empresa_id))?.nombre_corto ?? "" });
+    }
+    return [...m.values()].sort((a, b) => b.docs.length - a.docs.length || a.destino.cliente.localeCompare(b.destino.cliente));
+  }, [filas, destinoFila, empresas]);
+  const sinUbicacion = pendientes.filter((p) => !ubicaciones.get(p.clave)).length;
+  const porConfirmar = [...ubicaciones.values()].filter((u) => !u.confirmada).length;
+  const trasUbicar = () => { recargarUbicaciones(); setRecargaRutas((n) => n + 1); };
 
   // Si el detalle está abierto, se refresca con los datos nuevos
   useEffect(() => { setDetalle((d) => (d ? filas.find((f) => f.clave === d.clave) ?? null : d)); }, [filas]);
@@ -238,14 +303,33 @@ const Delivery = () => {
     <MainLayout title="Delivery">
       <KpiStrip
         items={[
-          { label: "Por asignar", valor: conteo.por_asignar, detalle: `${listas} listas en Odoo`, tono: "primario", onClick: () => setTab("por_asignar"), activo: tab === "por_asignar" },
-          { label: "Asignadas", valor: conteo.asignada, onClick: () => setTab("asignada"), activo: tab === "asignada" },
-          { label: "En camino", valor: conteo.en_camino, tono: "alerta", onClick: () => setTab("en_camino"), activo: tab === "en_camino" },
-          { label: "Cerradas hoy", valor: cerradasHoy, detalle: `${conteo.cerrada} en ${DIAS_HISTORIAL} días`, tono: "positivo", onClick: () => setTab("cerrada"), activo: tab === "cerrada" },
+          { label: "Por asignar", valor: conteo.por_asignar, detalle: `${listas} listas en Odoo`, tono: "primario", onClick: () => { cambiarVista("cola"); setTab("por_asignar"); }, activo: seccion === "cola" && tab === "por_asignar" },
+          { label: "Asignadas", valor: conteo.asignada, onClick: () => { cambiarVista("cola"); setTab("asignada"); }, activo: seccion === "cola" && tab === "asignada" },
+          { label: "En camino", valor: conteo.en_camino, tono: "alerta", onClick: () => { cambiarVista("cola"); setTab("en_camino"); }, activo: seccion === "cola" && tab === "en_camino" },
+          { label: "Cerradas hoy", valor: cerradasHoy, detalle: `${conteo.cerrada} en ${DIAS_HISTORIAL} días`, tono: "positivo", onClick: () => { cambiarVista("cola"); setTab("cerrada"); }, activo: seccion === "cola" && tab === "cerrada" },
+          { label: "Sin ubicación", valor: sinUbicacion, detalle: porConfirmar ? `${porConfirmar} por confirmar (GPS)` : "destinos pendientes", tono: sinUbicacion ? "alerta" : "tenue",
+            onClick: () => cambiarVista("ubicaciones"), activo: seccion === "ubicaciones", titulo: "Destinos de los documentos pendientes sin ubicación en el mapa" },
           { label: "Error en Odoo", valor: conError, tono: conError ? "negativo" : "tenue", titulo: "Entregas cerradas cuya validación en Odoo falló" },
         ]}
       />
 
+      <Tabs value={seccion} onValueChange={cambiarVista} className="mb-2">
+        <TabsList className="h-auto flex-wrap justify-start">
+          <TabsTrigger value="cola" className="gap-1.5"><ListChecks className="h-3.5 w-3.5" />Cola de despacho</TabsTrigger>
+          <TabsTrigger value="rutas" className="gap-1.5"><Route className="h-3.5 w-3.5" />Rutas</TabsTrigger>
+          <TabsTrigger value="ubicaciones" className="gap-1.5"><MapPinned className="h-3.5 w-3.5" />Ubicaciones{sinUbicacion + porConfirmar ? ` (${sinUbicacion + porConfirmar})` : ""}</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {seccion === "rutas" && (
+        <PlanificadorRutas repartidores={repartidores} puedeEditar={can("delivery", "editar")} recarga={recargaRutas}
+          onEditarUbicacion={(d) => setEditarUbic(d)} />
+      )}
+      {seccion === "ubicaciones" && (
+        <UbicacionesPanel pendientes={pendientes} ubicaciones={ubicaciones} puedeEditar={puedeUbicar} onEditar={setEditarUbic} onCambio={trasUbicar} />
+      )}
+
+      {seccion === "cola" && (<>
       <Tabs value={tab} onValueChange={(v) => setTab(v as Situacion)}>
         <BarraLista
           pestanas={pestanas}
@@ -308,6 +392,8 @@ const Delivery = () => {
                 const corto = d && d.estado !== "hecha" && reservadas < pedidas;
                 const tel = telefonos(d?.telefono_entrega)[0];
                 const abierta = f.situacion === "asignada" || f.situacion === "en_camino";
+                const destino = tipoDe(f) === "corte" ? null : destinoFila(f);
+                const eu = estadoUbicacion(destino ? ubicaciones.get(claveDestino(destino.cliente_id, destino.direccion_id)!) : null);
                 return (
                   <TableRow key={f.clave} className="cursor-pointer hover:bg-muted/50" onClick={() => setDetalle(f)}>
                     <TableCell className="whitespace-nowrap">
@@ -326,7 +412,16 @@ const Delivery = () => {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       <span className="block max-w-[260px] truncate" title={d?.direccion_entrega || f.entrega?.doc_direccion || undefined}>{d?.direccion_entrega || f.entrega?.doc_direccion || "—"}</span>
-                      <span className="block max-w-[260px] truncate text-[11px]">{[d?.ciudad_entrega, tel].filter(Boolean).join(" · ")}</span>
+                      <span className="flex max-w-[260px] items-center gap-1.5 text-[11px]">
+                        {destino && (
+                          <button type="button" onClick={(ev) => { ev.stopPropagation(); setEditarUbic(destino); }}
+                            className={`inline-flex shrink-0 items-center gap-0.5 hover:underline ${ETIQUETA_UBICACION[eu].cls}`}
+                            title={`${ETIQUETA_UBICACION[eu].titulo}: ${eu === "sin" ? "ubicar" : "ver"} en el mapa`} aria-label={`Ubicación de ${clienteFila(f)}: ${ETIQUETA_UBICACION[eu].label}`}>
+                            <MapPin className="h-3 w-3" />{eu === "confirmada" ? null : ETIQUETA_UBICACION[eu].label}
+                          </button>
+                        )}
+                        <span className="truncate">{[d?.ciudad_entrega, tel].filter(Boolean).join(" · ")}</span>
+                      </span>
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
                       {tab === "cerrada" ? fechaCorta(f.entrega?.fecha_cierre || f.entrega?.fecha_entrega || d?.fecha_realizada || null) : fechaCorta(d?.fecha_programada ?? null)}
@@ -360,9 +455,14 @@ const Delivery = () => {
         )}
         {!loading && vista.length > 0 && <DataTablePagination pagination={pagination} />}
       </div>
+      </>)}
 
       <DetalleEntregaDialog fila={detalle} onClose={() => setDetalle(null)} puedeEditar={!soloLectura}
-        onAsignar={(f) => abrirAsignar(f)} onAnular={(e) => { setAnular(e); setMotivoAnular(""); }} onReintentar={reintentar} />
+        onAsignar={(f) => abrirAsignar(f)} onAnular={(e) => { setAnular(e); setMotivoAnular(""); }} onReintentar={reintentar}
+        ubicacion={detalle && destinoFila(detalle) ? estadoUbicacion(ubicacionFila(detalle)) : undefined}
+        onUbicar={(f) => { const d = destinoFila(f); if (d) { setDetalle(null); setEditarUbic(d); } }} />
+
+      <EditorUbicacionDialog destino={editarUbic} onClose={() => setEditarUbic(null)} onGuardado={trasUbicar} />
 
       {/* Asignar / reasignar repartidor */}
       <Dialog open={!!asignar} onOpenChange={(o) => { if (!o) setAsignar(null); }}>

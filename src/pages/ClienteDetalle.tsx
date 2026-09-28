@@ -22,6 +22,7 @@ import { usePermissions } from "@/contexts/PermissionsContext";
 import { EditarContactoClienteDialog } from "@/components/clientes/EditarContactoClienteDialog";
 import { DireccionClienteDialog, type DireccionEntrega } from "@/components/clientes/DireccionClienteDialog";
 import { HistorialOdooCliente } from "@/components/clientes/HistorialOdooCliente";
+import { BotonUbicacionesCliente } from "@/components/delivery/UbicacionesClienteDialog";
 
 interface ClienteFull extends Cliente {
   lista_precios?: ListaPrecios | null;
@@ -299,6 +300,7 @@ const ClienteDetalle = () => {
         </TabsContent>
 
         <TabsContent value="direcciones">
+          <div className="mb-2 flex justify-end"><BotonUbicacionesCliente clienteId={cliente.id} clienteNombre={cliente.nombre_negocio} /></div>
           <div className="rounded-lg border border-border bg-card">
             {puedeEditarOdoo && odoo && (
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-1.5">

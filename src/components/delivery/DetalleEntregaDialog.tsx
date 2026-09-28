@@ -11,6 +11,8 @@ import { OdooBadge } from "@/components/OdooBadge";
 import {
   ESTADO_ENTREGA, ESTADO_ESCRITURA, MOTIVOS_LINEA, ABIERTAS, CLS_REPOSICION, etiquetaMotivo, fmtCantidad, fmtDia, fmtFecha, telefonos, type LineaCierre,
 } from "@/components/delivery/entregas";
+import { ETIQUETA_UBICACION, type EstadoUbicacion } from "@/components/delivery/ubicaciones";
+import { verEnGoogle } from "@/components/mapas/geo";
 
 // ── Tipos del admin (documentos de entrega de Odoo + entregas de GUDS + escritura en Odoo) ──
 export interface ItemDoc {
@@ -23,7 +25,9 @@ export interface DocEntrega {
   region_entrega: string | null; telefono_entrega: string | null; notas: string | null; odoo_sync_at: string | null;
   almacen?: { nombre: string; tipo: string } | null; cliente?: { nombre_negocio: string } | null; items?: ItemDoc[];
   // Reposición a consignación: almacén destino y su cliente (donde se entrega)
-  almacen_destino?: { nombre: string; tipo: string; cliente?: { nombre_negocio: string } | null } | null;
+  almacen_destino?: { nombre: string; tipo: string; cliente_id?: string | null; cliente?: { nombre_negocio: string } | null } | null;
+  // Destino (20f): cliente del documento y contacto de Odoo (la sucursal si es una dirección de entrega)
+  cliente_id?: string | null; partner_odoo_id?: number | null;
 }
 export interface EntregaAdmin {
   id: string; transferencia_id: string | null; transferencia_odoo_id: number | null; orden_id: string | null; doc_numero: string | null;
@@ -32,6 +36,9 @@ export interface EntregaAdmin {
   receptor_nombre: string | null; notas: string | null; motivo_fallo: string | null; motivo_codigo: string | null; motivo_detalle: string | null;
   reprogramada_para: string | null; deja_pendiente: boolean | null; lineas: LineaCierre[] | null; origen_cierre: string | null;
   firma_url: string | null; foto_entrega_url: string | null; doc_direccion: string | null;
+  // 20f: destino, ruta del día y GPS del cierre
+  cliente_id?: string | null; direccion_id?: string | null; fecha_ruta?: string | null; orden_ruta?: number | null;
+  cierre_lat?: number | null; cierre_lng?: number | null; cierre_precision_m?: number | null;
   repartidor?: { nombre: string; apellido: string | null } | null;
   orden?: { numero: string; direccion_entrega: string | null; cliente?: { nombre_negocio: string } | null } | null;
   cliente?: { nombre_negocio: string } | null;
@@ -131,9 +138,11 @@ export function EscrituraBadge({ esc }: { esc: EscrituraOdoo | null }) {
 
 /** Detalle de un documento de entrega para el admin: datos del documento de Odoo (tal cual), líneas y lotes, la entrega de
  *  GUDS (repartidor, resultado y evidencia) y el estado de la escritura en Odoo, con "Reintentar". */
-export function DetalleEntregaDialog({ fila, onClose, onAsignar, onAnular, onReintentar, puedeEditar }: {
+export function DetalleEntregaDialog({ fila, onClose, onAsignar, onAnular, onReintentar, puedeEditar, ubicacion, onUbicar }: {
   fila: FilaDoc | null; onClose: () => void; onAsignar: (f: FilaDoc) => void; onAnular: (e: EntregaAdmin) => void;
   onReintentar: (esc: EscrituraOdoo) => Promise<void>; puedeEditar: boolean;
+  /** 20f: estado de la ubicación del destino y abrir el editor en el mapa */
+  ubicacion?: EstadoUbicacion; onUbicar?: (f: FilaDoc) => void;
 }) {
   const [lotes, setLotes] = useState<Record<string, { lote: string | null; cantidad: number; vence: string | null }[]>>({});
   const [reintentando, setReintentando] = useState(false);
@@ -192,6 +201,20 @@ export function DetalleEntregaDialog({ fila, onClose, onAsignar, onAnular, onRei
             {doc?.region_entrega && <span className="text-muted-foreground"> · {doc.region_entrega.replace(/\s*\(VE\)$/, "")}</span>}
           </Dato>
           <Dato etiqueta="Teléfono">{tels.length ? tels.join(" · ") : "—"}</Dato>
+          {ubicacion && (
+            <Dato etiqueta="Ubicación en el mapa">
+              <span className={ETIQUETA_UBICACION[ubicacion].cls}>{ETIQUETA_UBICACION[ubicacion].label}</span>
+              {onUbicar && <button type="button" className="ml-2 text-xs text-primary hover:underline" onClick={() => onUbicar(f)}>{ubicacion === "sin" ? "Ubicar" : ubicacion === "propuesta" ? "Revisar" : "Ver / editar"}</button>}
+            </Dato>
+          )}
+          {e?.fecha_ruta && <Dato etiqueta="Ruta">{fmtDia(e.fecha_ruta)}{e.orden_ruta ? ` · parada ${e.orden_ruta}` : ""}</Dato>}
+          {e?.cierre_lat != null && e.cierre_lng != null && (
+            <Dato etiqueta="GPS al cerrar">
+              <a className="text-primary hover:underline" href={verEnGoogle({ lat: Number(e.cierre_lat), lng: Number(e.cierre_lng) })} target="_blank" rel="noopener noreferrer">
+                {Number(e.cierre_lat).toFixed(5)}, {Number(e.cierre_lng).toFixed(5)}
+              </a>{e.cierre_precision_m != null ? <span className="text-muted-foreground"> · ±{Math.round(Number(e.cierre_precision_m))} m</span> : null}
+            </Dato>
+          )}
           {doc && <Dato etiqueta="Programada">{fechaCorta(doc.fecha_programada)}</Dato>}
           {doc?.almacen && <Dato etiqueta="Sale de">{doc.almacen.nombre}{doc.almacen.tipo === "consignacion" ? " (consignación)" : ""}</Dato>}
           {e && <Dato etiqueta="Repartidor">{nombreRepartidor(e)}{e.prioridad === "alta" ? <span className="text-destructive"> · prioridad alta</span> : null}</Dato>}

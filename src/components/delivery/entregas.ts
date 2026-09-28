@@ -1,6 +1,8 @@
 // Delivery sobre los documentos de entrega de Odoo (fase 19v): estados, motivos, tipos y utilidades compartidas entre el
 // admin (/admin/delivery) y la app del repartidor (/delivery/*). Los códigos de motivo son los que valida cerrar_entrega.
 import { diaCaracas } from "@/components/delivery/fechas";
+import { navegarGoogle, navegarWaze } from "@/components/mapas/geo";
+import type { UbicacionCorta } from "@/components/delivery/ubicaciones";
 
 export type ResultadoCierre = "completa" | "incompleta" | "rechazada" | "reprogramada";
 
@@ -80,6 +82,8 @@ export interface EntregaReparto {
   es_documento: boolean; tipo: "entrega" | "reposicion"; numero: string | null; origen: string | null; estado_odoo: string | null; fecha_programada: string | null;
   cliente: string | null; contacto: string | null; direccion: string | null; ciudad: string | null; region: string | null;
   telefono: string | null; notas_documento: string | null; lineas: LineaReparto[];
+  /** Ruta del día (20f): día y posición que fijó el planificador; ubicación de la parada si está abierta. */
+  fecha_ruta: string | null; orden_ruta: number | null; ubicacion: UbicacionCorta | null;
 }
 
 // ── Utilidades ──
@@ -109,9 +113,13 @@ export const enlaceMaps = (dir: string | null, ciudad?: string | null, region?: 
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destino(dir, ciudad, region))}`;
 export const enlaceWaze = (dir: string | null, ciudad?: string | null, region?: string | null) =>
   `https://waze.com/ul?q=${encodeURIComponent(destino(dir, ciudad, region))}&navigate=yes`;
-/** Ruta con varias paradas en Google Maps (hasta 9 paradas intermedias). */
-export const enlaceRuta = (paradas: { dir: string | null; ciudad?: string | null; region?: string | null }[]) => {
-  const d = paradas.filter((p) => p.dir).map((p) => destino(p.dir, p.ciudad, p.region));
+/** Navegar a una parada: por coordenadas si tiene ubicación en el mapa; si no, por la dirección de Odoo. */
+export const navegacion = (e: Pick<EntregaReparto, "ubicacion" | "direccion" | "ciudad" | "region">) => e.ubicacion
+  ? { maps: navegarGoogle(e.ubicacion), waze: navegarWaze(e.ubicacion) }
+  : { maps: enlaceMaps(e.direccion, e.ciudad, e.region), waze: enlaceWaze(e.direccion, e.ciudad, e.region) };
+/** Ruta con varias paradas en Google Maps (hasta 9 paradas intermedias), por coordenadas cuando las hay. */
+export const enlaceRuta = (paradas: { dir: string | null; ciudad?: string | null; region?: string | null; lat?: number; lng?: number }[]) => {
+  const d = paradas.filter((p) => p.dir || p.lat != null).map((p) => (p.lat != null && p.lng != null ? `${p.lat},${p.lng}` : destino(p.dir, p.ciudad, p.region)));
   if (!d.length) return null;
   const fin = d[d.length - 1];
   const intermedias = d.slice(0, -1).slice(0, 9);

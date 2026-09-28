@@ -107,6 +107,7 @@ const VendedorRetenciones = lazy(() => import("./pages/vendedor/VendedorRetencio
 
 // Admin Delivery
 const Delivery = lazy(() => import("./pages/Delivery"));
+const HojaRuta = lazy(() => import("./pages/delivery/HojaRuta"));
 
 // Admin Cupones
 const Cupones = lazy(() => import("./pages/Cupones"));
@@ -204,6 +205,7 @@ const App = () => (
                 <Route path="/admin/banners" element={<ProtectedRoute allowedRoles={["admin"]} modulo="banners"><Banners /></ProtectedRoute>} />
                 <Route path="/admin/categorias" element={<ProtectedRoute allowedRoles={["admin"]} modulo="categorias"><Categorias /></ProtectedRoute>} />
                 <Route path="/admin/delivery" element={<ProtectedRoute allowedRoles={["admin"]} modulo="delivery"><Delivery /></ProtectedRoute>} />
+                <Route path="/admin/delivery/hoja-ruta" element={<ProtectedRoute allowedRoles={["admin"]} modulo="delivery"><HojaRuta /></ProtectedRoute>} />
                 <Route path="/admin/registros" element={<ProtectedRoute allowedRoles={["admin"]} modulo="registros"><RegistrosClientes /></ProtectedRoute>} />
                 <Route path="/admin/perfil" element={<ProtectedRoute allowedRoles={["admin"]}><Perfil /></ProtectedRoute>} />
           

@@ -4,11 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, CalendarClock, Camera, CheckCircle2, Eraser, Loader2, Minus, PackageMinus, Plus, XCircle } from "lucide-react";
+import { ArrowLeft, CalendarClock, Camera, CheckCircle2, Eraser, Loader2, LocateFixed, Minus, PackageMinus, Plus, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { compressImage } from "@/lib/image";
 import { diaCaracas } from "@/components/delivery/fechas";
+import { leerPosicion, type Posicion } from "@/components/delivery/usePosicion";
 import {
   MOTIVOS_LINEA, MOTIVOS_RECHAZO, MOTIVOS_REPROGRAMACION, siguienteDiaHabil, fmtCantidad,
   type EntregaReparto, type ResultadoCierre, type Motivo,
@@ -71,12 +72,23 @@ export function CierreEntregaDialog({ entrega, onClose, onCerrada }: { entrega: 
   const [firmado, setFirmado] = useState(false);
   const [busy, setBusy] = useState(false);
   const sigRef = useRef<HTMLCanvasElement>(null);
+  // GPS del teléfono al cerrar (20f): opcional. Si el cliente no tiene ubicación confirmada queda como propuesta.
+  const [gps, setGps] = useState<{ estado: "buscando" | "ok" | "sin"; pos: Posicion | null }>({ estado: "buscando", pos: null });
+  const gpsRef = useRef<Promise<Posicion | null> | null>(null);
 
   // Al abrir otra entrega, todo vuelve a empezar
   useEffect(() => {
     setResultado(null); setReceptor(""); setNotas(""); setMotivo(""); setDetalle(""); setFecha(siguienteDiaHabil());
     setFoto(null); setFirmado(false); setMotivosLinea({});
     setCantidades(Object.fromEntries((entrega?.lineas ?? []).map((l) => [l.id, String(Number(l.esperada) || 0)])));
+    gpsRef.current = null;
+    setGps({ estado: "buscando", pos: null });
+    if (!entrega) return;
+    let vivo = true;
+    const p = leerPosicion(15000);
+    gpsRef.current = p;
+    p.then((pos) => { if (vivo) setGps({ estado: pos ? "ok" : "sin", pos }); });
+    return () => { vivo = false; };
   }, [entrega?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lineas = useMemo(() => entrega?.lineas ?? [], [entrega]);
@@ -149,6 +161,9 @@ export function CierreEntregaDialog({ entrega, onClose, onCerrada }: { entrega: 
       }
       if (resultado === "rechazada" || resultado === "reprogramada") { datos.motivo = motivo; datos.motivo_detalle = detalle.trim() || null; }
       if (resultado === "reprogramada") datos.fecha = fecha;
+      // GPS: si aún no llegó la lectura se espera un poco (máx. 4 s); sin permiso o sin señal se cierra igual
+      const pos = gps.pos ?? (gpsRef.current ? await Promise.race([gpsRef.current, new Promise<null>((r) => setTimeout(() => r(null), 4000))]) : null);
+      if (pos) datos.gps = { lat: pos.lat, lng: pos.lng, precision: pos.precision };
       const { data, error } = await supabase.rpc("cerrar_entrega", { p_entrega_id: entrega.id, p_resultado: resultado, p_datos: datos });
       if (error) throw new Error(error.message);
       const r = data as { escritura_id: string | null } | null;
@@ -320,6 +335,13 @@ export function CierreEntregaDialog({ entrega, onClose, onCerrada }: { entrega: 
               )}
             </div>
 
+            {resultado && (
+              <p className="flex items-center gap-1.5 border-t border-border bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground" data-gps={gps.estado}>
+                <LocateFixed className="h-3.5 w-3.5 shrink-0" />
+                {gps.estado === "ok" && gps.pos ? `Ubicación tomada (±${gps.pos.precision} m): se guarda con la entrega.`
+                  : gps.estado === "buscando" ? "Tomando tu ubicación…" : "Sin ubicación (no diste permiso o no hay señal): la entrega se cierra igual."}
+              </p>
+            )}
             {resultado && (
               <div className="flex gap-2 border-t border-border px-4 py-3">
                 <Button variant="outline" className="h-11 flex-1" onClick={() => setResultado(null)} disabled={busy}>Atrás</Button>
