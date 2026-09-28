@@ -5,9 +5,9 @@ import {
   ClipboardList,
   CreditCard,
   FileText,
-  Heart,
   Landmark,
   LayoutGrid,
+  LineChart,
   Receipt,
   Search,
   Wallet,
@@ -27,6 +27,7 @@ import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog
 import { EstadoPill, EstadoVacio, Kpi, NumeroPedido, Panel, SkeletonFilas, SkeletonProductos, fechaCorta } from "@/components/portal/sistema";
 import { useCarritoPortal } from "@/hooks/useCarritoPortal";
 import { pedirCatalogo, useCategoriasPortal, type ProductoPortal } from "@/hooks/useCatalogoPortal";
+import { pedirEstadoCuenta, type CreditoCuenta, type ResumenCuenta } from "@/hooks/useFinanzasPortal";
 
 // Inicio del portal: lo que un comprador B2B necesita al entrar (saldo, crédito, pedidos en curso), sus pedidos recientes,
 // accesos rápidos y productos destacados para recomprar.
@@ -35,17 +36,15 @@ interface OrdenResumen {
   id: string; numero: string; numero_guds: string | null; estado: string; estado_odoo: string | null; aprobacion: string | null;
   odoo_id: number | null; total: number; created_at: string; fecha_pedido: string | null;
 }
-interface Credito { modo: string; disponible: number; limite: number }
-
 const TOLERANCIA = 0.009;
 
 const ACCESOS: { etiqueta: string; ruta: string; icono: LucideIcon }[] = [
   { etiqueta: "Catálogo", ruta: "/portal/catalogo", icono: LayoutGrid },
-  { etiqueta: "Favoritos", ruta: "/portal/favoritos", icono: Heart },
-  { etiqueta: "Declarar pago", ruta: "/portal/pagos", icono: Wallet },
-  { etiqueta: "Cuentas para pagar", ruta: "/portal/cuenta/pagos", icono: Landmark },
   { etiqueta: "Mis pedidos", ruta: "/portal/pedidos", icono: ClipboardList },
-  { etiqueta: "Retenciones", ruta: "/portal/retenciones", icono: Receipt },
+  { etiqueta: "Estado de cuenta", ruta: "/portal/finanzas", icono: LineChart },
+  { etiqueta: "Facturas", ruta: "/portal/facturas", icono: FileText },
+  { etiqueta: "Declarar pago", ruta: "/portal/pagos?declarar=1", icono: Wallet },
+  { etiqueta: "Cómo pagar", ruta: "/portal/cuenta/pagos", icono: Landmark },
 ];
 
 const PortalDashboard = () => {
@@ -57,8 +56,9 @@ const PortalDashboard = () => {
 
   const [cargando, setCargando] = useState(true);
   const [ordenes, setOrdenes] = useState<OrdenResumen[]>([]);
-  const [facturas, setFacturas] = useState<{ saldo_usd: number; fecha_vencimiento: string | null }[]>([]);
-  const [credito, setCredito] = useState<Credito | null>(null);
+  // Saldo, vencido y crédito: el mismo resumen del estado de cuenta (regla de Cuentas por Cobrar del admin)
+  const [resumen, setResumen] = useState<ResumenCuenta | null>(null);
+  const [credito, setCredito] = useState<CreditoCuenta | null>(null);
   // Destacados con el precio del servidor (catalogo_portal) y categorías con productos a la venta en la empresa activa
   const [destacados, setDestacados] = useState<ProductoPortal[] | null>(null);
   const categoriasPortal = useCategoriasPortal();
@@ -73,15 +73,13 @@ const PortalDashboard = () => {
     Promise.all([
       supabase.from("ordenes").select("id, numero, numero_guds, estado, estado_odoo, aprobacion, odoo_id, total, created_at, fecha_pedido")
         .eq("cliente_id", cid).order("created_at", { ascending: false }).limit(200),
-      // Deuda real: facturas publicadas con saldo, igual que Pagos y Cuentas por Cobrar del admin
-      supabase.from("facturas").select("saldo_usd, fecha_vencimiento").eq("cliente_id", cid).eq("estado", "posted").gt("saldo_usd", TOLERANCIA),
-      supabase.rpc("credito_disponible", { p_cliente_id: cid }),
-    ]).then(([o, f, c]) => {
+      pedirEstadoCuenta({ desde: null, hasta: null }, false).catch(() => null),
+    ]).then(([o, ec]) => {
       if (!activo) return;
       const filas = ((o.data as OrdenResumen[] | null) ?? []).sort((a, b) => (b.fecha_pedido ?? b.created_at).localeCompare(a.fecha_pedido ?? a.created_at));
       setOrdenes(filas);
-      setFacturas(((f.data as { saldo_usd: number; fecha_vencimiento: string | null }[] | null) ?? []).map((x) => ({ ...x, saldo_usd: Number(x.saldo_usd) })));
-      setCredito(((c.data as Credito[] | null) ?? [])[0] ?? null);
+      setResumen(ec?.resumen ?? null);
+      setCredito(ec?.credito ?? null);
       setCargando(false);
     });
     pedirCatalogo({ soloDestacados: true, orden: "nombre", limite: 8 })
@@ -90,9 +88,9 @@ const PortalDashboard = () => {
     return () => { activo = false; };
   }, [user?.cliente_id]);
 
-  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-  const porPagar = facturas.reduce((s, f) => s + f.saldo_usd, 0);
-  const vencido = facturas.filter((f) => f.fecha_vencimiento && new Date(`${f.fecha_vencimiento}T00:00:00`) < hoy).reduce((s, f) => s + f.saldo_usd, 0);
+  const porPagar = Number(resumen?.saldo ?? 0);
+  const vencido = Number(resumen?.vencido ?? 0);
+  const abiertas = resumen?.facturas_abiertas ?? 0;
   const conEstado = ordenes.map((o) => ({ o, ev: estadoVisible(o) }));
   const enCurso = conEstado.filter(({ ev }) => !["rechazado", "cancelado", "entregado"].includes(ev.clave));
   const porAprobar = enCurso.filter(({ ev }) => ev.clave === "por_aprobar").length;
@@ -119,7 +117,7 @@ const PortalDashboard = () => {
       }
       acciones={
         <>
-          <Button asChild variant="outline" className="gap-2"><Link to="/portal/pagos"><Wallet className="h-4 w-4" />Declarar pago</Link></Button>
+          <Button asChild variant="outline" className="gap-2"><Link to="/portal/pagos?declarar=1"><Wallet className="h-4 w-4" />Declarar pago</Link></Button>
           <Button asChild className="gap-2"><Link to="/portal/catalogo"><LayoutGrid className="h-4 w-4" />Hacer un pedido</Link></Button>
         </>
       }
@@ -142,9 +140,9 @@ const PortalDashboard = () => {
 
         {/* Indicadores */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-          <Kpi etiqueta="Por pagar" icono={FileText} href="/portal/pagos" cargando={cargando} testId="kpi-por-pagar"
-            valor={formatPrice(porPagar)} alerta={vencido > TOLERANCIA}
-            detalle={facturas.length === 0 ? "Sin facturas pendientes" : vencido > TOLERANCIA ? `${formatPrice(vencido)} vencido` : `${facturas.length} ${facturas.length === 1 ? "factura" : "facturas"}`} />
+          <Kpi etiqueta="Por pagar" icono={FileText} href="/portal/finanzas" cargando={cargando} testId="kpi-por-pagar"
+            valor={resumen ? formatPrice(porPagar) : "—"} alerta={vencido > TOLERANCIA}
+            detalle={!resumen ? "No disponible" : abiertas === 0 ? "Sin facturas pendientes" : vencido > TOLERANCIA ? `${formatPrice(vencido)} vencido` : `${abiertas} ${abiertas === 1 ? "factura" : "facturas"}`} />
           <Kpi etiqueta="Crédito disponible" icono={CreditCard} cargando={cargando} valor={creditoValor} detalle={creditoDetalle}>
             {usoCredito != null && (
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>

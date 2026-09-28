@@ -1,8 +1,8 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as EventoTeclado } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  ArrowRight, Boxes, ChevronDown, ClipboardList, Heart, Home, Landmark, LayoutGrid, LifeBuoy, Loader2, LogOut, Receipt, Search,
-  TicketPercent, UserRound, Wallet, type LucideIcon,
+  ArrowRight, Boxes, ChevronDown, ClipboardList, FileText, Heart, Home, Landmark, LayoutGrid, LifeBuoy, LineChart, Loader2, LogOut,
+  Receipt, Search, TicketPercent, UserRound, Wallet, type LucideIcon,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,7 @@ import { SelectorMoneda } from "@/components/portal/sistema";
 import { PaginaCargando } from "@/components/portal/PortalPagina";
 import { ProductImage } from "@/components/portal/ProductImage";
 import { pedirCatalogo, sembrarFicha, useAlcanceCatalogo, type PaginaCatalogo, type ProductoPortal } from "@/hooks/useCatalogoPortal";
+import { useAplicarTemaPortal } from "@/hooks/useTemaPortal";
 
 // Shell responsive del portal del cliente (F1). Es una ruta de diseño: se monta una vez y las páginas cambian dentro.
 //  · Móvil y tableta (< 1024 px): encabezado compacto (lo pone cada página), barra inferior con 5 destinos y barra de
@@ -50,8 +51,10 @@ const NAV_LATERAL: { seccion: string | null; items: ItemNav[] }[] = [
   {
     seccion: "Finanzas",
     items: [
+      { etiqueta: "Estado de cuenta", ruta: "/portal/finanzas", icono: LineChart },
+      { etiqueta: "Facturas", ruta: "/portal/facturas", icono: FileText },
       { etiqueta: "Pagos", ruta: "/portal/pagos", icono: Wallet },
-      { etiqueta: "Cuentas para pagar", ruta: "/portal/cuenta/pagos", icono: Landmark },
+      { etiqueta: "Cómo pagar", ruta: "/portal/cuenta/pagos", icono: Landmark },
       { etiqueta: "Retenciones", ruta: "/portal/retenciones", icono: Receipt },
       { etiqueta: "Consignación", ruta: "/portal/consignacion", icono: Boxes },
     ],
@@ -70,8 +73,11 @@ const NAV_INFERIOR: ItemNav[] = [
   { etiqueta: "Inicio", ruta: "/portal", icono: Home, exacto: true },
   { etiqueta: "Catálogo", ruta: "/portal/catalogo", icono: LayoutGrid, tambien: ["/portal/favoritos"] },
   { etiqueta: "Pedidos", ruta: "/portal/pedidos", icono: ClipboardList },
-  { etiqueta: "Pagos", ruta: "/portal/pagos", icono: Wallet, tambien: ["/portal/cuenta/pagos", "/portal/retenciones"] },
-  { etiqueta: "Cuenta", ruta: "/portal/cuenta", icono: UserRound, tambien: ["/portal/ayuda", "/portal/consignacion"], excluir: ["/portal/cuenta/pagos"] },
+  {
+    etiqueta: "Finanzas", ruta: "/portal/finanzas", icono: Wallet,
+    tambien: ["/portal/facturas", "/portal/pagos", "/portal/cuenta/pagos", "/portal/retenciones", "/portal/consignacion"],
+  },
+  { etiqueta: "Cuenta", ruta: "/portal/cuenta", icono: UserRound, tambien: ["/portal/ayuda"], excluir: ["/portal/cuenta/pagos"] },
 ];
 
 const coincide = (item: ItemNav, ruta: string) => {
@@ -95,6 +101,7 @@ export default function PortalShell() {
   const carrito = useCarritoPanel();
   const [cliente, setCliente] = useState<ClientePortal | null>(() => (user?.cliente_id ? cacheCliente.get(user.cliente_id) ?? null : null));
   const [monedaLista, setMonedaLista] = useState(false);
+  useAplicarTemaPortal();
 
   // Cliente de la empresa activa (un cliente presente en ambas empresas tiene una ficha por empresa)
   useEffect(() => {

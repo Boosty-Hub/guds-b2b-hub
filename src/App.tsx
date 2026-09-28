@@ -79,6 +79,9 @@ const PortalProducto = lazy(() => import("./pages/portal/PortalProducto"));
 const PortalCarrito = lazy(() => import("./pages/portal/PortalCarrito"));
 const PortalPedidos = lazy(() => import("./pages/portal/PortalPedidos"));
 const PortalPagos = lazy(() => import("./pages/portal/PortalPagos"));
+const PortalEstadoCuenta = lazy(() => import("./pages/portal/PortalEstadoCuenta"));
+const PortalFacturas = lazy(() => import("./pages/portal/PortalFacturas"));
+const PortalFacturaDetalle = lazy(() => import("./pages/portal/PortalFacturaDetalle"));
 const PortalCuenta = lazy(() => import("./pages/portal/PortalCuentaMobile"));
 const PortalFavoritos = lazy(() => import("./pages/portal/PortalFavoritos"));
 const PortalConsignacion = lazy(() => import("./pages/portal/PortalConsignacion"));
@@ -100,6 +103,10 @@ const VendedorDashboard = lazy(() => import("./pages/vendedor/VendedorDashboard"
 const VendedorClientes = lazy(() => import("./pages/vendedor/VendedorClientes"));
 const VendedorPedidos = lazy(() => import("./pages/vendedor/VendedorPedidos"));
 const VendedorPedidoDetalle = lazy(() => import("./pages/vendedor/VendedorPedidoDetalle"));
+const VendedorPedidoNuevo = lazy(() => import("./pages/vendedor/VendedorPedidoNuevo"));
+const VendedorClienteFicha = lazy(() => import("./pages/vendedor/VendedorClienteFicha"));
+const VendedorCartera = lazy(() => import("./pages/vendedor/VendedorCartera"));
+const VendedorCobroNuevo = lazy(() => import("./pages/vendedor/VendedorCobroNuevo"));
 const VendedorPagos = lazy(() => import("./pages/vendedor/VendedorPagos"));
 const VendedorMetas = lazy(() => import("./pages/vendedor/VendedorMetas"));
 const VendedorInventario = lazy(() => import("./pages/vendedor/VendedorInventario"));
@@ -232,6 +239,9 @@ const App = () => (
                   <Route path="/portal/carrito" element={<PortalCarrito />} />
                   <Route path="/portal/pedidos" element={<PortalPedidos />} />
                   <Route path="/portal/pagos" element={<PortalPagos />} />
+                  <Route path="/portal/finanzas" element={<PortalEstadoCuenta />} />
+                  <Route path="/portal/facturas" element={<PortalFacturas />} />
+                  <Route path="/portal/facturas/:id" element={<PortalFacturaDetalle />} />
                   <Route path="/portal/favoritos" element={<PortalFavoritos />} />
                   <Route path="/portal/consignacion" element={<PortalConsignacion />} />
                   <Route path="/portal/retenciones" element={<PortalRetenciones />} />
@@ -251,8 +261,12 @@ const App = () => (
                 {/* Portal de Vendedor - Solo vendedor */}
                 <Route path="/vendedor" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorDashboard /></ProtectedRoute>} />
                 <Route path="/vendedor/clientes" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorClientes /></ProtectedRoute>} />
+                <Route path="/vendedor/clientes/:id" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorClienteFicha /></ProtectedRoute>} />
+                <Route path="/vendedor/cartera" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorCartera /></ProtectedRoute>} />
                 <Route path="/vendedor/pedidos" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorPedidos /></ProtectedRoute>} />
+                <Route path="/vendedor/pedidos/nuevo" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorPedidoNuevo /></ProtectedRoute>} />
                 <Route path="/vendedor/pedidos/:id" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorPedidoDetalle /></ProtectedRoute>} />
+                <Route path="/vendedor/cobros/nuevo" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorCobroNuevo /></ProtectedRoute>} />
                 <Route path="/vendedor/pagos" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorPagos /></ProtectedRoute>} />
                 <Route path="/vendedor/metas" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorMetas /></ProtectedRoute>} />
                 <Route path="/vendedor/inventario" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorInventario /></ProtectedRoute>} />

@@ -46,7 +46,7 @@ const faqCategories = [
     questions: [
       {
         q: "¿A qué cuentas puedo pagar?",
-        a: "Solo a las cuentas oficiales que aparecen en Cuenta → Cuentas para pagar. Cada cuenta muestra banco, número, titular y RIF, con botón para copiar.",
+        a: "Solo a las cuentas oficiales que aparecen en Finanzas → Cómo pagar. Cada cuenta muestra banco, número, titular y RIF, con botón para copiar.",
       },
       {
         q: "¿Cómo reporto un pago?",
@@ -54,7 +54,7 @@ const faqCategories = [
       },
       {
         q: "¿Qué significa «Por pagar»?",
-        a: "Es el saldo pendiente de tus facturas emitidas. Los pagos que declaras se descuentan cuando los verificamos.",
+        a: "Es el saldo pendiente de tus facturas emitidas. En Finanzas → Estado de cuenta lo ves por antigüedad, con tus movimientos, y puedes descargarlo o imprimirlo. Los pagos que declaras se descuentan cuando los verificamos.",
       },
     ]
   },

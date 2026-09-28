@@ -51,7 +51,10 @@ export const NotificationsProvider = ({ children }: { children: ReactNode }) => 
 
     if (!error && data) {
       setNotifications(data as Notification[]);
-      setUnreadCount(data.filter((n) => !n.leida).length);
+      // No leídas: todas las del usuario, no solo las 10 que se muestran
+      const { count } = await supabase.from("notificaciones").select("id", { count: "exact", head: true })
+        .eq("usuario_id", user.id).eq("leida", false);
+      setUnreadCount(count ?? data.filter((n) => !n.leida).length);
     }
   }, [user?.id, versionEmpresa]);
 

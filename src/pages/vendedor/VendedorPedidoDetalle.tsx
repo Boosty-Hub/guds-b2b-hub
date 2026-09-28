@@ -185,7 +185,7 @@ const VendedorPedidoDetalle = () => {
     setRecarga((n) => n + 1);
     cargar();
   };
-  const duplicar = () => navigate(`/vendedor/pedidos?duplicar=${pedido.id}`);
+  const duplicar = () => navigate(`/vendedor/pedidos/nuevo?duplicar=${pedido.id}`);
   // Notas de crédito y saldos a favor: "-$7,47" (no "$-7,47")
   const monto = (n: number) => (n < -0.004 ? `-${formatPrice(-n)}` : formatPrice(n));
 
@@ -303,9 +303,15 @@ const VendedorPedidoDetalle = () => {
 
             <Panel className="order-5 mb-0 lg:order-none" titulo="Cliente y entrega"
               acciones={pedido.cliente ? (
-                <Link to={`/vendedor/pedidos?q=${encodeURIComponent(pedido.cliente.nombre_negocio)}`} className="text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400">
-                  Ver sus pedidos
-                </Link>
+                miCliente ? (
+                  <Link to={`/vendedor/clientes/${pedido.cliente.id}`} className="text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400">
+                    Ver ficha del cliente
+                  </Link>
+                ) : (
+                  <Link to={`/vendedor/pedidos?q=${encodeURIComponent(pedido.cliente.nombre_negocio)}`} className="text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400">
+                    Ver sus pedidos
+                  </Link>
+                )
               ) : undefined}>
               {pedido.cliente ? (
                 <FichaCampos columnas={3} campos={[

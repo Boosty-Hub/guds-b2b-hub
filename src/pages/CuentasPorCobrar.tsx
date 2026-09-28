@@ -17,6 +17,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Loader2, HandCoins, FilePlus, Eye, ShieldCheck } from "lucide-react";
+import { urlComprobante } from "@/components/vendedor/comprobantes";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
@@ -45,7 +46,7 @@ const TRAMOS = [
 ] as const;
 interface Cobro { id: string; numero: string; monto: number; monto_moneda: number; moneda: string; created_at: string; cliente?: { nombre_negocio: string } | null; banco?: { nombre: string } | null; }
 interface CuentaManual { id: string; numero: string; cliente_id: string; concepto: string; monto: number; monto_pagado: number; estado_pago: string; fecha: string; }
-interface PagoPendiente { id: string; numero: string; cliente_id: string; monto: number; monto_moneda: number | null; moneda: string; metodo: string; referencia: string | null; comprobante_url: string | null; banco_id: string | null; created_at: string; cliente?: { nombre_negocio: string } | null; orden?: { numero: string } | null; }
+interface PagoPendiente { id: string; numero: string; cliente_id: string; monto: number; monto_moneda: number | null; moneda: string; metodo: string; referencia: string | null; comprobante_url: string | null; banco_id: string | null; created_at: string; propuesta_estado?: string | null; cliente?: { nombre_negocio: string } | null; orden?: { numero: string } | null; }
 interface Anticipo { pago_id: string; numero: string; cliente_id: string; monto_usd: number; aplicado: number; disponible: number; created_at: string; }
 
 const CuentasPorCobrar = () => {
@@ -90,7 +91,7 @@ const CuentasPorCobrar = () => {
       supabase.from("bancos").select("id, nombre, moneda, metodo_pago, metodos").eq("activo", true).order("nombre"),
       supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("created_at", { ascending: false }).limit(5000),
       supabase.from("cuentas_cobrar").select("id, numero, cliente_id, concepto, monto, monto_pagado, estado_pago, fecha").order("fecha", { ascending: false }),
-      supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, comprobante_url, banco_id, created_at, cliente:clientes(nombre_negocio), orden:ordenes(numero)").eq("estado", "pendiente").order("created_at", { ascending: false }),
+      supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, comprobante_url, banco_id, created_at, propuesta_estado, cliente:clientes(nombre_negocio), orden:ordenes(numero)").eq("estado", "pendiente").order("created_at", { ascending: false }),
       supabase.from("v_anticipos").select("*").order("created_at", { ascending: false }),
     ]);
     setFacturas((facs as FacturaRow[]) ?? []);
@@ -248,10 +249,10 @@ const CuentasPorCobrar = () => {
   const facturasVerif = useMemo(() => verif ? facturasDelCliente(verif.cliente_id) : [], [verif, facturasNormales]);
   const montoVerifUSD = verif ? Number(verif.monto) : 0;
 
+  // El comprobante puede estar en "documentos" (portal) o en "comprobantes-cobro" (cobros de vendedor)
   const verComprobante = async (path: string) => {
-    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 120);
-    if (error || !data?.signedUrl) { toast({ title: "No se pudo abrir el comprobante", description: error?.message, variant: "destructive" }); return; }
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    try { window.open(await urlComprobante(path, 120), "_blank", "noopener,noreferrer"); }
+    catch (e) { toast({ title: "No se pudo abrir el comprobante", description: (e as Error).message, variant: "destructive" }); }
   };
 
   const decidirVerif = async (aprobar: boolean) => {
@@ -672,6 +673,12 @@ const CuentasPorCobrar = () => {
                 <div className="flex justify-between"><span className="text-muted-foreground">Método</span><span>{metodoLabel[verif.metodo] || verif.metodo}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Referencia</span><span className="font-mono">{verif.referencia || "—"}</span></div>
               </div>
+              {verif.propuesta_estado === "pendiente" && (
+                <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  Este cobro trae una propuesta del vendedor de a qué facturas aplicarlo. Para aplicarla tal cual o corregirla, verifícalo en{" "}
+                  <a href="/admin/pagos" className="font-medium underline">Pagos</a>.
+                </p>
+              )}
               {verif.comprobante_url && (
                 <Button variant="outline" size="sm" className="gap-2" onClick={() => verComprobante(verif.comprobante_url!)}>
                   <Eye className="h-4 w-4" /> Ver comprobante

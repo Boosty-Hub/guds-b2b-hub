@@ -1,111 +1,84 @@
-import { useState } from "react";
+import type { ReactNode } from "react";
+import { Check, DollarSign, Monitor, Moon, Palette, Sun, type LucideIcon } from "lucide-react";
 import { PortalPagina } from "@/components/portal/PortalPagina";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import {
-  Settings,
-  Moon,
-  Sun,
-  Globe,
-  DollarSign,
-  Check
-} from "lucide-react";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
+import { useTemaPortal, type TemaPortal } from "@/hooks/useTemaPortal";
+import { cn } from "@/lib/utils";
+
+// Preferencias del portal (F6), todas reales y guardadas en este navegador para el usuario: el tema (claro, oscuro o el
+// del sistema, con la clase `dark`) y la moneda en que se muestran los montos (el shell la recuerda por usuario).
+
+const TEMAS: { id: TemaPortal; nombre: string; detalle: string; icono: LucideIcon }[] = [
+  { id: "claro", nombre: "Claro", detalle: "Fondo claro", icono: Sun },
+  { id: "oscuro", nombre: "Oscuro", detalle: "Fondo oscuro, cómodo de noche", icono: Moon },
+  { id: "sistema", nombre: "Según el dispositivo", detalle: "Sigue el ajuste de tu teléfono o computadora", icono: Monitor },
+];
+
+const MONEDAS: { id: "USD" | "BS"; nombre: string; simbolo: string }[] = [
+  { id: "USD", nombre: "Dólares (USD)", simbolo: "$" },
+  { id: "BS", nombre: "Bolívares (Bs.) a la tasa BCV del día", simbolo: "Bs." },
+];
+
+const Opcion = ({ activa, onClick, children, testId }: { activa: boolean; onClick: () => void; children: ReactNode; testId?: string }) => (
+  <button
+    type="button"
+    role="radio"
+    aria-checked={activa}
+    onClick={onClick}
+    data-testid={testId}
+    className={cn(
+      "flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors",
+      activa ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50",
+    )}
+  >
+    {children}
+    <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full", activa ? "bg-primary text-primary-foreground" : "border border-border")} aria-hidden>
+      {activa && <Check className="h-4 w-4" />}
+    </span>
+  </button>
+);
 
 const PortalPreferencias = () => {
   const { currency, setCurrency } = useCurrency();
-  const [darkMode, setDarkMode] = useState(false);
-
-  const currencies = [
-    { id: "USD", name: "Dólar (USD)", symbol: "$" },
-    { id: "BS", name: "Bolívar (Bs.)", symbol: "Bs." },
-  ];
+  const [tema, setTema] = useTemaPortal();
 
   return (
-    <PortalPagina titulo="Preferencias" volver="/portal/cuenta" etiquetaVolver="Mi cuenta" ancho="estrecho">
-
-      <div className="pb-6 space-y-4">
-        {/* Appearance */}
-        <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <Settings className="h-5 w-5" />
-            Apariencia
-          </h3>
-          
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
-                {darkMode ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
-              </div>
-              <div>
-                <p className="font-medium">Modo oscuro</p>
-                <p className="text-sm text-muted-foreground">Cambiar tema de la aplicación</p>
-              </div>
-            </div>
-            <Switch 
-              checked={darkMode}
-              onCheckedChange={setDarkMode}
-            />
-          </div>
-        </div>
-
-        {/* Currency */}
-        <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <DollarSign className="h-5 w-5" />
-            Moneda
-          </h3>
-          
-          <div className="space-y-2">
-            {currencies.map((curr) => (
-              <button
-                key={curr.id}
-                onClick={() => setCurrency(curr.id as "USD" | "BS")}
-                className={`w-full p-3 rounded-xl border flex items-center justify-between transition-colors ${
-                  currency === curr.id 
-                    ? "border-primary bg-primary/5" 
-                    : "border-border"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-lg font-bold text-muted-foreground">{curr.symbol}</span>
-                  <span className="font-medium">{curr.name}</span>
-                </div>
-                {currency === curr.id && (
-                  <div className="h-6 w-6 rounded-full bg-primary flex items-center justify-center">
-                    <Check className="h-4 w-4 text-white" />
-                  </div>
-                )}
-              </button>
+    <PortalPagina titulo="Preferencias" volver="/portal/cuenta" etiquetaVolver="Mi cuenta" ancho="estrecho"
+      descripcion="Se guardan en este navegador para tu usuario.">
+      <div className="space-y-4 pb-2">
+        <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="pref-tema">
+          <h2 id="pref-tema" className="mb-3 flex items-center gap-2 font-semibold"><Palette className="h-4 w-4" />Apariencia</h2>
+          <div className="space-y-2" role="radiogroup" aria-labelledby="pref-tema">
+            {TEMAS.map((t) => (
+              <Opcion key={t.id} activa={tema === t.id} onClick={() => setTema(t.id)} testId={`tema-${t.id}`}>
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted"><t.icono className="h-4 w-4" /></span>
+                  <span className="min-w-0">
+                    <span className="block font-medium">{t.nombre}</span>
+                    <span className="block text-xs text-muted-foreground">{t.detalle}</span>
+                  </span>
+                </span>
+              </Opcion>
             ))}
           </div>
-        </div>
+        </section>
 
-        {/* Language */}
-        <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <Globe className="h-5 w-5" />
-            Idioma
-          </h3>
-          
-          <button
-            className="w-full p-3 rounded-xl border border-primary bg-primary/5 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-3">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-[11px] font-semibold text-muted-foreground">ES</span>
-              <span className="font-medium">Español</span>
-            </div>
-            <div className="h-6 w-6 rounded-full bg-primary flex items-center justify-center">
-              <Check className="h-4 w-4 text-white" />
-            </div>
-          </button>
-        </div>
+        <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="pref-moneda">
+          <h2 id="pref-moneda" className="mb-3 flex items-center gap-2 font-semibold"><DollarSign className="h-4 w-4" />Moneda de los montos</h2>
+          <div className="space-y-2" role="radiogroup" aria-labelledby="pref-moneda">
+            {MONEDAS.map((m) => (
+              <Opcion key={m.id} activa={currency === m.id} onClick={() => setCurrency(m.id)} testId={`moneda-pref-${m.id.toLowerCase()}`}>
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="w-9 text-center text-base font-bold text-muted-foreground">{m.simbolo}</span>
+                  <span className="font-medium">{m.nombre}</span>
+                </span>
+              </Opcion>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">Los documentos (facturas, estado de cuenta en CSV o impreso) conservan su moneda original.</p>
+        </section>
 
-        {/* App Info */}
-        <div className="bg-muted rounded-xl p-4 text-center">
-          <p className="text-sm text-muted-foreground">GUDS App v1.0.0</p>
-          <p className="text-xs text-muted-foreground mt-1">© 2024 GUDS Distribuidora</p>
-        </div>
+        <p className="px-1 text-xs text-muted-foreground">El portal está disponible en español.</p>
       </div>
     </PortalPagina>
   );

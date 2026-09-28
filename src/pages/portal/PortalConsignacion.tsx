@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PortalPagina } from "@/components/portal/PortalPagina";
-import { EstadoVacio, Panel, PillTono, SkeletonFilas, type Tono } from "@/components/portal/sistema";
+import { EstadoVacio, Panel, PillTono, SkeletonFilas, fechaCorta, type Tono } from "@/components/portal/sistema";
+import { NavFinanzas } from "@/components/portal/finanzas";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Boxes } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -53,6 +54,7 @@ const PortalConsignacion = () => {
 
   return (
     <PortalPagina titulo="Consignación" descripcion="Declara lo que vendiste del inventario que tienes en consignación.">
+      <NavFinanzas />
       {loading ? (
         <SkeletonFilas n={2} alto="h-48" />
       ) : !almacen ? (
@@ -69,7 +71,8 @@ const PortalConsignacion = () => {
             {declaraciones.length === 0 ? (
               <p className="p-8 text-center text-sm text-muted-foreground">Todavía no has declarado ninguna venta.</p>
             ) : (
-              <Table>
+              <>
+              <Table className="hidden md:table">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Nº</TableHead><TableHead>Fecha</TableHead>
@@ -81,7 +84,7 @@ const PortalConsignacion = () => {
                   {declaraciones.map((d) => (
                     <TableRow key={d.id}>
                       <TableCell className="font-mono text-sm">{d.numero}</TableCell>
-                      <TableCell className="text-muted-foreground">{new Date(d.fecha).toLocaleDateString("es-VE")}</TableCell>
+                      <TableCell className="text-muted-foreground">{fechaCorta(d.fecha)}</TableCell>
                       <TableCell className="text-right font-semibold tabular-nums">{formatPrice(d.total)}</TableCell>
                       <TableCell><PillTono tono={ESTADO[d.estado]?.tono ?? "neutro"}>{ESTADO[d.estado]?.label ?? d.estado}</PillTono></TableCell>
                       <TableCell className="font-mono text-sm text-muted-foreground">{d.factura?.numero || "—"}</TableCell>
@@ -89,6 +92,22 @@ const PortalConsignacion = () => {
                   ))}
                 </TableBody>
               </Table>
+              {/* Móvil: una fila por declaración */}
+              <ul className="divide-y divide-border md:hidden" data-testid="consignacion-lista">
+                {declaraciones.map((d) => (
+                  <li key={d.id} className="flex items-start justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium tabular-nums">{d.numero}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{fechaCorta(d.fecha)}{d.factura?.numero ? ` · Factura ${d.factura.numero}` : ""}</p>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
+                      <span className="text-sm font-semibold tabular-nums">{formatPrice(d.total)}</span>
+                      <PillTono tono={ESTADO[d.estado]?.tono ?? "neutro"}>{ESTADO[d.estado]?.label ?? d.estado}</PillTono>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              </>
             )}
           </Panel>
         </div>

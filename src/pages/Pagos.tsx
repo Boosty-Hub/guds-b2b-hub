@@ -29,6 +29,8 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { useColumnas } from "@/components/datos/columnas";
+import { VerificarCobroDialog } from "@/components/vendedor/VerificarCobroDialog";
+import { urlComprobante } from "@/components/vendedor/comprobantes";
 
 interface PagoAdmin {
   odoo_id?: number | null;
@@ -47,6 +49,9 @@ interface PagoAdmin {
   fecha_verificacion: string | null;
   orden?: { numero: string; total: number } | null;
   cliente?: { nombre_negocio: string } | null;
+  // Cobros reportados por un vendedor (20o): se verifican con la propuesta de aplicación y la foto del comprobante
+  registrado_por?: string | null;
+  propuesta_estado?: string | null;
 }
 
 const estadoConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -63,6 +68,7 @@ const Pagos = () => {
   const [accion, setAccion] = useState<{ pago: PagoAdmin; aprobar: boolean } | null>(null);
   const [notas, setNotas] = useState("");
   const [procesando, setProcesando] = useState(false);
+  const [verifCobro, setVerifCobro] = useState<string | null>(null);
   const { formatPrice } = useCurrency();
   const { toast } = useToast();
 
@@ -76,6 +82,7 @@ const Pagos = () => {
       .from("pagos")
       .select(`
         id, numero, monto, metodo, referencia, comprobante_url, banco, estado, notas, created_at, fecha_verificacion, odoo_id, es_igtf, igtf_origen:igtf_origen_id(numero),
+        registrado_por, propuesta_estado,
         orden:ordenes(numero, total),
         cliente:clientes(nombre_negocio)
       `)
@@ -117,13 +124,13 @@ const Pagos = () => {
   const formatDate = (s: string) =>
     new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
+  // Los comprobantes de cobros de vendedor están en el bucket comprobantes-cobro (con prefijo); los demás, en documentos
   const verComprobante = async (path: string) => {
-    const { data, error } = await supabase.storage.from("documentos").createSignedUrl(path, 120);
-    if (error || !data?.signedUrl) {
-      toast({ title: "No se pudo abrir el comprobante", description: error?.message, variant: "destructive" });
-      return;
+    try {
+      window.open(await urlComprobante(path, 120), "_blank", "noopener,noreferrer");
+    } catch (e) {
+      toast({ title: "No se pudo abrir el comprobante", description: (e as Error).message, variant: "destructive" });
     }
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
   const texto = q.trim().toLowerCase();
@@ -209,6 +216,10 @@ const Pagos = () => {
                       {pago.numero}
                       {pago.odoo_id && <OdooBadge />}
                       {pago.es_igtf && <Badge variant="outline" className="px-1 py-0 text-[10px]">IGTF</Badge>}
+                      {pago.registrado_por && <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal" title="Reportado por el vendedor">Vendedor</Badge>}
+                      {pago.propuesta_estado === "pendiente" && pago.estado === "pendiente" && (
+                        <Badge variant="outline" className="border-sky-300 bg-sky-50 px-1 py-0 text-[10px] font-normal text-sky-900 dark:bg-sky-500/10 dark:text-sky-200" data-testid="badge-propuesta">Propuesta</Badge>
+                      )}
                       {pago.igtf_origen && <span className="text-xs font-normal text-muted-foreground">IGTF del cobro {pago.igtf_origen.numero}</span>}
                     </span>
                   </TableCell>
@@ -248,7 +259,8 @@ const Pagos = () => {
                           size="icon"
                           className="h-7 w-7 text-green-600 hover:bg-green-500/10 hover:text-green-700"
                           title="Verificar pago"
-                          onClick={() => { setAccion({ pago, aprobar: true }); setNotas(""); }}
+                          data-testid="verificar-pago"
+                          onClick={() => { if (pago.registrado_por || pago.propuesta_estado) setVerifCobro(pago.id); else { setAccion({ pago, aprobar: true }); setNotas(""); } }}
                         >
                           <CheckCircle className="h-3.5 w-3.5" />
                         </Button>
@@ -275,6 +287,9 @@ const Pagos = () => {
         )}
         {!loading && <DataTablePagination pagination={pagination} />}
       </div>
+
+      {/* Cobro de vendedor: foto del comprobante y propuesta de aplicación a facturas (aplicar tal cual o corregir) */}
+      <VerificarCobroDialog pagoId={verifCobro} onCerrar={() => setVerifCobro(null)} onHecho={() => { setVerifCobro(null); fetchPagos(); }} />
 
       {/* Diálogo de confirmación */}
       <Dialog open={!!accion} onOpenChange={(o) => { if (!o) { setAccion(null); setNotas(""); } }}>

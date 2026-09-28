@@ -18,6 +18,7 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
+import { MetasVendedoresPanel } from "@/components/vendedores/MetasVendedoresPanel";
 
 interface Vendedor {
   id: string; nombre: string; apellido: string | null; email: string; telefono: string | null; activo: boolean;
@@ -130,6 +131,7 @@ const Vendedores = () => {
     <TabsList>
       <TabsTrigger value="vendedores">Vendedores ({vendedores.length})</TabsTrigger>
       <TabsTrigger value="sin-asignar">Sin asignar ({sinAsignar.length})</TabsTrigger>
+      <TabsTrigger value="metas" data-testid="tab-metas">Metas</TabsTrigger>
     </TabsList>
   );
 
@@ -159,7 +161,7 @@ const Vendedores = () => {
                 <Button size="sm" className="gap-1.5" onClick={() => setOpenNuevo(true)}><UserPlus className="h-3.5 w-3.5" /> Nuevo vendedor</Button>
               }
             />
-          ) : (
+          ) : tab === "sin-asignar" ? (
             <BarraLista
               pestanas={pestanas}
               filtros={<p className="text-xs text-muted-foreground">Elegí clientes y asignalos a un vendedor.</p>}
@@ -178,7 +180,7 @@ const Vendedores = () => {
                 </>
               }
             />
-          )}
+          ) : null}
 
           <TabsContent value="vendedores" className="mt-2">
             <div className="rounded-lg border border-border bg-card">
@@ -246,6 +248,11 @@ const Vendedores = () => {
                 </>
               )}
             </div>
+          </TabsContent>
+
+          {/* Metas por vendedor y mes (su propia barra con el mes; solo personal de administración) */}
+          <TabsContent value="metas" className="mt-0">
+            <MetasVendedoresPanel pestanas={pestanas} />
           </TabsContent>
         </Tabs>
       )}

@@ -43,7 +43,8 @@ en el servidor, listas de precios sincronizadas), **F1** (portal del cliente res
 detalle del pedido), los **avisos desde Odoo**, **D2–D3** (ubicaciones, mapa y rutas), **R1** (histórico de Profit en
 reportes) y **R3–R6** (costo promedio de Odoo visible solo para administración, motor de reporte tipo cubo con subtotales y
 filtros cruzados, pestaña **Análisis** con las vistas del Excel y exportación del análisis y del detalle de líneas con las
-columnas de "Base datos"; migraciones 20j) y **F2** (catálogo paginado y ficha de producto). Siguiente: F5–F6, V2–V5, D5–D6, el
+columnas de "Base datos"; migraciones 20j) y **F2** (catálogo paginado y ficha de producto), **F5–F6** (estado de cuenta, facturas, cuenta) y **V2–V5** (venta rápida,
+ficha y cartera, cobro con comprobante y propuesta, "Hoy" y metas). Siguiente: F7, V6 (PWA), D5–D6, el
 piloto de entregas en Odoo, R2 (clasificación comercial en Odoo) y R7 (comparativos y metas).
 
 ## 2. Principios comunes (los tres portales)

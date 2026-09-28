@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { PortalPagina } from "@/components/portal/PortalPagina";
 import { EstadoVacio, Kpi, Panel, PillTono, Segmentado, SkeletonFilas, useEsEscritorio, type Tono } from "@/components/portal/sistema";
 import { CuentaPagoDatos } from "@/components/portal/CuentaPagoDatos";
+import { NavFinanzas } from "@/components/portal/finanzas";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEmpresa } from "@/contexts/EmpresaContext";
@@ -64,6 +65,7 @@ interface PagoDB {
 
 // Deuda real: facturas publicadas (posted) con saldo, igual que Cuentas por Cobrar del admin
 interface FacturaAbierta {
+  estado_cobro?: string | null;
   id: string;
   numero: string;
   tipo: string;
@@ -155,7 +157,7 @@ const PortalPagos = () => {
       // Facturas publicadas con saldo (positivo = por pagar; negativo = saldo a favor por notas de crédito)
       supabase
         .from("facturas")
-        .select("id, numero, tipo, fecha_emision, fecha_vencimiento, saldo_usd, orden_id")
+        .select("id, numero, tipo, fecha_emision, fecha_vencimiento, saldo_usd, orden_id, estado_cobro")
         .eq("cliente_id", cid)
         .eq("estado", "posted")
         .or(`saldo_usd.gt.${TOLERANCIA},saldo_usd.lt.-${TOLERANCIA}`)
@@ -187,7 +189,11 @@ const PortalPagos = () => {
   const totalAFavor = facturas.reduce((s, f) => s + (f.saldo_usd < -TOLERANCIA ? -f.saldo_usd : 0), 0);
 
   const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-  const vencida = (f: FacturaAbierta) => !!f.fecha_vencimiento && new Date(`${f.fecha_vencimiento}T00:00:00`) < hoy;
+  // Misma regla que CxC del admin: vence = vencimiento o, si falta, la emisión
+  const vencida = (f: FacturaAbierta) => {
+    const v = f.fecha_vencimiento || f.fecha_emision;
+    return !!v && new Date(`${v}T00:00:00`) < hoy;
+  };
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "—";
@@ -196,7 +202,8 @@ const PortalPagos = () => {
   };
 
   const destinos = useMemo<Destino[]>(() => [
-    ...facturasPorPagar.map((f) => ({
+    // Las anuladas que Odoo aún tiene con saldo ("por cruzar" con su NC) cuentan en la deuda, pero no se pagan
+    ...facturasPorPagar.filter((f) => f.estado_cobro !== "anulado").map((f) => ({
       clave: `f:${f.id}`,
       etiqueta: `Factura ${f.numero} · saldo ${fmtUsd(f.saldo_usd)}`,
       saldoUSD: round2(f.saldo_usd),
@@ -301,13 +308,21 @@ const PortalPagos = () => {
     }
   };
 
-  // Enlace directo desde el detalle del pedido: /portal/pagos?factura=<id> abre la declaración de esa factura
+  // Enlaces directos: /portal/pagos?factura=<id> (detalle del pedido o de la factura) abre la declaración de esa factura;
+  // /portal/pagos?declarar=1 (estado de cuenta) abre la declaración vacía.
   useEffect(() => {
     const fid = searchParams.get("factura");
-    if (!fid || loading) return;
-    if (facturasPorPagar.some((f) => f.id === fid)) abrirDeclaracion(`f:${fid}`);
+    const declarar = searchParams.get("declarar");
+    if ((!fid && !declarar) || loading) return;
+    if (fid) {
+      if (facturasPorPagar.some((f) => f.id === fid && f.estado_cobro !== "anulado")) abrirDeclaracion(`f:${fid}`);
+      else toast({ title: "Esta factura no tiene saldo pendiente", description: "Puedes declarar un abono a tu cuenta si lo necesitas." });
+    } else {
+      abrirDeclaracion();
+    }
     const n = new URLSearchParams(searchParams);
     n.delete("factura");
+    n.delete("declarar");
     setSearchParams(n, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, searchParams]);
@@ -443,11 +458,12 @@ const PortalPagos = () => {
       descripcion="Tus facturas por pagar y los pagos que has declarado."
       acciones={
         <>
-          <Button asChild variant="outline" className="gap-2"><Link to="/portal/cuenta/pagos"><Landmark className="h-4 w-4" />Cuentas para pagar</Link></Button>
+          <Button asChild variant="outline" className="gap-2"><Link to="/portal/cuenta/pagos"><Landmark className="h-4 w-4" />Cómo pagar</Link></Button>
           <Button className="gap-2" onClick={() => abrirDeclaracion()} data-testid="declarar-pago"><Plus className="h-4 w-4" />Declarar un pago</Button>
         </>
       }
     >
+      <NavFinanzas />
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
         {/* Resumen y facturas pendientes (en móvil va primero; en escritorio, columna derecha) */}
         <aside className="space-y-4 lg:sticky lg:top-[5.5rem] lg:order-2">
@@ -469,13 +485,14 @@ const PortalPagos = () => {
               <Plus className="h-5 w-5" />Declarar un pago
             </Button>
             <Link to="/portal/cuenta/pagos" className="flex items-center justify-center gap-1.5 py-1 text-sm font-medium text-primary">
-              <Landmark className="h-4 w-4" />Ver cuentas para pagar
+              <Landmark className="h-4 w-4" />Ver cómo pagar
             </Link>
           </div>
 
           {/* Facturas pendientes: el detalle de "Por pagar" */}
           {!loading && facturasPorPagar.length > 0 && (
-            <Panel titulo="Facturas pendientes" descripcion="Toca una factura para declarar su pago." cuerpoClassName="p-0 sm:p-0">
+            <Panel titulo="Facturas pendientes" descripcion="Toca una factura para declarar su pago." cuerpoClassName="p-0 sm:p-0"
+              accion={<Link to="/portal/facturas" className="text-xs font-medium text-primary hover:underline">Ver facturas</Link>}>
               <ul className="divide-y divide-border">
                 {facturasPorPagar.map((f) => (
                   <li key={f.id}>

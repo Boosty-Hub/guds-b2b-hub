@@ -1136,6 +1136,214 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
     como({ rol: 'anon', uid: null, empresa: guds.id }, `select count(*)::text from public.reporte_ventas_cubo(${P}, array['vendedor'])`));
 }
 
+// ── Finanzas y cuenta del portal (20m): estado de cuenta ligado al cliente, facturas propias, ejecutivo sin datos de más ──
+{
+  // Cliente real con facturas vivas y vendedor asignado; el perfil temporal (auth de qa.cliente) vive solo dentro del bloque
+  const qa20m = (await sql(`select id from auth.users where email = 'qa.cliente@guds.test'`))[0]?.id;
+  const c20m = (await sql(`select c.id, c.empresa_id, c.vendedor_asignado_id from clientes c
+    where c.empresa_id is not null and c.vendedor_asignado_id is not null
+      and exists (select 1 from facturas f where f.cliente_id = c.id and f.estado = 'posted' and f.saldo_usd > 0.009)
+      and exists (select 1 from facturas f where f.cliente_id = c.id and f.estado = 'posted' and f.saldo_usd < -0.009)
+    order by c.codigo limit 1`))[0];
+  const resuelto20m = (obj) => Promise.resolve(obj.error ? obj : { ok: JSON.stringify(obj) });
+  if (qa20m && c20m) {
+    const Cli = { uid: qa20m, empresa: c20m.empresa_id,
+      previo: `insert into public.usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${qa20m}', 'qa.cliente@guds.test', 'QA', 'cliente', '${c20m.id}', true);` };
+    await caso('Estado de cuenta 20m: movimientos solo con documentos del cliente que llama', (x) => x?.n > 0 && x?.ajenos === 0 && x?.cliente === c20m.id,
+      como(Cli, `select row_to_json(t)::text from (select count(*) n,
+          count(*) filter (where m->>'factura_id' is not null and not exists (select 1 from facturas f where f.id = (m->>'factura_id')::uuid and f.cliente_id = '${c20m.id}')) ajenos,
+          (select public.estado_cuenta_portal()->'cliente'->>'id') cliente
+        from jsonb_array_elements(public.estado_cuenta_portal()->'movimientos') m) t`));
+    // Mismo saldo que Cuentas por Cobrar del admin: facturas publicadas de su empresa con saldo positivo; a favor = negativos
+    const esperado20m = (await sql(`select round(coalesce(sum(saldo_usd) filter (where saldo_usd > 0.009), 0), 2)::float8 saldo,
+        round(coalesce(-sum(saldo_usd) filter (where saldo_usd < -0.009), 0), 2)::float8 nc
+      from facturas where cliente_id = '${c20m.id}' and estado = 'posted' and (empresa_id is null or empresa_id = '${c20m.empresa_id}')`))[0];
+    const r20m = await como(Cli, `select (public.estado_cuenta_portal()->'resumen' || jsonb_build_object('diferencia', public.estado_cuenta_portal()->'diferencia',
+      'saldo_final', public.estado_cuenta_portal()->'saldo_final'))::text`);
+    const v20m = r20m.ok ? JSON.parse(r20m.ok) : null;
+    await caso('Estado de cuenta 20m: saldo y a favor = regla de CxC del admin; el libro cuadra con el saldo neto', (x) => x?.ok === true,
+      resuelto20m(r20m.error ? r20m : { ok: Number(v20m.saldo) === esperado20m.saldo && Number(v20m.nc_a_favor) === esperado20m.nc
+        && Number(v20m.diferencia) === 0 && Number(v20m.saldo_final) === Number(v20m.neto),
+        saldo: v20m.saldo, esperado: esperado20m.saldo, neto: v20m.neto, final: v20m.saldo_final }));
+    await caso('Estado de cuenta 20m: la antigüedad suma el saldo (por vencer + vencido)', (x) => x?.ok === true,
+      resuelto20m(r20m.error ? r20m : { ok: Math.abs(Number(v20m.por_vencer) + Number(v20m.d1_30) + Number(v20m.d31_60) + Number(v20m.d61_90) + Number(v20m.mas_90) - Number(v20m.saldo)) < 0.011
+        && Math.abs(Number(v20m.por_vencer) + Number(v20m.vencido) - Number(v20m.saldo)) < 0.011 }));
+    const propia = (await sql(`select id from facturas where cliente_id = '${c20m.id}' and estado = 'posted' limit 1`))[0].id;
+    const ajena = (await sql(`select id from facturas where cliente_id <> '${c20m.id}' and empresa_id = '${c20m.empresa_id}' limit 1`))[0].id;
+    await caso('Factura 20m: la ficha de una factura propia sí; la de otro cliente devuelve nada', (x) => x?.propia === propia && x?.ajena === null,
+      como(Cli, `select json_build_object('propia', public.factura_portal('${propia}')->>'id', 'ajena', public.factura_portal('${ajena}'))::text`));
+    const vend20m = (await sql(`select nullif(btrim(concat_ws(' ', nombre, apellido)), '') n from usuarios where id = '${c20m.vendedor_asignado_id}'`))[0]?.n;
+    await caso('Ejecutivo 20m: mi_ejecutivo() da solo nombre, teléfono y WhatsApp del vendedor de su propio cliente', (x) =>
+      x && Object.keys(x).sort().join(',') === 'nombre,telefono,whatsapp' && x.nombre === vend20m,
+      como(Cli, `select public.mi_ejecutivo()::text`));
+    // Con otra ficha (otro vendedor), la misma llamada responde por esa ficha: no hay forma de pedir el de otro cliente
+    const otro20m = (await sql(`select c.id, c.empresa_id, nullif(btrim(concat_ws(' ', u.nombre, u.apellido)), '') n from clientes c join usuarios u on u.id = c.vendedor_asignado_id
+      where c.vendedor_asignado_id <> '${c20m.vendedor_asignado_id}' and c.empresa_id is not null limit 1`))[0];
+    if (otro20m) {
+      await caso('Ejecutivo 20m: un cliente no ve el ejecutivo de otro (la función no recibe parámetros)', (x) => x?.nombre === otro20m.n && x?.nombre !== vend20m
+        && x?.args === '',
+        como({ uid: qa20m, empresa: otro20m.empresa_id,
+          previo: `insert into public.usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${qa20m}', 'qa.cliente@guds.test', 'QA', 'cliente', '${otro20m.id}', true);` },
+          `select (public.mi_ejecutivo() || jsonb_build_object('args', (select pg_get_function_identity_arguments('public.mi_ejecutivo'::regproc))))::text`));
+    }
+    await caso('Retenciones 20m: un cliente no declara sobre la ficha de otro cliente', 'No tienes acceso a este cliente',
+      como(Cli, `select public.declarar_retencion('${otro20m?.id ?? cliGuds}', 'iva', '[]'::jsonb)::text`));
+  }
+  await caso('Estado de cuenta 20m: un anónimo no ejecuta estado_cuenta_portal', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select public.estado_cuenta_portal()::text`));
+  await caso('Estado de cuenta 20m: un anónimo no ejecuta la ficha de factura ni el ejecutivo', (x) => x?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace
+      and p.proname in ('estado_cuenta_portal', 'factura_portal', 'mi_ejecutivo', 'portal_cliente_contexto') and has_function_privilege('anon', p.oid, 'execute')) t`));
+  await caso('Estado de cuenta 20m: la función interna de contexto no se ejecuta por la API', (x) => x?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace
+      and p.proname = 'portal_cliente_contexto' and has_function_privilege('authenticated', p.oid, 'execute')) t`));
+  if (vendGuds) {
+    await caso('Estado de cuenta 20m: un vendedor no ejecuta el estado de cuenta del portal', 'solo para clientes del portal',
+      como({ uid: vendGuds, empresa: guds.id }, `select public.estado_cuenta_portal()::text`));
+    await caso('Ejecutivo 20m: un vendedor no ejecuta mi_ejecutivo', 'solo para clientes del portal',
+      como({ uid: vendGuds, empresa: guds.id }, `select public.mi_ejecutivo()::text`));
+  }
+  await caso('Estado de cuenta 20m: el personal de administración no usa el estado de cuenta del portal', 'solo para clientes del portal',
+    como(E, `select public.estado_cuenta_portal()::text`));
+}
+
+// ── Portal del vendedor V2–V5 (20o): catálogo, pedido idempotente, ficha y cartera, cobro con evidencia, metas ──
+{
+  // Un vendedor activo con un cliente activo de GUDS que tenga facturas con saldo (y otro cliente ajeno con factura)
+  const v = (await sql(`select u.auth_id, u.id usuario, c.id cliente, f.id factura, f.saldo_usd
+    from usuarios u join clientes c on c.vendedor_asignado_id = u.id and c.activo and c.empresa_id = '${guds.id}'
+    join facturas f on f.cliente_id = c.id and f.estado = 'posted' and f.tipo = 'factura' and f.saldo_usd > 1
+    where u.role = 'vendedor' and coalesce(u.activo, true) and u.auth_id is not null
+    order by f.saldo_usd desc limit 1`))[0];
+  const ajena = v && (await sql(`select f.id, f.cliente_id from facturas f join clientes c on c.id = f.cliente_id
+    where f.estado = 'posted' and f.tipo = 'factura' and f.saldo_usd > 1 and c.empresa_id = '${guds.id}'
+      and c.vendedor_asignado_id is distinct from '${v.usuario}' limit 1`))[0];
+  const otroV = v && (await sql(`select u.auth_id, u.id usuario, c.id cliente from usuarios u join clientes c on c.vendedor_asignado_id = u.id and c.activo
+    where u.role = 'vendedor' and u.auth_id is not null and u.id <> '${v.usuario}' limit 1`))[0];
+  const bancoBs = (await sql(`select id from bancos where empresa_id = '${guds.id}' and activo and visible_portal and moneda = 'BS' limit 1`))[0]?.id;
+  const prodV = (await sql(`select id, sku from productos where empresa_id = '${guds.id}' and activo and coalesce(vendible, true) and controla_stock
+    and stock_disponible > 50 and sku is not null limit 1`))[0];
+  if (v && ajena && bancoBs && prodV) {
+    const E = { uid: v.auth_id, empresa: guds.id };
+    const claimsJ = (uid) => JSON.stringify({ sub: uid, role: 'authenticated' }).replace(/'/g, "''");
+    const hdrJ = JSON.stringify({ 'x-empresa-id': guds.id }).replace(/'/g, "''");
+    const comoU = (uid) => `perform set_config('request.jwt.claims', '${claimsJ(uid)}', true); perform set_config('request.headers', '${hdrJ}', true);`;
+
+    // V2 · catálogo y pedido
+    await caso('Vendedor 20o: catálogo del cliente de su cartera, con precio del cliente y sin costo', (r) => r?.n > 0 && r.costo === false && r.precio === true,
+      como(E, `select row_to_json(t)::text from (select jsonb_array_length(x->'productos') n, (x::text like '%"costo"%') costo,
+        (x->'productos'->0 ? 'precio') precio from (select public.catalogo_vendedor('${v.cliente}') x) y) t`));
+    await caso('Vendedor 20o: el catálogo no se abre para un cliente que no es de su cartera', 'no está en tu cartera',
+      como(E, `select public.catalogo_vendedor('${ajena.cliente_id}')::text`));
+    await caso('Vendedor 20o: el catálogo busca por código y sin mayúsculas', (r) => r?.primero === prodV.id,
+      como(E, `select row_to_json(t)::text from (select public.catalogo_vendedor('${v.cliente}', lower('${prodV.sku}')) -> 'productos' -> 0 ->> 'id' primero) t`));
+    await caso('Vendedor 20o: "lo que compra" solo de clientes de su cartera', 'no está en tu cartera',
+      como(E, `select public.compras_cliente_vendedor('${ajena.cliente_id}')::text`));
+    const items = `'[{"producto_id":"${prodV.id}","cantidad":2}]'::jsonb`;
+    const clave = '00000000-0000-0000-0000-00000000c1a0';
+    const pedido = `perform public.crear_orden_vendedor('${v.cliente}', 'transferencia', 'prueba-20o', ${items}, null, '${clave}');`;
+    await caso('Vendedor 20o: el pedido con la misma clave no se crea dos veces (doble toque / reintento)', (r) => r?.n === 1 && r.mismo === true,
+      como({ ...E, previo: `${comoU(v.auth_id)} ${pedido} perform set_config('guds.p1', (select id from ordenes where clave_idempotencia = '${clave}')::text, true);` },
+        `select row_to_json(t)::text from (select (select count(*) from ordenes where clave_idempotencia = '${clave}') n,
+          (select orden_id from public.crear_orden_vendedor('${v.cliente}', 'transferencia', 'prueba-20o', ${items}, null, '${clave}'))::text = current_setting('guds.p1') mismo) t`));
+    if (otroV) {
+      await caso('Vendedor 20o: otro vendedor no reutiliza la clave de un pedido ajeno', 'ya usada',
+        como({ uid: otroV.auth_id, empresa: guds.id, previo: `${comoU(v.auth_id)} ${pedido}` },
+          `select orden_id::text from public.crear_orden_vendedor('${otroV.cliente}', 'transferencia', 'x', ${items}, null, '${clave}')`));
+    }
+
+    // V3 · ficha y cartera
+    await caso('Vendedor 20o: la ficha de un cliente ajeno no existe para él (null)', (r) => r === null,
+      como(E, `select public.ficha_cliente_vendedor('${ajena.cliente_id}')::text`));
+    await caso('Vendedor 20o: la ficha da la deuda de Cuentas por cobrar (neto = Σ saldos; tramos = saldo positivo)', (r) => r?.neto_ok && r?.tramos_ok,
+      como(E, `select row_to_json(t)::text from (select
+          round((f->'deuda'->>'neto')::numeric, 2) = (select round(coalesce(sum(saldo_usd), 0), 2) from facturas where cliente_id = '${v.cliente}' and estado = 'posted' and abs(saldo_usd) > 0.009) neto_ok,
+          abs((select sum(value::numeric) from jsonb_each_text(f->'deuda'->'tramos')) - (f->'deuda'->>'por_cobrar')::numeric) < 0.05 tramos_ok
+        from (select public.ficha_cliente_vendedor('${v.cliente}') f) x) t`));
+    await caso('Vendedor 20o: la cartera suma lo mismo que resumen_vendedor (tramos)', (r) => r?.ok === true,
+      como(E, `select row_to_json(t)::text from (select
+          abs((select sum((c->'tramos'->>'mas_90')::numeric + (c->'tramos'->>'d61_90')::numeric + (c->'tramos'->>'d31_60')::numeric + (c->'tramos'->>'d1_30')::numeric + (c->'tramos'->>'por_vencer')::numeric)
+             from jsonb_array_elements(public.cartera_vendedor()->'clientes') c)
+          - (select (r->'cartera'->>'por_cobrar')::numeric from (select public.resumen_vendedor() r) z)) < 0.5 ok) t`));
+    await caso('Vendedor 20o: "Hoy" cuenta los mismos pedidos por aprobar que resumen_vendedor', (r) => r?.ok === true,
+      como(E, `select row_to_json(t)::text from (select (public.hoy_vendedor()->'por_aprobar'->>'n')::int = (public.resumen_vendedor()->'pedidos'->>'por_aprobar')::int ok) t`));
+
+    // V4 · cobro con evidencia
+    const ruta = `${v.usuario}/${v.cliente}/prueba-20o.jpg`;
+    const objeto = `insert into storage.objects (bucket_id, name) values ('comprobantes-cobro', '${ruta}');`;
+    const fecha = `(now() at time zone 'America/Caracas')::date - 3`;
+    const lineas = (comp = ruta) => `jsonb_build_array(jsonb_build_object('banco_id', '${bancoBs}', 'metodo', 'transferencia', 'moneda', 'BS', 'monto', 10000,
+      'referencia', 'PRUEBA-20O-REF', 'fecha_pago', ${fecha}, 'comprobante', '${comp}'))`;
+    const prop = (fid, m) => `jsonb_build_array(jsonb_build_object('factura_id', '${fid}', 'monto', ${m}))`;
+    const lote = '00000000-0000-0000-0000-00000000c0b0';
+    const cobro = `perform public.registrar_cobro_vendedor('${v.cliente}', ${lineas()}, ${prop(v.factura, 1)}, '${lote}');`;
+    await caso('Vendedor 20o: la propuesta de aplicación solo sobre facturas del cliente del pago', 'no es de este cliente',
+      como({ ...E, previo: objeto }, `select public.registrar_cobro_vendedor('${v.cliente}', ${lineas()}, ${prop(ajena.id, 1)}, '${lote}')::text`));
+    await caso('Vendedor 20o: sin el comprobante subido no se registra el cobro', 'comprobante no se encontró',
+      como(E, `select public.registrar_cobro_vendedor('${v.cliente}', ${lineas()}, '[]'::jsonb, '${lote}')::text`));
+    await caso('Vendedor 20o: el cobro en Bs usa la tasa BCV de la fecha del pago y queda pendiente con su propuesta', (r) => r?.tasa_ok && r?.estado === 'pendiente' && r?.prop === 'pendiente' && r?.n === 1,
+      como({ ...E, previo: `${objeto} ${comoU(v.auth_id)} ${cobro} ${cobro}` }, `select row_to_json(t)::text from (select count(*) n,
+          bool_and(tasa_cambio = public.tasa_bcv_de(fecha_pago) and monto = round(monto_moneda / tasa_cambio, 2)) tasa_ok, min(estado::text) estado, min(propuesta_estado) prop
+        from pagos where lote_cobro = '${lote}') t`));
+    await caso('Vendedor 20o: la misma foto no respalda dos cobros distintos', 'ya se usó en el cobro',
+      como({ ...E, previo: `${objeto} ${comoU(v.auth_id)} ${cobro}` }, `select public.registrar_cobro_vendedor('${v.cliente}',
+        jsonb_set(${lineas()}, '{0,referencia}', '"OTRA-REF-20O"'), '[]'::jsonb, '00000000-0000-0000-0000-00000000c0b1')::text`));
+    await caso('Vendedor 20o: administración recibe el aviso "Cobro por verificar" con enlace a Pagos', (r) => r?.n >= 1,
+      como({ uid: admin, empresa: guds.id, previo: `${objeto} ${comoU(v.auth_id)} ${cobro}` }, `select row_to_json(t)::text from (select count(*) n from notificaciones
+        where titulo = 'Cobro por verificar' and link = '/admin/pagos' and created_at >= now() - interval '1 minute') t`));
+    await caso('Vendedor 20o: un vendedor no verifica ni aplica pagos', 'No tienes permiso para verificar',
+      como({ ...E, previo: `${objeto} ${comoU(v.auth_id)} ${cobro}` }, `select public.verificar_cobro_propuesta((select id from pagos where lote_cobro = '${lote}'))::text`));
+    await caso('Vendedor 20o: aplicar_pago_a_facturas sigue siendo interna', (r) => r?.ok === false,
+      como(E, `select row_to_json(t)::text from (select has_function_privilege('authenticated', 'public.aplicar_pago_a_facturas(uuid, jsonb)', 'execute') ok) t`));
+    await caso('Vendedor 20o: administración verifica aplicando la propuesta del vendedor', (r) => r?.aplicado === 1 && r?.estado === 'verificado/aplicada',
+      como({ uid: admin, empresa: guds.id, previo: `${objeto} ${comoU(v.auth_id)} ${cobro} ${comoU(admin)}
+          perform public.verificar_cobro_propuesta((select id from pagos where lote_cobro = '${lote}'));` },
+        `select row_to_json(t)::text from (select (select sum(monto_aplicado) from pago_facturas pf join pagos p on p.id = pf.pago_id where p.lote_cobro = '${lote}') aplicado,
+          (select estado || '/' || propuesta_estado from pagos where lote_cobro = '${lote}') estado) t`));
+    // Almacenamiento: carpeta del vendedor
+    await caso('Vendedor 20o: no sube comprobantes a la carpeta de otro vendedor', 'row-level security',
+      como(E, `with x as (insert into storage.objects (bucket_id, name) values ('comprobantes-cobro', '${otroV?.usuario ?? '00000000-0000-0000-0000-000000000000'}/${v.cliente}/x.jpg') returning name) select row_to_json(x)::text from x`));
+    await caso('Vendedor 20o: no sube comprobantes para un cliente que no es suyo', 'row-level security',
+      como(E, `with x as (insert into storage.objects (bucket_id, name) values ('comprobantes-cobro', '${v.usuario}/${ajena.cliente_id}/x.jpg') returning name) select row_to_json(x)::text from x`));
+    await caso('Vendedor 20o: sube a su carpeta para un cliente de su cartera', (r) => r?.name === `${v.usuario}/${v.cliente}/propio.jpg`,
+      como(E, `with x as (insert into storage.objects (bucket_id, name) values ('comprobantes-cobro', '${v.usuario}/${v.cliente}/propio.jpg') returning name) select row_to_json(x)::text from x`));
+    if (otroV) {
+      await caso('Vendedor 20o: no lee comprobantes de otros vendedores (sí los suyos)', (r) => r?.ajenos === 0 && r?.propios === 1,
+        como({ uid: otroV.auth_id, empresa: guds.id, previo: `${objeto} insert into storage.objects (bucket_id, name) values ('comprobantes-cobro', '${otroV.usuario}/${otroV.cliente}/suyo.jpg');` },
+          `select row_to_json(t)::text from (select count(*) filter (where name = '${ruta}') ajenos, count(*) filter (where name = '${otroV.usuario}/${otroV.cliente}/suyo.jpg') propios
+            from storage.objects where bucket_id = 'comprobantes-cobro') t`));
+    }
+    await caso('Vendedor 20o: administración lee los comprobantes de todos', (r) => r?.n === 1,
+      como({ uid: admin, empresa: guds.id, previo: objeto }, `select row_to_json(t)::text from (select count(*) n from storage.objects where bucket_id = 'comprobantes-cobro' and name = '${ruta}') t`));
+    const cliPortal = (await sql(`select u.auth_id, u.cliente_id from usuarios u join clientes c on c.id = u.cliente_id
+      where u.role = 'cliente' and coalesce(u.activo, true) and u.auth_id is not null and c.empresa_id = '${guds.id}' limit 1`))[0];
+    if (cliPortal) {
+      await caso('Vendedor 20o: el cliente del portal lee solo los comprobantes de sus fichas', (r) => r?.suyo === 1 && r?.ajeno === 0,
+        como({ uid: cliPortal.auth_id, empresa: guds.id, previo: `${objeto} insert into storage.objects (bucket_id, name) values ('comprobantes-cobro', '${v.usuario}/${cliPortal.cliente_id}/del-cliente.jpg');` },
+          `select row_to_json(t)::text from (select count(*) filter (where name like '%/${cliPortal.cliente_id}/%') suyo, count(*) filter (where name = '${ruta}' and '${v.cliente}' <> '${cliPortal.cliente_id}') ajeno
+            from storage.objects where bucket_id = 'comprobantes-cobro') t`));
+    }
+
+    // V5 · metas
+    const mes = `extract(month from (now() at time zone 'America/Caracas'))::int`, anio = `extract(year from (now() at time zone 'America/Caracas'))::int`;
+    await caso('Vendedor 20o: un vendedor no carga metas', 'No tienes permiso para cargar metas',
+      como(E, `select public.guardar_meta_vendedor('${v.usuario}', ${anio}, ${mes}, 1000)::text`));
+    await caso('Vendedor 20o: administración carga la meta y el vendedor la ve contra su venta del mes', (r) => Number(r?.meta) === 1234.5 && r?.venta_ok === true,
+      como({ ...E, previo: `${comoU(admin)} perform public.guardar_meta_vendedor('${v.usuario}', ${anio}, ${mes}, 1234.5);` },
+        `select row_to_json(t)::text from (select (r->'meta_mes'->>'meta')::numeric meta, (r->'ventas_mes'->>'neto') is not null venta_ok from (select public.resumen_vendedor() r) z) t`));
+    await caso('Vendedor 20o: la lista de metas del admin no se abre para un vendedor', 'No tienes permiso para ver las metas',
+      como(E, `select public.metas_vendedores(${anio}, ${mes})::text`));
+  }
+  await caso('Vendedor 20o: las funciones internas no se ejecutan por la API y las nuevas no se abren sin sesión', (r) => r?.internas === 0 && r?.anon === 0,
+    como({}, `select row_to_json(t)::text from (select
+      (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('vendedor_cliente_empresa', 'vendedor_producto_item', 'trg_pago_estado')
+         and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))) internas,
+      (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('catalogo_vendedor', 'categorias_vendedor', 'compras_cliente_vendedor',
+         'crear_orden_vendedor', 'ficha_cliente_vendedor', 'cartera_vendedor', 'registrar_cobro_vendedor', 'verificar_cobro_propuesta', 'hoy_vendedor',
+         'metas_vendedores', 'guardar_meta_vendedor', 'tasa_bcv_de', 'ruta_comprobante_cobro_ok', 'comprobante_cobro_de_mis_clientes', 'comprobante_cobro_en_uso')
+         and has_function_privilege('anon', p.oid, 'execute')) anon) t`));
+}
+
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {
   const pol = await sql(String.raw`select tablename || '.' || policyname p, coalesce(qual,'') || ' ' || coalesce(with_check,'') t from pg_policies where schemaname = 'public'`);

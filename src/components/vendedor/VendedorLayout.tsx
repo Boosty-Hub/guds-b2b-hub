@@ -1,20 +1,25 @@
 import { ReactNode, useState } from "react";
 import { VendedorSidebar } from "./VendedorSidebar";
-import { navItems as navVendedor } from "./navegacion";
+import { navItems as navVendedor, accionesRapidas } from "./navegacion";
 import { BuscadorGlobal, type ModuloBuscador } from "@/components/BuscadorGlobal";
-import { NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import {
-  Bell,
   Menu,
-  X,
-  LayoutDashboard,
-  Users,
+  Sun,
+  Wallet,
   ShoppingCart,
   CreditCard,
-  Target,
-  LogOut
+  LogOut,
+  Plus,
+  ArrowLeft,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { CurrencySwitch } from "@/components/CurrencySwitch";
 import {
   Sheet,
@@ -32,25 +37,31 @@ import { EmpresaSelector, ModoConsultaBanner } from "@/components/EmpresaSelecto
 interface VendedorLayoutProps {
   children: ReactNode;
   title: string;
+  /** En el teléfono la pantalla ocupa todo (sin header ni barra inferior): la página pone su propia barra (BarraSuperiorMovil). */
+  pantallaCompletaMovil?: boolean;
 }
 
-// Barra inferior: 5 items ya llenan el ancho en móvil (justify-around); el resto
-// (Inventario, Consignación, Retenciones) se alcanza desde el menú hamburguesa.
-const mobileNavItems = [
-  { icon: LayoutDashboard, label: "Inicio", path: "/vendedor" },
-  { icon: Users, label: "Clientes", path: "/vendedor/clientes" },
+// Barra inferior: Hoy · Cartera · [+] · Pedidos · Cobros. El botón central abre "Nuevo pedido / Registrar cobro";
+// el resto (Clientes, Metas, Inventario, Consignación, Retenciones) está en el menú hamburguesa.
+const mobileNavIzq = [
+  { icon: Sun, label: "Hoy", path: "/vendedor" },
+  { icon: Wallet, label: "Cartera", path: "/vendedor/cartera" },
+];
+const mobileNavDer = [
   { icon: ShoppingCart, label: "Pedidos", path: "/vendedor/pedidos" },
-  { icon: CreditCard, label: "Pagos", path: "/vendedor/pagos" },
-  { icon: Target, label: "Metas", path: "/vendedor/metas" },
+  { icon: CreditCard, label: "Cobros", path: "/vendedor/pagos" },
 ];
 
 // Menú hamburguesa = el mismo menú del sidebar (navegacion.ts), para que ninguna entrada quede fuera en el teléfono
 const sheetNavItems = navVendedor;
 
 // Accesos "Ir a" del buscador del vendedor
-const modulosVendedor: ModuloBuscador[] = navVendedor.map((i) => ({ label: i.label, path: i.path, seccion: "Portal vendedor" }));
+const modulosVendedor: ModuloBuscador[] = [...accionesRapidas, ...navVendedor].map((i) => ({ label: i.label, path: i.path, seccion: "Portal vendedor" }));
 
-export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
+const claseNavMovil = ({ isActive }: { isActive: boolean }) =>
+  `flex min-w-0 flex-1 flex-col items-center gap-1 px-1 py-2 ${isActive ? "text-emerald-500" : "text-muted-foreground"}`;
+
+export const VendedorLayout = ({ children, title, pantallaCompletaMovil = false }: VendedorLayoutProps) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -73,7 +84,7 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
 
       {/* Mobile Header: en una sola fila los controles dejaban el título en 5 px. Fila 1: menú, título de la pantalla y
           campana; fila 2: buscador (ocupa lo que sobra), empresa, moneda y soporte. */}
-      <header className="md:hidden sticky top-0 z-50 bg-emerald-500 text-white">
+      <header className={cn("md:hidden sticky top-0 z-50 bg-emerald-500 text-white", pantallaCompletaMovil && "hidden")}>
         <div className="flex h-12 items-center gap-1 px-2">
           <button onClick={() => setIsMobileMenuOpen(true)} className="shrink-0 p-1.5" aria-label="Abrir menú">
             <Menu className="h-6 w-6" />
@@ -89,7 +100,7 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
           <BoostySupportSlot media="(max-width: 767.98px)" />
         </div>
       </header>
-      <div className="md:hidden">
+      <div className={cn("md:hidden", pantallaCompletaMovil && "hidden")}>
         <ModoConsultaBanner />
       </div>
 
@@ -120,24 +131,38 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
       </div>
 
       {/* Main Content */}
-      <main className="md:pl-56 pb-20 md:pb-0">
-        <div className="p-3 md:p-4">{children}</div>
+      <main className={cn("md:pl-56 md:pb-0", pantallaCompletaMovil ? "pb-0" : "pb-20")}>
+        <div className={pantallaCompletaMovil ? "md:p-4" : "p-3 md:p-4"}>{children}</div>
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border z-50">
-        <div className="flex items-center justify-around h-16">
-          {mobileNavItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              end={item.path === "/vendedor"}
-              className={({ isActive }) =>
-                `flex flex-col items-center gap-1 px-3 py-2 ${
-                  isActive ? "text-emerald-500" : "text-muted-foreground"
-                }`
-              }
-            >
+      <nav className={cn("md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border z-50", pantallaCompletaMovil && "hidden")} data-testid="nav-movil">
+        <div className="flex h-16 items-center justify-around">
+          {mobileNavIzq.map((item) => (
+            <NavLink key={item.path} to={item.path} end={item.path === "/vendedor"} className={claseNavMovil}>
+              <item.icon className="h-5 w-5" />
+              <span className="text-xs">{item.label}</span>
+            </NavLink>
+          ))}
+          <div className="flex flex-1 justify-center">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" aria-label="Nuevo pedido o cobro" data-testid="boton-accion-rapida"
+                  className="-mt-5 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg ring-4 ring-background active:bg-emerald-600">
+                  <Plus className="h-6 w-6" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="center" sideOffset={10} className="w-52">
+                {accionesRapidas.map((a) => (
+                  <DropdownMenuItem key={a.path} asChild className="h-11 gap-2.5 text-sm">
+                    <Link to={a.path}><a.icon className="h-4 w-4 text-emerald-600" />{a.label}</Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          {mobileNavDer.map((item) => (
+            <NavLink key={item.path} to={item.path} className={claseNavMovil}>
               <item.icon className="h-5 w-5" />
               <span className="text-xs">{item.label}</span>
             </NavLink>
@@ -207,5 +232,25 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
         </SheetContent>
       </Sheet>
     </div>
+  );
+};
+
+/** Barra superior propia de una pantalla completa en el teléfono (Nuevo pedido, Registrar cobro): volver, título y extra. */
+export const BarraSuperiorMovil = ({ titulo, subtitulo, volverA, onVolver, derecha }: {
+  titulo: string; subtitulo?: ReactNode; volverA?: string; onVolver?: () => void; derecha?: ReactNode;
+}) => {
+  const navigate = useNavigate();
+  return (
+    <header className="sticky top-0 z-40 flex min-h-12 items-center gap-1 bg-emerald-500 px-1.5 py-1 text-white md:hidden" data-testid="barra-movil">
+      <button type="button" aria-label="Volver" className="shrink-0 rounded-md p-2 active:bg-white/15"
+        onClick={() => (onVolver ? onVolver() : volverA ? navigate(volverA) : navigate(-1))}>
+        <ArrowLeft className="h-5 w-5" />
+      </button>
+      <div className="min-w-0 flex-1">
+        <h1 className="truncate text-base font-semibold leading-tight" data-testid="titulo-movil">{titulo}</h1>
+        {subtitulo && <div className="truncate text-xs leading-tight text-white/85">{subtitulo}</div>}
+      </div>
+      {derecha}
+    </header>
   );
 };

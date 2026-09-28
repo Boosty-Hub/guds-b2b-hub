@@ -10,6 +10,22 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-28 · Finanzas y cuenta del cliente (F5–F6) y herramientas del vendedor (V2–V5)
+
+- **Portal del cliente F5–F6** (agente, `…20m_finanzas_cuenta_portal.sql`, `…20m_retencion_fichas_cliente.sql`): estado de cuenta
+  con saldo, vencido, por vencer, a favor y antigüedad por tramos, idéntico a Cuentas por Cobrar del admin en los 421 clientes con
+  facturas; movimientos con saldo corrido, filtro por período, CSV e impresión; facturas con detalle (renglones, IVA, lo aplicado) y
+  "Pagar esta factura"; empresa y ejecutivo de cuenta; direcciones; retenciones y consignación; notificaciones reales; modo oscuro;
+  cambio de clave que pide la actual. Las facturas anuladas que Odoo aún tiene con saldo no se ofrecen para pagar.
+- **Vendedor V2–V5** (agente, `…20o_*`): venta rápida en pantalla completa (búsqueda sin acentos y tolerante a errores, "lo que compra
+  este cliente", borrador que se conserva, pedido idempotente); ficha del cliente con deuda por tramos, facturas, pedidos y productos
+  frecuentes; cartera priorizada; cobro en varias líneas (Bs/USD, cuenta o efectivo) con tasa BCV de la fecha, foto del comprobante en
+  bucket privado y propuesta de aplicación a facturas que administración aplica o corrige al verificar (Pagos); tablero "Hoy" y metas
+  mensuales (Vendedores → Metas).
+- Contador de avisos sin leer sobre todas las notificaciones (antes solo las últimas 10); en Cuentas por Cobrar se abren también los
+  comprobantes de los cobros de vendedor y se avisa si traen propuesta.
+- Verificado: pruebas de base (265 casos) y Playwright en portal (21 rutas, 3 tamaños) y vendedor.
+
 ## 2026-09-28 · Catálogo paginado con ficha de producto (F2) y Análisis de ventas con costo y margen (R3–R6)
 
 - **Catálogo del portal (F2)** (agente, `…20k_catalogo_portal.sql`): el catálogo se pagina en el servidor (24 por página; la primera

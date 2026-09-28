@@ -326,9 +326,9 @@ export const DetallePedido = ({ ordenId, enHoja, recarga = 0, recienEnviado, act
                     <li key={f.id} className="rounded-lg border border-border px-3 py-2.5">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="flex items-center gap-1.5 text-sm font-medium">
+                          <Link to={`/portal/facturas/${f.id}`} className="flex items-center gap-1.5 text-sm font-medium hover:underline" data-testid="ver-factura">
                             <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />{etiquetaFactura(f)} {f.numero}
-                          </p>
+                          </Link>
                           <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
                             {fechaCorta(f.fecha_emision)} · Total {formatPrice(Number(f.total_usd ?? f.total ?? 0))}
                           </p>

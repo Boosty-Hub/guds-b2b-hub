@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { VendedorLayout } from "@/components/vendedor/VendedorLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Loader2, Phone } from "lucide-react";
+import { Loader2, MessageCircle, Phone } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,6 +17,7 @@ import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
 import { useResumenVendedor } from "@/components/vendedor/resumen";
 import { AvisoEmpresaCartera } from "@/components/vendedor/AvisoEmpresaCartera";
+import { enlaceWhatsApp, telefonoLlamar, telefonoWhatsApp } from "@/components/vendedor/contacto";
 
 interface Cli {
   id: string; codigo: string; nombre_negocio: string; ciudad: string;
@@ -28,6 +29,7 @@ const VendedorClientes = () => {
   const { formatPrice } = useCurrency();
   const { user } = useAuth();
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   const [lista, setLista] = useState<Omit<Cli, "saldo" | "aFavor" | "vencido" | "diasMora">[]>([]);
   const [loading, setLoading] = useState(true);
   // Deuda por cliente y totales desde resumen_vendedor() (misma definición que el Dashboard y Cuentas por cobrar)
@@ -108,8 +110,10 @@ const VendedorClientes = () => {
                 const vencido = c.vencido > 0.009;
                 const aFavor = !conDeuda && c.aFavor < -0.009;
                 return (
-                  <TableRow key={c.id}>
-                    <TableCell className="font-medium"><span className="block max-w-[280px] truncate" title={c.nombre_negocio}>{c.nombre_negocio}</span></TableCell>
+                  <TableRow key={c.id} className="cursor-pointer" onClick={() => navigate(`/vendedor/clientes/${c.id}`)} data-testid="cliente-fila">
+                    <TableCell className="font-medium">
+                      <Link to={`/vendedor/clientes/${c.id}`} onClick={(e) => e.stopPropagation()} className="block max-w-[280px] truncate hover:underline" title={c.nombre_negocio}>{c.nombre_negocio}</Link>
+                    </TableCell>
                     <TableCell className="hidden whitespace-nowrap font-mono text-xs text-muted-foreground sm:table-cell">{c.codigo}</TableCell>
                     <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">{c.ciudad}</TableCell>
                     <TableCell className="hidden whitespace-nowrap text-right md:table-cell">{Number(c.limite_credito) > 0 ? formatPrice(Number(c.limite_credito)) : <span className="text-muted-foreground">—</span>}</TableCell>
@@ -124,8 +128,17 @@ const VendedorClientes = () => {
                         : aFavor ? <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">Saldo a favor</Badge>
                         : <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">Al día</Badge>}
                     </TableCell>
-                    <TableCell className="text-right">
-                      {c.telefono ? <Button size="icon" variant="ghost" className="h-7 w-7" title={`Llamar ${c.telefono}`} onClick={() => window.open(`tel:${c.telefono}`, "_self")}><Phone className="h-3.5 w-3.5" /></Button> : "—"}
+                    <TableCell className="whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+                      {c.telefono ? (
+                        <span className="inline-flex">
+                          <Button asChild size="icon" variant="ghost" className="h-7 w-7" title={`Llamar ${c.telefono}`}><a href={`tel:${telefonoLlamar(c.telefono)}`}><Phone className="h-3.5 w-3.5" /></a></Button>
+                          {telefonoWhatsApp(c.telefono) && (
+                            <Button asChild size="icon" variant="ghost" className="h-7 w-7" title="WhatsApp">
+                              <a href={enlaceWhatsApp(c.telefono, `Hola, ${c.nombre_negocio}. `)} target="_blank" rel="noopener noreferrer"><MessageCircle className="h-3.5 w-3.5" /></a>
+                            </Button>
+                          )}
+                        </span>
+                      ) : "—"}
                     </TableCell>
                   </TableRow>
                 );

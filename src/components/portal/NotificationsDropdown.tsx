@@ -11,6 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { useNotifications, Notification } from "@/contexts/NotificationsContext";
+import { usePortal } from "@/components/portal/contextoPortal";
 
 interface NotificationsDropdownProps {
   variant?: "default" | "header";
@@ -20,6 +21,8 @@ export const NotificationsDropdown = ({ variant = "default" }: NotificationsDrop
   const navigate = useNavigate();
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const [open, setOpen] = useState(false);
+  // Dentro del portal del cliente hay una página con todas las notificaciones; en los demás paneles solo se cierra
+  const enPortal = usePortal() !== null;
 
   const handleClick = (n: Notification) => {
     if (!n.leida) markAsRead(n.id);
@@ -152,7 +155,7 @@ export const NotificationsDropdown = ({ variant = "default" }: NotificationsDrop
               variant="ghost"
               size="sm"
               className="w-full text-sm text-primary"
-              onClick={() => setOpen(false)}
+              onClick={() => { setOpen(false); if (enPortal) navigate("/portal/cuenta/notificaciones"); }}
             >
               Ver todas las notificaciones
             </Button>
