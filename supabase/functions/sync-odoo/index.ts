@@ -97,7 +97,7 @@ async function sincronizar(simular: boolean) {
     const odoo = nuevoOdoo();
     // Pedidos aprobados que no llegaron a Odoo (p. ej. si falló el disparo): se reintentan antes de importar
     if (!simular) {
-      const pendientes = await sql(`select id from ordenes where aprobacion = 'aprobada' and odoo_id is null and odoo_envio_error is null
+      const pendientes = await sql(`select id from ordenes where aprobacion = 'aprobada' and aprobado_por is not null and odoo_id is null and odoo_envio_error is null
         and estado <> 'cancelado' and aprobado_at < now() - interval '2 minutes' order by aprobado_at limit 10`);
       for (const p of pendientes) { await enviarUno(sql, String(p.id), odoo); await traza(`reintento envío ${p.id}`); }
     }

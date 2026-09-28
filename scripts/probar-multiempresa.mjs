@@ -348,6 +348,57 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
   }
 }
 
+// ── Seguridad de vendedor, repartidor y almacenamiento (19i/19j) ──
+{
+  const delivery = (await sql(`select u.auth_id from usuarios u where u.role = 'delivery' and u.activo and u.auth_id is not null
+    and not exists (select 1 from entregas e where e.repartidor_id = u.id) limit 1`))[0]?.auth_id;
+  if (vendGuds) {
+    await caso('Vendedor: solo ve órdenes y clientes de su cartera (no toda la empresa)', (r) => r?.ordenes_ajenas === 0 && r?.clientes_ajenos === 0,
+      como({ uid: vendGuds, empresa: guds.id }, `select row_to_json(t)::text from (select
+        (select count(*) from ordenes o where not exists (select 1 from clientes c join usuarios u on u.id = c.vendedor_asignado_id
+           where c.id = o.cliente_id and u.auth_id = '${vendGuds}') and o.vendedor_id is distinct from (select id from usuarios where auth_id = '${vendGuds}')) ordenes_ajenas,
+        (select count(*) from clientes c where c.vendedor_asignado_id is distinct from (select id from usuarios where auth_id = '${vendGuds}')) clientes_ajenos) t`));
+    const suOrden = (await sql(`select o.id from ordenes o join clientes c on c.id = o.cliente_id join usuarios u on u.id = c.vendedor_asignado_id
+      where u.auth_id = '${vendGuds}' limit 1`))[0]?.id;
+    if (suOrden) {
+      await caso('Vendedor: no puede marcar un pedido como aprobado por la API', (r, e) => !!e || r?.n === 0,
+        como({ uid: vendGuds, empresa: guds.id }, `with x as (update ordenes set aprobacion = 'aprobada' where id = '${suOrden}' returning 1) select row_to_json(t)::text from (select count(*) n from x) t`));
+    }
+  }
+  const qaCli = (await sql(`select id from auth.users where email = 'qa.cliente@guds.test'`))[0]?.id;
+  const libre = qaCli && !(await sql(`select 1 from usuarios where auth_id = '${qaCli}'`)).length;
+  if (libre) {
+    const previoCli = `insert into usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${qaCli}', 'qa.cliente@guds.test', 'QA', 'cliente', '${cliGuds}', true);`;
+    await caso('Cliente: no puede insertar pedidos directo por la API (solo por la función del carrito)', 'row-level security',
+      como({ uid: qaCli, empresa: guds.id, previo: previoCli },
+        `with x as (insert into ordenes (cliente_id, subtotal, total, estado, aprobacion, odoo_id) values ('${cliGuds}', 0, 0, 'pendiente', 'aprobada', 999999)
+          returning aprobacion, odoo_id) select row_to_json(x)::text from x`));
+    await caso('Cliente: no puede insertar pagos directo por la API (p. ej. uno ya "verificado")', 'row-level security',
+      como({ uid: qaCli, empresa: guds.id, previo: previoCli },
+        `with x as (insert into pagos (cliente_id, monto, metodo, estado) values ('${cliGuds}', 1000, 'transferencia', 'verificado') returning estado) select row_to_json(x)::text from x`));
+  }
+  if (delivery) {
+    await caso('Repartidor: sin entregas asignadas no ve órdenes', (r) => r?.n === 0,
+      como({ uid: delivery, empresa: guds.id }, `select row_to_json(t)::text from (select count(*) n from ordenes) t`));
+  }
+  {
+    const [emp] = await sql(`select pe.producto_id, pe.tipo_empaque_id, te.unidades, p.precio_base from producto_empaques pe join tipos_empaque te on te.id = pe.tipo_empaque_id
+      join productos p on p.id = pe.producto_id where pe.activo and pe.precio_empaque is null and te.unidades > 1 and not p.en_oferta limit 1`);
+    if (emp) {
+      await caso('Precios: un empaque sin precio propio vale precio unitario × unidades (como Odoo)', (r) => Math.abs(Number(r?.p) - Number(emp.precio_base) * emp.unidades) < 0.001,
+        como({ empresa: guds.id }, `select row_to_json(t)::text from (select public.precio_efectivo('${emp.producto_id}', '${emp.tipo_empaque_id}', null) p) t`));
+    }
+  }
+  await caso('Almacenamiento: un cliente no puede borrar ni subir fotos de productos', (r) => r?.subir === false && r?.borrar === 0,
+    como({ uid: vendGuds || admin, empresa: guds.id }, `select row_to_json(t)::text from (select
+      (select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname in ('Authenticated users can delete images', 'Authenticated users can upload images')) borrar,
+      exists (select 1 from pg_policies where schemaname = 'storage' and policyname = 'imagenes_subir' and with_check not like '%es_personal_admin%') subir) t`));
+  {
+    const [bk] = await sql(`select public from storage.buckets where id = 'evidencias-entrega'`);
+    casos.push({ ok: bk && bk.public === false ? '✓' : '✗', caso: 'Evidencias de entrega en bucket privado', resultado: JSON.stringify(bk ?? null) });
+  }
+}
+
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {
   const pol = await sql(String.raw`select tablename || '.' || policyname p, coalesce(qual,'') || ' ' || coalesce(with_check,'') t from pg_policies where schemaname = 'public'`);

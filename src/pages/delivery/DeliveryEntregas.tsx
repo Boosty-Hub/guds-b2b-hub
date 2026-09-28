@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import { compressImage } from "@/lib/image";
 
 // Pad de firma sencillo sobre canvas (mouse + touch)
 function SignaturePad({ canvasRef }: { canvasRef: React.RefObject<HTMLCanvasElement> }) {
@@ -100,12 +101,13 @@ const DeliveryEntregas = () => {
 
   const productos = (e: EntregaRow) => (e.orden?.orden_items || []).reduce((s, i) => s + Number(i.cantidad), 0);
 
-  // Sube una imagen (blob) al bucket público 'imagenes' bajo entregas/ y devuelve la URL
-  const subirImagen = async (blob: Blob, nombre: string): Promise<string | null> => {
-    const path = `entregas/${nombre}`;
-    const { error } = await supabase.storage.from("imagenes").upload(path, blob, { upsert: true, contentType: blob.type || "image/png" });
-    if (error) { toast({ title: "No se pudo subir la imagen", description: error.message, variant: "destructive" }); return null; }
-    return supabase.storage.from("imagenes").getPublicUrl(path).data.publicUrl;
+  // Evidencia en el bucket PRIVADO 'evidencias-entrega' (<entrega>/<archivo>); se guarda la ruta, no una URL pública.
+  // Sin reemplazos (upsert false): la evidencia no se sobrescribe.
+  const subirEvidencia = async (entregaId: string, blob: Blob, nombre: string): Promise<string | null> => {
+    const path = `${entregaId}/${nombre}`;
+    const { error } = await supabase.storage.from("evidencias-entrega").upload(path, blob, { upsert: false, contentType: blob.type || "image/jpeg" });
+    if (error) { toast({ title: "No se pudo subir la evidencia", description: `${error.message}. La entrega no se cerró: inténtalo de nuevo.`, variant: "destructive" }); return null; }
+    return path;
   };
 
   const firmaTieneTrazos = () => {
@@ -121,13 +123,21 @@ const DeliveryEntregas = () => {
     let fotoUrl: string | null = null;
 
     if (estado === "entregada") {
-      // Firma (canvas) → PNG
-      if (firmaTieneTrazos()) {
-        const blob: Blob | null = await new Promise((res) => sigRef.current!.toBlob(res, "image/png"));
-        if (blob) firmaUrl = await subirImagen(blob, `firma-${e.id}-${e.orden?.numero || ""}.png`);
+      // Firma y foto son obligatorias; si alguna no sube, la entrega NO se cierra
+      if (!firmaTieneTrazos() || !fotoFile) {
+        setBusy(false);
+        toast({ title: "Falta evidencia", description: "Pide la firma del receptor y toma la foto de la entrega.", variant: "destructive" });
+        return;
       }
-      // Foto de evidencia
-      if (fotoFile) fotoUrl = await subirImagen(fotoFile, `foto-${e.id}-${fotoFile.name}`);
+      const marca = Date.now();
+      const blob: Blob | null = await new Promise((res) => sigRef.current!.toBlob(res, "image/png"));
+      if (blob) firmaUrl = await subirEvidencia(e.id, blob, `firma-${marca}.png`);
+      // Foto comprimida en el teléfono (las fotos de celular pesan 2–6 MB)
+      if (firmaUrl) {
+        const foto = await compressImage(fotoFile, 1600, 0.78).catch(() => fotoFile);
+        fotoUrl = await subirEvidencia(e.id, foto, `foto-${marca}.jpg`);
+      }
+      if (!firmaUrl || !fotoUrl) { setBusy(false); return; }
     }
 
     const { error } = await supabase.rpc("actualizar_estado_entrega", {
@@ -247,7 +257,7 @@ const DeliveryEntregas = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={busy}>Cancelar</Button>
-            <Button className="bg-green-600 hover:bg-green-700" disabled={busy || !receptor.trim()} onClick={() => selected && cambiarEstado(selected, "entregada", { receptor, notas })}>
+            <Button className="bg-green-600 hover:bg-green-700" disabled={busy || !receptor.trim() || !fotoFile} title={!fotoFile ? "Toma la foto de la entrega" : undefined} onClick={() => selected && cambiarEstado(selected, "entregada", { receptor, notas })}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirmar entrega"}
             </Button>
           </DialogFooter>

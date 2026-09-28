@@ -31,3 +31,6 @@ scripts/node_modules
 scripts/package-lock.json
 scripts/package.json
 .env.local
+
+# Documentos con datos de clientes/vendedores (el repositorio es público)
+docs/privado/

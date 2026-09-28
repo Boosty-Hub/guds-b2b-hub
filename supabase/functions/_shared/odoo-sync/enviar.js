@@ -33,6 +33,7 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
   if (o.estado === 'cancelado') throw new Error(`El pedido ${o.numero} está cancelado`);
   // Crear en Odoo exige aprobación; la simulación sirve también para revisar un pedido antes de aprobarlo
   if (aplicar && o.aprobacion !== 'aprobada') throw new Error(`El pedido ${o.numero} no está aprobado (aprobación: ${o.aprobacion ?? '—'})`);
+  if (aplicar && !o.aprobado_por) throw new Error(`El pedido ${o.numero} no tiene registrado quién lo aprobó`);
   if (!o.odoo_company_id) throw new Error('La empresa del pedido no está ligada a Odoo');
   if (!o.cliente_odoo_id) throw new Error(`El cliente ${o.nombre_negocio} no existe en Odoo (primero hay que crearlo)`);
   const items = await sql(`

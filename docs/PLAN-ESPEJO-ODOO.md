@@ -364,3 +364,7 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 32 | Los montos negativos se muestran como `$-1,234.69` (formato de `formatPrice`) | Cosmético |
 | 33 | **Envío**: GUDS cobra $50 en pedidos menores de $500. Decisión (28-sep): va como línea de servicio. En Odoo no hay un servicio vendible de envío | Contabilidad crea el servicio en Odoo (cuenta de ingresos + IVA) y se configura su código en Políticas de venta; mientras tanto va como nota |
 | 34 | S00927 (prueba) quedó con almacén G-CONSIGNADO REPRESENTACIONES FAW; los envíos nuevos usan P-01 | Si se confirma, cambiar almacén en Odoo (GUDS no edita en Odoo) |
+| 35 | ~~Vendedor y repartidor veían toda la empresa; vendedor podía autoaprobar; cualquiera borraba fotos de productos; cliente insertaba pagos "verificados"; empaque sin precio a precio unitario~~ | ✅ migraciones 19i–19k |
+| 36 | **Impuestos**: GUDS aplica IVA 16 % a todo; en Odoo cada producto tiene su impuesto (IVA efectivo ~6,7 % por exentos). El total que ve el vendedor/cliente no coincide con Odoo | Sincronizar el impuesto por producto y calcular totales en el servidor (plan de portales, etapa 2) |
+| 37 | La sincronización escribe sin triggers: los cambios que vienen de Odoo (confirmado, despachado, facturado) no generan notificaciones | Emitir notificaciones desde el sync (plan de portales, etapa 1) |
+| 38 | La cola de delivery son órdenes, no los documentos de entrega de Odoo; dirección fiscal en vez de la de entrega; 0 clientes con coordenadas | Plan de portales, D1–D2 |

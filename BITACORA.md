@@ -38,6 +38,36 @@ admin** y solo al aprobarse se crean en Odoo. Prohibido borrar en Odoo.
   Reintentar (cliente de prueba inexistente en Odoo: se detiene antes de escribir). **En Odoo sigue existiendo una sola
   cotización de GUDS (S00927).** Los pedidos de prueba se borraron de GUDS y la numeración quedó en GUDS-ORD-00001.
 
+### Seguridad y precios (hallazgos de la investigación de portales, migraciones 19i–19k)
+
+Cuatro agentes revisaron en paralelo los portales del cliente, del vendedor, de delivery y el módulo de reportes. Lo que era un
+riesgo inmediato se corrigió en el momento:
+
+- **Vendedor** (`…19j_seguridad_vendedor_aprobacion.sql`): el rol tenía permisos de ver/editar órdenes y clientes de toda la
+  empresa y por REST veía y modificaba pedidos y clientes ajenos → ahora solo su cartera. Además podía **autoaprobar** un pedido
+  (insertándolo o actualizándolo con `aprobacion='aprobada'`): triggers que fuerzan *pendiente* y protegen la aprobación y los
+  datos de Odoo para cualquier llamada que no sea de administración; la sincronización solo envía pedidos con aprobador.
+- **Delivery** (`…19i_seguridad_delivery_storage.sql`): el rol leía todas las órdenes y podía modificar cualquier entrega →
+  solo sus entregas; el cierre pasa por `actualizar_estado_entrega()` que exige receptor, firma y foto (rutas dentro de la carpeta
+  de esa entrega), no reabre entregas cerradas y pide motivo si falla.
+- **Almacenamiento**: en el bucket público `imagenes` cualquier usuario con sesión podía borrar o reemplazar fotos de productos y
+  banners → solo administración (cada usuario su avatar). Firma y foto de entrega pasan a un bucket **privado**
+  `evidencias-entrega` (3 MB); la foto se comprime y sin evidencia no se confirma la entrega (`DeliveryEntregas.tsx`).
+- **Cliente** (`…19k_precio_empaque_y_cliente.sql`): podía insertar por REST pedidos y pagos (p. ej. uno ya "verificado") →
+  solo por las funciones del servidor.
+- **Precio por empaque**: un empaque sin precio propio ("Caja ×12") se cobraba al precio de 1 unidad y a Odoo llegaba precio/12
+  → `precio_efectivo` = precio base (u oferta) × unidades del empaque. Afectaba a 3 productos activos.
+- Verificado: `scripts/probar-multiempresa.mjs` 88/88 (casos nuevos de vendedor, repartidor, cliente, almacenamiento, evidencias
+  y precio de empaque), humo de los portales del cliente y de delivery y e2e del portal del vendedor 16/16.
+
+### Plan de portales y flujos
+
+`docs/PLAN-PORTALES-Y-FLUJOS.md`: principios de una distribuidora de alto nivel, contrato único de estados del pedido
+(aprobación + Odoo + despacho + pago), fases del portal del cliente (F0–F7), del vendedor (V0–V6), de delivery con los
+documentos de entrega de Odoo, mapa y los 4 cierres (D0–D8), reportes frente al Excel de analítica (R0–R8; el Excel sale de
+Profit Plus, el ERP anterior, y termina donde empieza Odoo) y 16 decisiones de negocio. Los informes detallados de cada agente
+(con nombres y montos) quedan en `docs/privado/planes/`, fuera de git.
+
 ---
 
 ## 2026-09-27 · Fase 9b: primer pedido de GUDS enviado a Odoo (prueba única)
