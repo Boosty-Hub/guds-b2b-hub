@@ -91,6 +91,9 @@ export interface Producto {
   vendible?: boolean | null;
   tipo_odoo?: string | null;
   empresa_id?: string | null;
+  // IVA de venta del producto en su empresa (Odoo: taxes_id). null = aún sin sincronizar (el servidor usa el general)
+  impuesto_pct?: number | null;
+  impuesto_nombre?: string | null;
 }
 
 export interface Cliente {

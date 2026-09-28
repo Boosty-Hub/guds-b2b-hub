@@ -68,6 +68,8 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { useColumnas } from "@/components/datos/columnas";
+import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
+import { textoIva } from "@/lib/iva";
 
 interface ProductoConRelaciones extends Producto {
   categoria: Categoria | null;
@@ -864,12 +866,14 @@ const Productos = () => {
 
   const { ordenadas: productosOrdenados, orden, alternar } = useOrdenTabla(filteredProductos, {
     sku: (p) => p.sku, nombre: (p) => p.nombre, categoria: (p) => p.categoria?.nombre, precio: (p) => Number(p.precio_base || 0),
+    iva: (p) => (p.impuesto_pct == null ? null : Number(p.impuesto_pct)),
     stock: (p) => Number(p.stock_disponible ?? p.stock_actual ?? 0),
   });
   const pagination = usePagination(productosOrdenados, 50);
   const exportarProductos = () => exportarCSV("productos", productosOrdenados, [
     { titulo: "SKU", valor: (p) => p.sku }, { titulo: "Producto", valor: (p) => p.nombre }, { titulo: "Categoría", valor: (p) => p.categoria?.nombre },
-    { titulo: "Precio base", valor: (p) => Number(p.precio_base || 0) }, { titulo: "Existencia", valor: (p) => p.stock_actual },
+    { titulo: "Precio base", valor: (p) => Number(p.precio_base || 0) }, { titulo: "IVA %", valor: (p) => (p.impuesto_pct == null ? "" : Number(p.impuesto_pct)) },
+    { titulo: "Existencia", valor: (p) => p.stock_actual },
     { titulo: "Disponible", valor: (p) => p.stock_disponible ?? p.stock_actual }, { titulo: "Activo", valor: (p) => (p.activo ? "Sí" : "No") },
   ]);
 
@@ -940,6 +944,11 @@ const Productos = () => {
           </div>
         </TableCell>
         <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(producto.precio_base)}</TableCell>
+        <TableCell className="whitespace-nowrap">
+          {producto.impuesto_pct != null
+            ? <EtiquetaIva pct={producto.impuesto_pct} nombre={producto.impuesto_nombre} className="text-xs" />
+            : <span className="text-xs text-muted-foreground" title="Aún sin sincronizar: se aplica el IVA general de configuración">—</span>}
+        </TableCell>
         <TableCell className="text-center">{producto.stock_actual}</TableCell>
         <TableCell className="whitespace-nowrap">
           <Badge variant={status.variant}>{status.label}</Badge>
@@ -969,7 +978,7 @@ const Productos = () => {
     );
   };
 
-  const cols = useColumnas("productos", [{ etiqueta: "", fija: true }, { etiqueta: "SKU" }, { etiqueta: "Producto", fija: true }, { etiqueta: "Categoría" }, { etiqueta: "Empaque" }, { etiqueta: "Precio Base" }, { etiqueta: "Stock" }, { etiqueta: "Estado" }, { etiqueta: "Activo" }, { etiqueta: "Acciones", fija: true }]);
+  const cols = useColumnas("productos", [{ etiqueta: "", fija: true }, { etiqueta: "SKU" }, { etiqueta: "Producto", fija: true }, { etiqueta: "Categoría" }, { etiqueta: "Empaque" }, { etiqueta: "Precio Base" }, { etiqueta: "IVA" }, { etiqueta: "Stock" }, { etiqueta: "Estado" }, { etiqueta: "Activo" }, { etiqueta: "Acciones", fija: true }]);
   return (
     <MainLayout title="Productos">
       {cols.estilo}
@@ -1123,6 +1132,7 @@ const Productos = () => {
                 <EncabezadoOrdenable clave="categoria" orden={orden} onOrdenar={alternar}>Categoría</EncabezadoOrdenable>
                 <TableHead>Empaque</TableHead>
                 <EncabezadoOrdenable clave="precio" orden={orden} onOrdenar={alternar} alinear="derecha">Precio Base</EncabezadoOrdenable>
+                <EncabezadoOrdenable clave="iva" orden={orden} onOrdenar={alternar}>IVA</EncabezadoOrdenable>
                 <EncabezadoOrdenable clave="stock" orden={orden} onOrdenar={alternar} alinear="centro">Stock</EncabezadoOrdenable>
                 <TableHead>Estado</TableHead>
                 <TableHead className="text-center">Activo</TableHead>
@@ -1134,7 +1144,7 @@ const Productos = () => {
                 ? grupos.map((g) => (
                     <Fragment key={g.key}>
                       <TableRow className="cursor-pointer bg-muted/40 hover:bg-muted" onClick={() => toggleGroup(g.key)}>
-                        <TableCell colSpan={10}>
+                        <TableCell colSpan={11}>
                           <div className="flex items-center gap-2 whitespace-nowrap font-medium">
                             <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 transition-transform", openGroups.has(g.key) && "rotate-90")} />
                             <span className="truncate">{g.nombre}</span>
@@ -1406,6 +1416,10 @@ const Productos = () => {
                 {selectedProducto?.odoo_id && selectedProducto.precio_origen !== 'odoo' && (
                   <p className="text-xs text-muted-foreground">Sin ventas en Odoo: el precio lo fija GUDS hasta que haya una venta en Odoo.</p>
                 )}
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="iva-producto">
+                  IVA de venta: {textoIva(selectedProducto?.impuesto_pct) ?? "el general de configuración (sin sincronizar)"}
+                  {selectedProducto?.impuesto_pct != null && <OdooBadge titulo={`Impuesto del producto en Odoo${selectedProducto.impuesto_nombre ? `: ${selectedProducto.impuesto_nombre}` : ""} · se cambia en Odoo`} />}
+                </p>
               </div>
               <div className="space-y-2">
                 <Label>Costo</Label>

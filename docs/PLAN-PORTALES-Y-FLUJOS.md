@@ -38,8 +38,9 @@ Hecho: F0 (portal cliente), V0 (vendedor), D0, **D1 + D4 + D7** (cola con los do
 consignación de Odoo, asignación a repartidor, app con los 4 cierres, escritura del estado a Odoo en modo simulación hasta el
 piloto), R8a (reversos), edición de pedidos pendientes con recálculo de cupón y pago, empresas del cliente en el portal,
 cuentas de pago desde Odoo, edición de dirección y teléfonos del cliente escrita en Odoo (activa), facturas sin borrado con
-historial, correo por Resend, dominio propio y limpieza de Lovable. Siguiente: etapa 2 (IVA por producto y listas de precios
-desde Odoo), F1 (shell y diseño común), D2–D3 (ubicaciones y rutas), R1 (histórico de Profit).
+historial, correo por Resend, dominio propio y limpieza de Lovable, y la **etapa 2** (IVA de cada producto desde Odoo, cotización
+en el servidor, listas de precios sincronizadas). Siguiente: F1 (shell y diseño común) con líneas de tiempo del pedido y avisos
+desde Odoo, D2–D3 (ubicaciones, mapa y rutas), R1 (histórico de Profit).
 
 ## 2. Principios comunes (los tres portales)
 

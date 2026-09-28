@@ -25,7 +25,11 @@ const monedaFactura = (curId) => (curId === 2 ? 'VES' : 'USD');
 const RE_DIARIO_ND = /nota\s+(de\s+)?d[eé]bito|^nd\s/i;
 const CAMPOS_CLIENTE = ['name', 'vat', 'rif', 'cedula', 'email', 'phone', 'mobile', 'street', 'street2', 'city', 'state_id',
   'partner_latitude', 'partner_longitude', 'is_company', 'residence_type', 'user_id', 'property_payment_term_id',
-  'credit_limit', 'credit_limit_value', 'econ_act_license', 'website', 'comment', 'create_date', 'active', 'company_id', 'write_date'];
+  'credit_limit', 'credit_limit_value', 'econ_act_license', 'website', 'comment', 'create_date', 'active', 'company_id', 'write_date',
+  'property_product_pricelist'];
+// Reglas de listas de precios (fase 20a)
+const CAMPOS_REGLA = ['pricelist_id', 'applied_on', 'product_tmpl_id', 'product_id', 'categ_id', 'compute_price', 'fixed_price',
+  'percent_price', 'price_discount', 'price_surcharge', 'base', 'min_quantity', 'date_start', 'date_end'];
 const CAMPOS_PROVEEDOR = ['name', 'vat', 'rif', 'cedula', 'email', 'phone', 'mobile', 'street', 'street2', 'city', 'state_id',
   'is_company', 'residence_type', 'property_supplier_payment_term_id', 'website', 'comment', 'active', 'company_id', 'write_date'];
 const RESIDENCIA = { D: 'Domiciliado', R: 'Residente', NR: 'No residente', ND: 'No domiciliado' };
@@ -135,7 +139,13 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       d.clientes = await odoo.leerTodo('res.partner', [['customer_rank', '>', 0], ...deEmpresa], CAMPOS_CLIENTE, { empresa: cid });
       d.proveedores = await odoo.leerTodo('res.partner', [['supplier_rank', '>', 0], ...deEmpresa], CAMPOS_PROVEEDOR, { empresa: cid });
       d.productos = await odoo.leerTodo('product.template', deEmpresa,
-        ['name', 'default_code', 'description_sale', 'categ_id', 'uom_id', 'type', 'is_storable', 'sale_ok', 'active', 'company_id', 'write_date'], { empresa: cid });
+        ['name', 'default_code', 'description_sale', 'categ_id', 'uom_id', 'type', 'is_storable', 'sale_ok', 'active', 'company_id', 'taxes_id', 'write_date'], { empresa: cid });
+      // Impuestos de venta de la empresa (el IVA de cada producto) y listas de precios con sus reglas (fase 20a)
+      d.impuestos = await odoo.leerTodo('account.tax', [['type_tax_use', '=', 'sale'], ['company_id', '=', cid]],
+        ['name', 'amount', 'amount_type', 'price_include'], { empresa: cid });
+      d.listas = await odoo.leerTodo('product.pricelist', ['|', ['company_id', '=', cid], ['company_id', '=', false]],
+        ['name', 'currency_id', 'company_id', 'active'], { empresa: cid });
+      d.reglas = d.listas.length ? await odoo.leerTodo('product.pricelist.item', [['pricelist_id', 'in', d.listas.map((l) => l.id)]], CAMPOS_REGLA, { empresa: cid }) : [];
       d.almacenes = await odoo.leerTodo('stock.warehouse', [['company_id', '=', cid]], ['name', 'code', 'active', 'write_date'], { empresa: cid });
       d.quants = await odoo.leerTodo('stock.quant', [['location_id.usage', '=', 'internal'], ['company_id', '=', cid]],
         ['product_id', 'location_id', 'lot_id', 'quantity', 'reserved_quantity', 'in_date', 'write_date'], { empresa: cid });
@@ -305,7 +315,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           rif: txt(p.rif) || txt(p.vat) || txt(p.cedula) || 'N/D', cedula: txt(p.cedula),
           email: txt(p.email, 255), telefono: txt(p.phone), celular: txt(p.mobile),
           direccion: [txt(p.street), txt(p.street2)].filter(Boolean).join(', ') || null,
-          calle: txt(p.street), complemento: txt(p.street2),
+          calle: txt(p.street), complemento: txt(p.street2), lista_odoo_id: m2oId(p.property_product_pricelist),
           ciudad: txt(p.city, 100), estado: m2oNombre(p.state_id),
           latitud: p.partner_latitude || null, longitud: p.partner_longitude || null,
           es_empresa: !!p.is_company, tipo_negocio: p.is_company ? 'Empresa' : 'Persona Natural',
@@ -336,6 +346,14 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
 
       // Productos
       const skus = new Set();
+      // IVA de venta del producto en SU empresa (suma de los impuestos porcentuales; sin impuesto = 0, exento)
+      const impuestoPorId = new Map(d.impuestos.map((t) => [t.id, t]));
+      if (d.impuestos.some((t) => t.price_include || t.amount_type !== 'percent')) aviso(`${emp.nombre_corto}: hay impuestos de venta incluidos en el precio o no porcentuales; GUDS los trata como porcentaje sobre el precio`);
+      const impuestoDe = (p) => {
+        const ts = (p.taxes_id || []).map((id) => impuestoPorId.get(id)).filter(Boolean);
+        return { impuesto_pct: round2(ts.reduce((a, t) => a + (t.amount_type === 'percent' ? Number(t.amount) || 0 : 0), 0)),
+          impuesto_nombre: ts.map((t) => txt(typeof t.name === 'object' ? (t.name.es_VE || t.name.en_US) : t.name)).filter(Boolean).join(' + ') || 'Sin impuesto' };
+      };
       const productos = d.productos.map((p) => {
         let sku = txt(p.default_code, 50) || `ODOO-${p.id}`;
         if (skus.has(sku)) sku = `${sku.slice(0, 40)}-${p.id}`;
@@ -347,6 +365,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           unidad: txt(m2oNombre(p.uom_id), 50) || 'Unidad',
           precio_odoo: ultimoPrecio.get(p.id)?.usd ?? null,   // null: nunca se vendió; se respeta el precio de GUDS
           tipo_odoo: p.type, vendible: !!p.active && !!p.sale_ok, controla_stock: !!p.is_storable,
+          ...impuestoDe(p),
         };
       });
       marcas.push(marca('productos', E, d.productos));
@@ -607,24 +626,41 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           is distinct from (excluded.empresa_id, excluded.nombre, excluded.moneda, excluded.tipo_odoo, excluded.activo, excluded.numero_cuenta,
             excluded.banco_nombre, excluded.titular, excluded.documento)`);
 
+      // Listas de precios de Odoo (antes que los clientes, que apuntan a su lista)
+      if (d.listas.length) {
+        const listas = d.listas.map((l) => ({ odoo_id: l.id, empresa_id: empDe(l.company_id),
+          nombre: txt(typeof l.name === 'object' ? (l.name.es_VE || l.name.en_US) : l.name) || `Lista ${l.id}`,
+          moneda: monedaBanco(m2oId(l.currency_id)), activo: !!l.active }));
+        await escribir(`
+          insert into listas_precios (odoo_id, empresa_id, nombre, moneda, activo, es_default, porcentaje_descuento)
+          select x.odoo_id, x.empresa_id, x.nombre, x.moneda, x.activo, false, 0
+          from jsonb_to_recordset(${jsonbLit(listas)}) as x(odoo_id int, empresa_id uuid, nombre text, moneda text, activo boolean)
+          on conflict (odoo_id) where odoo_id is not null do update set empresa_id = excluded.empresa_id, nombre = excluded.nombre,
+            moneda = excluded.moneda, activo = excluded.activo, updated_at = now()
+          where (listas_precios.empresa_id, listas_precios.nombre, listas_precios.moneda, listas_precios.activo)
+            is distinct from (excluded.empresa_id, excluded.nombre, excluded.moneda, excluded.activo)`);
+      }
+
       for (const lote of lotes(clientes, 500)) {
         await escribir(`
           insert into clientes (odoo_id, empresa_id, codigo, nombre_negocio, rif, cedula, email, telefono, celular, direccion, calle, complemento, ciudad,
             estado, latitud, longitud, es_empresa, tipo_negocio, tipo_residencia, vendedor_odoo, vendedor_asignado_id, condicion_pago,
-            dias_credito, limite_credito, licencia_actividad, sitio_web, notas, fecha_registro_odoo, activo, contribuyente_especial, odoo_sync_at)
+            dias_credito, limite_credito, licencia_actividad, sitio_web, notas, fecha_registro_odoo, activo, contribuyente_especial, lista_precios_id, odoo_sync_at)
           select x.odoo_id, x.empresa_id, x.codigo, x.nombre_negocio, x.rif, x.cedula, x.email, x.telefono, x.celular, x.direccion, x.calle, x.complemento, x.ciudad,
             x.estado, x.latitud, x.longitud, x.es_empresa, x.tipo_negocio, x.tipo_residencia, x.vendedor_odoo, x.vendedor_id, x.condicion_pago,
-            x.dias_credito, x.limite_credito, x.licencia_actividad, x.sitio_web, x.notas, x.fecha_registro_odoo, x.activo, false, '${ts}'
+            x.dias_credito, x.limite_credito, x.licencia_actividad, x.sitio_web, x.notas, x.fecha_registro_odoo, x.activo, false,
+            (select l.id from listas_precios l where l.odoo_id = x.lista_odoo_id), '${ts}'
           from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, empresa_id uuid, codigo text, nombre_negocio text, rif text, cedula text,
             email text, telefono text, celular text, direccion text, calle text, complemento text, ciudad text, estado text, latitud numeric, longitud numeric, es_empresa boolean,
             tipo_negocio text, tipo_residencia text, vendedor_odoo text, vendedor_id uuid, condicion_pago text, dias_credito int, limite_credito numeric,
-            licencia_actividad text, sitio_web text, notas text, fecha_registro_odoo timestamptz, activo boolean)
+            licencia_actividad text, sitio_web text, notas text, fecha_registro_odoo timestamptz, activo boolean, lista_odoo_id int)
           on conflict (odoo_id) do update set empresa_id = excluded.empresa_id, nombre_negocio = excluded.nombre_negocio, rif = excluded.rif,
             cedula = excluded.cedula, email = excluded.email, telefono = excluded.telefono, celular = excluded.celular,
             direccion = excluded.direccion, calle = excluded.calle, complemento = excluded.complemento, ciudad = excluded.ciudad, estado = excluded.estado, latitud = excluded.latitud,
             longitud = excluded.longitud, es_empresa = excluded.es_empresa, tipo_negocio = excluded.tipo_negocio,
             tipo_residencia = excluded.tipo_residencia, vendedor_odoo = excluded.vendedor_odoo,
             vendedor_asignado_id = coalesce(excluded.vendedor_asignado_id, clientes.vendedor_asignado_id),
+            lista_precios_id = coalesce(excluded.lista_precios_id, clientes.lista_precios_id),
             condicion_pago = excluded.condicion_pago, dias_credito = excluded.dias_credito,
             limite_credito = case when clientes.limite_credito_pendiente then clientes.limite_credito else excluded.limite_credito end,
             licencia_actividad = excluded.licencia_actividad, sitio_web = excluded.sitio_web, notas = excluded.notas,
@@ -632,13 +668,13 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           where (clientes.empresa_id, clientes.nombre_negocio, clientes.rif, clientes.cedula, clientes.email, clientes.telefono, clientes.celular,
             clientes.direccion, clientes.calle, clientes.complemento, clientes.ciudad, clientes.estado, clientes.latitud, clientes.longitud, clientes.es_empresa, clientes.tipo_residencia,
             clientes.vendedor_odoo, clientes.vendedor_asignado_id, clientes.condicion_pago, clientes.dias_credito, clientes.limite_credito,
-            clientes.licencia_actividad, clientes.sitio_web, clientes.notas, clientes.activo)
+            clientes.licencia_actividad, clientes.sitio_web, clientes.notas, clientes.activo, clientes.lista_precios_id)
           is distinct from (excluded.empresa_id, excluded.nombre_negocio, excluded.rif, excluded.cedula, excluded.email, excluded.telefono,
             excluded.celular, excluded.direccion, excluded.calle, excluded.complemento, excluded.ciudad, excluded.estado, excluded.latitud, excluded.longitud, excluded.es_empresa,
             excluded.tipo_residencia, excluded.vendedor_odoo, coalesce(excluded.vendedor_asignado_id, clientes.vendedor_asignado_id),
             excluded.condicion_pago, excluded.dias_credito, case when clientes.limite_credito_pendiente then clientes.limite_credito else excluded.limite_credito end,
             excluded.licencia_actividad, excluded.sitio_web,
-            excluded.notas, excluded.activo)`);
+            excluded.notas, excluded.activo, coalesce(excluded.lista_precios_id, clientes.lista_precios_id))`);
       }
 
       for (const lote of lotes(productos, 500)) {
@@ -647,15 +683,17 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
             select x.*, coalesce(x.precio_odoo, 0) precio_ins,
               x.vendible and coalesce(x.tipo_odoo, 'consu') <> 'service' and coalesce(x.precio_odoo, 0) > 0 disponible_ins
             from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, empresa_id uuid, sku text, nombre text, descripcion text,
-              categ_odoo_id int, unidad text, precio_odoo numeric, tipo_odoo text, vendible boolean, controla_stock boolean)
+              categ_odoo_id int, unidad text, precio_odoo numeric, tipo_odoo text, vendible boolean, controla_stock boolean,
+              impuesto_pct numeric, impuesto_nombre text)
           )
           insert into productos (odoo_id, empresa_id, sku, nombre, descripcion, categoria_id, unidad, precio_base, precio_origen, stock_actual,
-            stock_minimo, disponible, activo, destacado, tipo_odoo, vendible, controla_stock, odoo_sync_at)
+            stock_minimo, disponible, activo, destacado, tipo_odoo, vendible, controla_stock, impuesto_pct, impuesto_nombre, odoo_sync_at)
           select x.odoo_id, x.empresa_id, x.sku, x.nombre, x.descripcion, (select c.id from categorias c where c.odoo_id = x.categ_odoo_id),
             x.unidad, x.precio_ins, case when x.precio_odoo is not null then 'odoo' else 'guds' end, 0, 0, x.disponible_ins, x.disponible_ins,
-            false, x.tipo_odoo, x.vendible, x.controla_stock, '${ts}'
+            false, x.tipo_odoo, x.vendible, x.controla_stock, x.impuesto_pct, x.impuesto_nombre, '${ts}'
           from x
           on conflict (odoo_id) do update set empresa_id = excluded.empresa_id, sku = excluded.sku, nombre = excluded.nombre,
+            impuesto_pct = excluded.impuesto_pct, impuesto_nombre = excluded.impuesto_nombre,
             categoria_id = excluded.categoria_id, unidad = excluded.unidad,
             -- Precio: el de Odoo si hay historial de venta; si no, se conserva el que tenga GUDS
             precio_base = case when excluded.precio_origen = 'odoo' then excluded.precio_base else productos.precio_base end,
@@ -668,7 +706,8 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
             tipo_odoo = excluded.tipo_odoo, vendible = excluded.vendible, controla_stock = excluded.controla_stock,
             odoo_sync_at = excluded.odoo_sync_at, updated_at = now()
           where (productos.empresa_id, productos.sku, productos.nombre, productos.categoria_id, productos.unidad, productos.precio_base,
-            productos.precio_origen, productos.disponible, productos.activo, productos.tipo_odoo, productos.vendible, productos.controla_stock)
+            productos.precio_origen, productos.disponible, productos.activo, productos.tipo_odoo, productos.vendible, productos.controla_stock,
+            productos.impuesto_pct, productos.impuesto_nombre)
           is distinct from (excluded.empresa_id, excluded.sku, excluded.nombre, excluded.categoria_id, excluded.unidad,
             case when excluded.precio_origen = 'odoo' then excluded.precio_base else productos.precio_base end,
             case when excluded.precio_origen = 'odoo' then 'odoo' else productos.precio_origen end,
@@ -677,7 +716,45 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
             excluded.vendible and coalesce(excluded.tipo_odoo, 'consu') <> 'service'
               and (case when excluded.precio_origen = 'odoo' then excluded.precio_base else productos.precio_base end) > 0
               and not productos.oculto_tienda,
-            excluded.tipo_odoo, excluded.vendible, excluded.controla_stock)`);
+            excluded.tipo_odoo, excluded.vendible, excluded.controla_stock, excluded.impuesto_pct, excluded.impuesto_nombre)`);
+      }
+
+      // Reglas de las listas de precios (precio fijo o descuento por producto, categoría o global)
+      const reglas = d.reglas.map((g) => ({
+        odoo_id: g.id, lista_odoo_id: m2oId(g.pricelist_id),
+        aplicado_en: g.applied_on === '3_global' ? 'global' : g.applied_on === '2_product_category' ? 'categoria' : 'producto',
+        producto_odoo_id: g.applied_on === '0_product_variant' ? plantillaDe.get(m2oId(g.product_id)) ?? null : m2oId(g.product_tmpl_id),
+        categ_odoo_id: m2oId(g.categ_id),
+        tipo_calculo: g.compute_price === 'fixed' ? 'fijo' : g.compute_price === 'percentage' ? 'porcentaje' : 'formula',
+        precio_fijo: g.compute_price === 'fixed' ? g.fixed_price : null,
+        descuento_pct: g.compute_price === 'percentage' ? g.percent_price : g.compute_price === 'formula' ? g.price_discount : null,
+        recargo: g.compute_price === 'formula' ? g.price_surcharge || 0 : null, base: g.base || null, cantidad_minima: g.min_quantity || 0,
+        fecha_inicio: g.date_start || null, fecha_fin: g.date_end || null,
+      }));
+      if (d.reglas.some((g) => g.compute_price === 'formula' && g.base && g.base !== 'list_price')) aviso(`${emp.nombre_corto}: reglas de lista de precios basadas en otra lista o en el costo; GUDS las aplica sobre su precio base`);
+      if (d.listas.length) {
+        if (reglas.length) {
+          await escribir(`
+            insert into reglas_precio (odoo_id, lista_precios_id, empresa_id, aplicado_en, producto_id, categoria_id, tipo_calculo, precio_fijo,
+              descuento_pct, recargo, base, cantidad_minima, fecha_inicio, fecha_fin, activo, odoo_sync_at)
+            select x.odoo_id, l.id, l.empresa_id, x.aplicado_en, (select p.id from productos p where p.odoo_id = x.producto_odoo_id),
+              (select c.id from categorias c where c.odoo_id = x.categ_odoo_id), x.tipo_calculo, x.precio_fijo, x.descuento_pct, x.recargo, x.base,
+              x.cantidad_minima, x.fecha_inicio, x.fecha_fin, true, '${ts}'
+            from jsonb_to_recordset(${jsonbLit(reglas)}) as x(odoo_id int, lista_odoo_id int, aplicado_en text, producto_odoo_id int, categ_odoo_id int,
+              tipo_calculo text, precio_fijo numeric, descuento_pct numeric, recargo numeric, base text, cantidad_minima numeric,
+              fecha_inicio timestamptz, fecha_fin timestamptz)
+            join listas_precios l on l.odoo_id = x.lista_odoo_id
+            on conflict (odoo_id) do update set lista_precios_id = excluded.lista_precios_id, empresa_id = excluded.empresa_id,
+              aplicado_en = excluded.aplicado_en, producto_id = excluded.producto_id, categoria_id = excluded.categoria_id,
+              tipo_calculo = excluded.tipo_calculo, precio_fijo = excluded.precio_fijo, descuento_pct = excluded.descuento_pct,
+              recargo = excluded.recargo, base = excluded.base, cantidad_minima = excluded.cantidad_minima, fecha_inicio = excluded.fecha_inicio,
+              fecha_fin = excluded.fecha_fin, activo = true, odoo_sync_at = excluded.odoo_sync_at`);
+        }
+        // Reglas que ya no existen en Odoo (tabla propia de GUDS: se quitan)
+        await escribir(`
+          delete from reglas_precio g using listas_precios l
+          where l.id = g.lista_precios_id and l.odoo_id = any (array[${d.listas.map((l) => l.id).join(',')}]::int[])
+            and g.odoo_id is not null and g.odoo_id <> all (array[${reglas.map((g) => g.odoo_id).join(',') || 0}]::int[])`);
       }
 
       for (const lote of lotes(proveedores, 500)) {

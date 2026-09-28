@@ -36,7 +36,7 @@ const faqCategories = [
       },
       {
         q: "¿Puedo modificar o cancelar mi pedido?",
-        a: "Mientras esté «Por aprobar» puedes editarlo: en Pedidos, abre el pedido y toca «Editar pedido» para cambiar cantidades, quitar o agregar productos y actualizar las notas. Al guardar, GUDS recalcula el total (precios vigentes, IVA y envío) y el pedido sigue pendiente de aprobación. Una vez aprobado ya no se puede editar. Los pedidos que te cargó tu vendedor los modifica él. Para cancelar un pedido, comunícate con tu ejecutivo de cuenta.",
+        a: "Mientras esté «Por aprobar» puedes editarlo: en Pedidos, abre el pedido y toca «Editar pedido» para cambiar cantidades, quitar o agregar productos y actualizar las notas. Al guardar, GUDS recalcula el total (precios vigentes, el IVA de cada producto y el envío) y el pedido sigue pendiente de aprobación. Una vez aprobado ya no se puede editar. Los pedidos que te cargó tu vendedor los modifica él. Para cancelar un pedido, comunícate con tu ejecutivo de cuenta.",
       },
     ]
   },

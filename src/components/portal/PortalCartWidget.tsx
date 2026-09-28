@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ShoppingCart, Plus, Minus, Trash2, Loader2, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,9 @@ import { supabase, Producto } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { cn } from "@/lib/utils";
+import { useCotizacion } from "@/hooks/useCotizacion";
+import { ResumenCotizacion } from "@/components/portal/ResumenCotizacion";
+import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
 
 interface CartItem {
   id: string;
@@ -56,14 +59,19 @@ export const PortalCartWidget = ({ maxWidthClass = "max-w-md" }: Props) => {
 
   useEffect(() => { if (open) fetchCart(); }, [open, fetchCart]);
 
+  // Total exacto del servidor (IVA de cada producto, envío); solo se cotiza con el panel abierto
+  const itemsCotizar = useMemo(() => items.map((i) => ({ producto_id: i.producto_id, cantidad: i.cantidad, tipo_empaque_id: i.tipo_empaque_id })), [items]);
+  const cotizacionEstado = useCotizacion({ clienteId: user?.cliente_id, items: itemsCotizar, activo: open });
+
   const precio = (i: CartItem) => {
+    const cotizado = cotizacionEstado.lineaDe(i.producto_id, i.tipo_empaque_id);
+    if (cotizado) return cotizado.precio_unitario;
     if (i.precio_unitario != null) return Number(i.precio_unitario);
     const p = i.producto;
     return p?.en_oferta && p?.precio_oferta ? Number(p.precio_oferta) : Number(p?.precio_base || 0);
   };
 
   const count = items.reduce((s, i) => s + i.cantidad, 0);
-  const subtotal = items.reduce((s, i) => s + precio(i) * i.cantidad, 0);
 
   const updateQty = async (id: string, delta: number) => {
     const it = items.find((i) => i.id === id); if (!it) return;
@@ -131,7 +139,13 @@ export const PortalCartWidget = ({ maxWidthClass = "max-w-md" }: Props) => {
                     <ProductImage imageUrl={i.producto?.imagen_url} emoji={i.producto?.imagen_emoji} alt={i.producto?.nombre} size="sm" />
                     <div className="min-w-0 flex-1">
                       <p className="line-clamp-2 text-sm font-medium">{i.producto?.nombre}</p>
-                      {i.tipo_empaque?.nombre && <p className="text-xs text-muted-foreground">{i.tipo_empaque.nombre}</p>}
+                      {(i.tipo_empaque?.nombre || i.producto?.impuesto_pct != null) && (
+                        <p className="text-xs text-muted-foreground">
+                          {i.tipo_empaque?.nombre}
+                          {i.tipo_empaque?.nombre && i.producto?.impuesto_pct != null ? " · " : ""}
+                          <EtiquetaIva pct={i.producto?.impuesto_pct} nombre={i.producto?.impuesto_nombre} className="text-xs" />
+                        </p>
+                      )}
                       <p className="mt-1 font-bold text-primary">{formatPrice(precio(i))}</p>
                     </div>
                     <div className="flex flex-col items-end justify-between">
@@ -152,14 +166,11 @@ export const PortalCartWidget = ({ maxWidthClass = "max-w-md" }: Props) => {
 
           {items.length > 0 && (
             <div className="border-t border-border p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Subtotal</span>
-                <span className="text-lg font-bold">{formatPrice(subtotal)}</span>
-              </div>
+              <ResumenCotizacion {...cotizacionEstado} className="mb-3" />
               <Button className="h-12 w-full text-base font-semibold" onClick={irACheckout}>
                 Finalizar compra
               </Button>
-              <p className="mt-2 text-center text-xs text-muted-foreground">Impuestos y envío se calculan al confirmar.</p>
+              <p className="mt-2 text-center text-xs text-muted-foreground">El IVA depende de cada producto (exento o gravado).</p>
             </div>
           )}
         </SheetContent>

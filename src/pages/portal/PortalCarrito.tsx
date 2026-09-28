@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -38,6 +38,9 @@ import { compressImage } from "@/lib/image";
 import { ProductImage } from "@/components/portal/ProductImage";
 import { CuentaPagoDatos } from "@/components/portal/CuentaPagoDatos";
 import { useCuentasPago, metodosDeCuenta, type MetodoCuenta } from "@/hooks/useCuentasPago";
+import { useCotizacion } from "@/hooks/useCotizacion";
+import { ResumenCotizacion } from "@/components/portal/ResumenCotizacion";
+import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
 
 const METODOS_CON_COMPROBANTE = ["transferencia", "pago_movil", "zelle"];
 const MAX_COMPROBANTE_SIZE = 5 * 1024 * 1024;
@@ -86,8 +89,6 @@ const PortalCarrito = () => {
   const { cuentas: bancos } = useCuentasPago();
   const [monedaPago, setMonedaPago] = useState<"USD" | "BS">("USD");
   const [bancoPagoId, setBancoPagoId] = useState<string>("");
-  // Config de negocio (IVA / envío) leída de la BD; los defaults coinciden con el servidor.
-  const [cfg, setCfg] = useState({ iva: 16, envio: 50, envioGratis: 500 });
   const { formatPrice, exchangeRate } = useCurrency();
   const { user } = useAuth();
   const [credito, setCredito] = useState<{ modo: string; disponible: number; limite: number } | null>(null);
@@ -105,23 +106,7 @@ const PortalCarrito = () => {
     if (user?.id) {
       fetchCart();
     }
-    fetchConfig();
   }, [user]);
-
-  const fetchConfig = async () => {
-    const { data } = await supabase
-      .from('configuracion')
-      .select('clave, valor')
-      .in('clave', ['iva_porcentaje', 'costo_envio', 'envio_gratis_minimo']);
-    if (data) {
-      const map = Object.fromEntries(data.map((r: { clave: string; valor: unknown }) => [r.clave, Number(r.valor)]));
-      setCfg({
-        iva: Number.isFinite(map.iva_porcentaje) ? map.iva_porcentaje : 16,
-        envio: Number.isFinite(map.costo_envio) ? map.costo_envio : 50,
-        envioGratis: Number.isFinite(map.envio_gratis_minimo) ? map.envio_gratis_minimo : 500,
-      });
-    }
-  };
 
   const fetchCart = async () => {
     setLoading(true);
@@ -206,11 +191,17 @@ const PortalCarrito = () => {
     }
   };
 
-  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  // Total exacto del servidor (cotizar_pedido): precio efectivo del cliente, IVA de cada producto (Odoo), cupón y envío
+  const itemsCotizar = useMemo(() => cart.map((i) => ({ producto_id: i.producto_id, cantidad: i.cantidad, tipo_empaque_id: i.tipo_empaque_id })), [cart]);
+  const cotizacionEstado = useCotizacion({ clienteId: user?.cliente_id, items: itemsCotizar, cuponId: cuponApplied?.id ?? null });
+  const { cotizacion, cargando: cotizando, error: errorCotizacion, lineaDe } = cotizacionEstado;
+  // Total confirmado de lo que hay en pantalla (no uno viejo mientras se recalcula)
+  const total = cotizacion && !cotizando && !errorCotizacion ? cotizacion.total : null;
 
   const getItemPrice = (item: CartItemDB) => {
-    // precio_unitario (precio del empaque elegido) es la fuente de verdad y coincide
-    // con lo que calcula el checkout en el servidor. Fallback al precio del producto.
+    // Precio que cobra el servidor (cotización); mientras llega, el guardado en el carrito o el del producto
+    const cotizado = lineaDe(item.producto_id, item.tipo_empaque_id);
+    if (cotizado) return cotizado.precio_unitario;
     if (item.precio_unitario != null) return Number(item.precio_unitario);
     const product = item.producto;
     return product.en_oferta && product.precio_oferta
@@ -218,15 +209,11 @@ const PortalCarrito = () => {
       : product.precio_base;
   };
 
-  const subtotal = cart.reduce((sum, item) => sum + getItemPrice(item) * item.cantidad, 0);
-  const discount = cuponApplied
-    ? (cuponApplied.tipo === 'porcentaje' ? subtotal * (cuponApplied.valor / 100) : cuponApplied.valor)
-    : 0;
-  const base = Math.max(0, subtotal - discount);
-  const impuesto = round2(base * (cfg.iva / 100));
-  const shipping = base >= cfg.envioGratis ? 0 : cfg.envio;
-  const total = round2(base + impuesto + shipping);
   const cartCount = cart.reduce((sum, item) => sum + item.cantidad, 0);
+  // Cuánto falta para el envío gratis (regla del portal, sobre el subtotal con el descuento)
+  const faltaEnvioGratis = cotizacion && cotizacion.envio > 0
+    ? Math.max(0, cotizacion.envio_gratis_desde - (cotizacion.subtotal - cotizacion.descuento))
+    : null;
 
   const requiereComprobante = selectedPayment ? METODOS_CON_COMPROBANTE.includes(selectedPayment) : false;
   const aceptaMetodo = (m: string) => (c: (typeof bancos)[number]) => (metodosDeCuenta(c) as string[]).includes(m);
@@ -236,7 +223,7 @@ const PortalCarrito = () => {
   const bancosFiltrados = bancos.filter((b) => b.moneda === monedaPago && (!selectedPayment || aceptaMetodo(selectedPayment)(b)));
   const bancoPago = bancos.find((b) => b.id === bancoPagoId);
   const tasaPago = monedaPago === "BS" ? exchangeRate : 0;
-  const montoPagar = monedaPago === "BS" && tasaPago > 0 ? total * tasaPago : total;
+  const montoPagar = total == null ? null : monedaPago === "BS" && tasaPago > 0 ? total * tasaPago : total;
 
   const handleComprobanteSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -275,6 +262,12 @@ const PortalCarrito = () => {
 
     if (!user?.cliente_id) {
       toast({ title: "Error", description: "No tienes un cliente asociado", variant: "destructive" });
+      return;
+    }
+
+    // Sin el total calculado por el servidor no se envía (el cliente debe ver lo que va a pagar)
+    if (total == null) {
+      toast({ title: "Falta calcular el total", description: errorCotizacion ?? "Espera un momento a que se calcule el total del pedido.", variant: "destructive" });
       return;
     }
 
@@ -383,15 +376,17 @@ const PortalCarrito = () => {
       </div>
 
       <div className="pb-40">
-        {/* Delivery Info */}
-        <div className="mx-4 mt-4 bg-green-500/10 rounded-xl p-3 flex items-center gap-3">
-          <Truck className="h-5 w-5 text-green-500" />
-          <div className="flex-1">
-            <p className="text-sm font-medium text-green-700">
-              {shipping === 0 ? "Envío gratis en este pedido" : `Agrega ${formatPrice(cfg.envioGratis - base)} más para envío gratis`}
-            </p>
+        {/* Delivery Info (según la cotización del servidor) */}
+        {cotizacion && (
+          <div className="mx-4 mt-4 bg-green-500/10 rounded-xl p-3 flex items-center gap-3">
+            <Truck className="h-5 w-5 text-green-500" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-green-700">
+                {faltaEnvioGratis == null ? "Envío gratis en este pedido" : `Agrega ${formatPrice(faltaEnvioGratis)} más para envío gratis`}
+              </p>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Cart Items */}
         <div className="px-4 mt-4 space-y-3">
@@ -412,7 +407,10 @@ const PortalCarrito = () => {
                 />
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-foreground line-clamp-2 text-sm">{product?.nombre}</p>
-                  <p className="text-xs text-muted-foreground">por {product?.unidad}</p>
+                  <p className="text-xs text-muted-foreground">
+                    por {product?.unidad}
+                    {product?.impuesto_pct != null && <> · <EtiquetaIva pct={product.impuesto_pct} nombre={product.impuesto_nombre} className="text-xs" /></>}
+                  </p>
                   <p className="text-primary font-bold mt-1">{formatPrice(price)}</p>
                 </div>
                 <div className="flex flex-col items-end justify-between">
@@ -562,13 +560,15 @@ const PortalCarrito = () => {
               {/* Monto a transferir */}
               <div className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2 text-sm">
                 <span className="text-muted-foreground">Monto a transferir</span>
-                <span className="font-semibold">
-                  {monedaPago === "BS" && tasaPago > 0
-                    ? `Bs. ${montoPagar.toLocaleString("es-VE", { maximumFractionDigits: 2 })}`
-                    : formatPrice(total)}
+                <span className="font-semibold" data-testid="monto-transferir">
+                  {total == null || montoPagar == null
+                    ? (cotizando ? "Calculando…" : "—")
+                    : monedaPago === "BS" && tasaPago > 0
+                      ? `Bs. ${montoPagar.toLocaleString("es-VE", { maximumFractionDigits: 2 })}`
+                      : formatPrice(total)}
                 </span>
               </div>
-              {monedaPago === "BS" && tasaPago > 0 && (
+              {monedaPago === "BS" && tasaPago > 0 && total != null && (
                 <p className="-mt-2 text-[11px] text-muted-foreground">Equivale a {formatPrice(total)} · tasa Bs. {tasaPago.toLocaleString("es-VE")}/USD</p>
               )}
 
@@ -624,33 +624,10 @@ const PortalCarrito = () => {
         {/* Order Summary */}
         <div className="px-4 mt-4">
           <div className="bg-card rounded-xl border border-border p-4 space-y-3">
-            <h3 className="font-semibold">Resumen del pedido</h3>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Subtotal ({cartCount} productos)</span>
-                <span>{formatPrice(subtotal)}</span>
-              </div>
-              {cuponApplied && (
-                <div className="flex justify-between text-green-600">
-                  <span>Descuento ({cuponApplied.tipo === 'porcentaje' ? `${cuponApplied.valor}%` : 'Cupón'})</span>
-                  <span>-{formatPrice(discount)}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">IVA ({cfg.iva}%)</span>
-                <span>{formatPrice(impuesto)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Envío</span>
-                <span className={shipping === 0 ? "text-green-600" : ""}>
-                  {shipping === 0 ? "Gratis" : formatPrice(shipping)}
-                </span>
-              </div>
-              <div className="border-t border-border pt-2 flex justify-between font-semibold text-base">
-                <span>Total</span>
-                <span className="text-primary">{formatPrice(total)}</span>
-              </div>
-            </div>
+            <h3 className="font-semibold">Resumen del pedido <span className="text-sm font-normal text-muted-foreground">· {cartCount} productos</span></h3>
+            <ResumenCotizacion {...cotizacionEstado} claseTotal="text-primary"
+              vacio={user?.cliente_id ? undefined : "Tu usuario no tiene una cuenta de cliente asociada: no podemos calcular el total. Comunícate con tu ejecutivo."} />
+            <p className="text-xs text-muted-foreground">El IVA depende de cada producto (exento o gravado) y lo calcula GUDS igual que en tu factura.</p>
           </div>
         </div>
       </div>
@@ -661,12 +638,17 @@ const PortalCarrito = () => {
           className="w-full h-12 text-base font-semibold"
           size="lg"
           onClick={handleCheckout}
-          disabled={submitting}
+          disabled={submitting || total == null}
+          data-testid="enviar-pedido"
         >
           {submitting ? (
             <Loader2 className="h-5 w-5 animate-spin" />
-          ) : (
+          ) : total != null ? (
             <>Enviar pedido · {formatPrice(total)}</>
+          ) : cotizando ? (
+            <><Loader2 className="h-4 w-4 animate-spin" />Calculando el total…</>
+          ) : (
+            <>Enviar pedido</>
           )}
         </Button>
         <div className="h-2" />

@@ -130,6 +130,13 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
     { fields: ['product_id', 'product_uom_qty', 'price_unit', 'price_subtotal', 'sequence', 'display_type'] }, cid);
   lineasOdoo.sort((a, b) => a.sequence - b.sequence || a.id - b.id);
 
+  // Cuadre: Odoo calcula el IVA con los impuestos de cada producto; GUDS usa los mismos (fase 20a). Si no cuadra, queda el aviso
+  // (p. ej. un cupón de GUDS, que no viaja a Odoo, o un impuesto cambiado en Odoo después de la última sincronización).
+  const diferencia = Math.round((Number(so.amount_total) - Number(o.total)) * 100) / 100;
+  if (Math.abs(diferencia) > 0.02) {
+    aviso = [aviso, `Total en Odoo ${Number(so.amount_total).toFixed(2)} y en GUDS ${Number(o.total).toFixed(2)} (diferencia ${diferencia.toFixed(2)}): revisar impuestos o descuentos`].filter(Boolean).join(' · ');
+  }
+
   // 5. Vincular en GUDS (sin triggers, como el importador): pedido y cada línea con su id de Odoo
   const usadas = new Set();
   const pares = items.map((i, k) => {

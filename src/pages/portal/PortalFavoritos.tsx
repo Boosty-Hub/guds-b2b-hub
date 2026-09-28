@@ -18,6 +18,7 @@ import { ProductImage } from "@/components/portal/ProductImage";
 import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
 import { useToast } from "@/hooks/use-toast";
 import { useCarritoPortal, type ProductoConEmpaques } from "@/hooks/useCarritoPortal";
+import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
 
 interface FavoritoDB {
   id: string;
@@ -177,6 +178,7 @@ const PortalFavoritos = () => {
                       </h3>
                       <p className="text-xs text-muted-foreground mb-2">
                         por {product.unidad}
+                        {product.impuesto_pct != null && <> · <EtiquetaIva pct={product.impuesto_pct} nombre={product.impuesto_nombre} className="text-xs" /></>}
                       </p>
 
                       <div className="flex items-center gap-2">
@@ -245,12 +247,16 @@ const PortalFavoritos = () => {
       {cartCount > 0 && (
         <Link to="/portal/carrito">
           <div className="fixed bottom-24 left-4 right-4 max-w-md mx-auto">
-            <div className="bg-primary text-white rounded-xl p-4 flex items-center justify-between shadow-lg">
+            <div className="bg-primary text-white rounded-xl py-4 pl-4 pr-20 flex items-center justify-between shadow-lg">
               <div className="flex items-center gap-3">
                 <div className="bg-white/20 rounded-full h-10 w-10 flex items-center justify-center font-bold">
                   {cartCount}
                 </div>
-                <span className="font-medium">Ver carrito</span>
+                {/* Suma de precios sin IVA: el total con el IVA de cada producto está en el carrito */}
+                <span>
+                  <span className="block font-medium leading-tight">Ver carrito</span>
+                  <span className="block text-[11px] opacity-80">Subtotal sin IVA</span>
+                </span>
               </div>
               <span className="font-bold text-lg">{formatPrice(cartTotal)}</span>
             </div>

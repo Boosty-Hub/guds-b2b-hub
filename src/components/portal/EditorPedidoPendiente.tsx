@@ -11,27 +11,33 @@ import { ProductImage } from "@/components/portal/ProductImage";
 import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
 import type { ProductoConEmpaques } from "@/hooks/useCarritoPortal";
 import { esErrorNoEditable, pedidoEditable, type ResultadoEdicion } from "@/components/portal/pedidoEditable";
+import { useCotizacion } from "@/hooks/useCotizacion";
+import { ResumenCotizacion } from "@/components/portal/ResumenCotizacion";
+import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
 
 // Edición de un pedido que sigue «Por aprobar» (portal del cliente y del vendedor). El servidor
 // (editar_pedido_pendiente) reemplaza las líneas y recalcula precios, IVA, envío y stock comprometido; aquí solo se arma
-// el pedido nuevo y se muestra un total ESTIMADO con las mismas reglas. El padre pone el encabezado (Sheet o Dialog).
+// el pedido nuevo y se muestra el total que cotiza el servidor (cotizar_pedido, mismo cálculo: IVA de cada producto según
+// Odoo). El padre pone el encabezado (Sheet o Dialog).
 
 interface OrdenEditable {
   id: string; numero: string; cliente_id: string; empresa_id: string | null; vendedor_id: string | null;
   aprobacion: string | null; estado: string; odoo_id: number | null;
-  descuento: number | null; envio: number | null; notas: string | null;
+  descuento: number | null; envio: number | null; notas: string | null; cupon_id: string | null;
 }
 
 interface ItemDB {
   producto_id: string; cantidad: number; precio_unitario: number; tipo_empaque_id: string | null; unidades_por_empaque: number | null;
   producto: { nombre: string; imagen_url: string | null; imagen_emoji: string | null;
-    stock_disponible: number | null; stock_actual: number | null; controla_stock: boolean | null } | null;
+    stock_disponible: number | null; stock_actual: number | null; controla_stock: boolean | null;
+    impuesto_pct: number | null; impuesto_nombre: string | null } | null;
   tipo_empaque: { nombre: string; unidades: number } | null;
 }
 
 interface Linea {
   producto_id: string; tipo_empaque_id: string | null; nombre: string; empaque: string | null;
   unidades: number; precio: number; cantidad: number; imagen_url: string | null; imagen_emoji: string | null;
+  impuesto_pct: number | null; impuesto_nombre: string | null;
 }
 
 interface InfoStock { nombre: string; stock_disponible: number | null; stock_actual: number | null; controla_stock: boolean | null }
@@ -66,7 +72,8 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
   const [info, setInfo] = useState<Record<string, InfoStock>>({});
   const [catalogo, setCatalogo] = useState<ProductoConEmpaques[]>([]);
   const [precioLista, setPrecioLista] = useState<Record<string, number>>({});
-  const [cfg, setCfg] = useState({ iva: 16, envio: 50, envioGratis: 500 });
+  // Regla de envío del portal, solo para el texto de ayuda del vendedor (el cálculo lo hace el servidor)
+  const [cfg, setCfg] = useState({ envio: 50, envioGratis: 500 });
   const [notas, setNotas] = useState("");
   const [envio, setEnvio] = useState("");
   const [buscando, setBuscando] = useState(false);
@@ -86,7 +93,7 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
       setErrorCarga(null);
       const { data: o, error } = await supabase
         .from("ordenes")
-        .select("id, numero, cliente_id, empresa_id, vendedor_id, aprobacion, estado, odoo_id, descuento, envio, notas")
+        .select("id, numero, cliente_id, empresa_id, vendedor_id, aprobacion, estado, odoo_id, descuento, envio, notas, cupon_id")
         .eq("id", ordenId)
         .maybeSingle();
       if (cancelado) return;
@@ -97,7 +104,7 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
       // Catálogo de la misma empresa del pedido (no se mezclan productos de GUDS y Quirutec)
       let qProd = supabase
         .from("productos")
-        .select("id, sku, nombre, imagen_url, imagen_emoji, precio_base, precio_oferta, en_oferta, stock_actual, stock_disponible, controla_stock, activo, empresa_id, producto_empaques(id, tipo_empaque_id, activo, tipo_empaque:tipos_empaque(*))")
+        .select("id, sku, nombre, imagen_url, imagen_emoji, precio_base, precio_oferta, en_oferta, stock_actual, stock_disponible, controla_stock, activo, empresa_id, impuesto_pct, impuesto_nombre, producto_empaques(id, tipo_empaque_id, activo, tipo_empaque:tipos_empaque(*))")
         .eq("activo", true)
         .order("nombre");
       if (ord.empresa_id) qProd = qProd.or(`empresa_id.is.null,empresa_id.eq.${ord.empresa_id}`);
@@ -105,10 +112,10 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
       const [iRes, pRes, cRes, cliRes] = await Promise.all([
         supabase
           .from("orden_items")
-          .select("producto_id, cantidad, precio_unitario, tipo_empaque_id, unidades_por_empaque, producto:productos(nombre, imagen_url, imagen_emoji, stock_disponible, stock_actual, controla_stock), tipo_empaque:tipos_empaque(nombre, unidades)")
+          .select("producto_id, cantidad, precio_unitario, tipo_empaque_id, unidades_por_empaque, producto:productos(nombre, imagen_url, imagen_emoji, stock_disponible, stock_actual, controla_stock, impuesto_pct, impuesto_nombre), tipo_empaque:tipos_empaque(nombre, unidades)")
           .eq("orden_id", ordenId),
         qProd,
-        supabase.from("configuracion").select("clave, valor").in("clave", ["iva_porcentaje", "costo_envio", "envio_gratis_minimo"]),
+        supabase.from("configuracion").select("clave, valor").in("clave", ["costo_envio", "envio_gratis_minimo"]),
         supabase.from("clientes").select("lista_precios_id").eq("id", ord.cliente_id).maybeSingle(),
       ]);
       if (cancelado) return;
@@ -132,6 +139,7 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
           producto_id: it.producto_id, tipo_empaque_id: it.tipo_empaque_id, nombre: it.producto?.nombre ?? "Producto",
           empaque: it.tipo_empaque?.nombre ?? null, unidades, precio: Number(it.precio_unitario), cantidad: Number(it.cantidad),
           imagen_url: it.producto?.imagen_url ?? null, imagen_emoji: it.producto?.imagen_emoji ?? null,
+          impuesto_pct: it.producto?.impuesto_pct ?? null, impuesto_nombre: it.producto?.impuesto_nombre ?? null,
         });
       }
 
@@ -162,7 +170,6 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
 
       const mapaCfg = Object.fromEntries(((cRes.data ?? []) as { clave: string; valor: unknown }[]).map((r) => [r.clave, Number(r.valor)]));
       setCfg({
-        iva: Number.isFinite(mapaCfg.iva_porcentaje) ? mapaCfg.iva_porcentaje : 16,
         envio: Number.isFinite(mapaCfg.costo_envio) ? mapaCfg.costo_envio : 50,
         envioGratis: Number.isFinite(mapaCfg.envio_gratis_minimo) ? mapaCfg.envio_gratis_minimo : 500,
       });
@@ -235,6 +242,7 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
       const nueva: Linea = {
         producto_id: p.id, tipo_empaque_id: emp?.id ?? null, nombre: p.nombre, empaque: emp?.nombre ?? null, unidades,
         precio: data != null ? Number(data) : precioMostrado(p), cantidad: 1, imagen_url: p.imagen_url, imagen_emoji: p.imagen_emoji,
+        impuesto_pct: p.impuesto_pct ?? null, impuesto_nombre: p.impuesto_nombre ?? null,
       };
       setLineas((prev) => (prev.some((x) => clave(x.producto_id, x.tipo_empaque_id) === k) ? incrementar(prev) : [...prev, nueva]));
     }
@@ -267,19 +275,18 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
     return catalogo.filter((p) => normalizar(p.nombre).includes(t) || normalizar(p.sku ?? "").includes(t)).slice(0, 30);
   }, [busqueda, catalogo]);
 
-  // ── Total estimado con las reglas del servidor ──
-  const subtotal = lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
-  const descuento = Math.min(Number(orden?.descuento ?? 0), subtotal);   // un cupón fijo se conserva
-  const base = subtotal - descuento;
-  const impuesto = round2(base * (cfg.iva / 100));
+  // ── Total exacto: lo cotiza el servidor con el mismo envío que se mandará al guardar ──
   const envioNum = envio.trim() === "" ? null : Number(envio.replace(",", "."));
   const envioInvalido = envioNum != null && (!Number.isFinite(envioNum) || envioNum < 0);
-  const reglaPortal = base >= cfg.envioGratis ? 0 : cfg.envio;
-  const envioEstimado = modo === "vendedor" && orden?.vendedor_id
-    ? (envioInvalido ? 0 : envioNum ?? 0)                                  // pedido del vendedor: solo el cargo que él indique
-    : modo === "vendedor" && envioNum != null && !envioInvalido ? envioNum  // el vendedor fija el envío de un pedido del portal
-    : reglaPortal;                                                         // regla del portal
-  const total = base + impuesto + round2(envioEstimado);
+  // Solo el vendedor manda el envío. En sus pedidos, vacío = sin envío; en los del portal, vacío = regla del portal.
+  const envioServidor = modo === "vendedor" ? (envioNum != null ? round2(envioNum) : orden?.vendedor_id ? 0 : null) : null;
+  const itemsCotizar = useMemo(() => lineas.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad, tipo_empaque_id: l.tipo_empaque_id })), [lineas]);
+  const cotizacionEstado = useCotizacion({
+    clienteId: orden?.cliente_id, items: itemsCotizar, ordenId: orden?.id ?? null, envio: envioServidor, activo: !envioInvalido,
+  });
+  // Pedidos viejos con un descuento fijo sin cupón registrado: el servidor lo conserva al guardar, pero la cotización no lo conoce
+  // Con ordenId el servidor ya incluye el descuento fijo de pedidos viejos sin cupón registrado (fase 20c)
+  const descuentoSinCupon = 0;
 
   const cambiado = firma(lineas) !== original.lineas || notas.trim() !== original.notas.trim()
     || (modo === "vendedor" && envio.trim() !== original.envio);
@@ -293,8 +300,7 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
       // null = sin cambios (el servidor conserva las notas)
       p_notas: notas.trim() === original.notas.trim() ? null : notas.trim(),
     };
-    // Solo el vendedor manda el envío. En sus pedidos, vacío = sin envío; en los del portal, vacío = regla del portal.
-    if (modo === "vendedor") payload.p_envio = envioNum != null ? round2(envioNum) : orden.vendedor_id ? 0 : null;
+    if (modo === "vendedor") payload.p_envio = envioServidor;
     const { data, error } = await supabase.rpc("editar_pedido_pendiente", payload);
     setGuardando(false);
     if (error) {
@@ -307,7 +313,7 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
       return;
     }
     const row = (Array.isArray(data) ? data[0] : data) as ResultadoEdicion | null;
-    onGuardado({ orden_id: row?.orden_id ?? orden.id, numero: row?.numero ?? orden.numero, total: Number(row?.total ?? total),
+    onGuardado({ orden_id: row?.orden_id ?? orden.id, numero: row?.numero ?? orden.numero, total: Number(row?.total ?? cotizacionEstado.cotizacion?.total ?? 0),
       pagado: Number(row?.pagado ?? 0), falta: Number(row?.falta ?? 0), a_favor: Number(row?.a_favor ?? 0) });
   };
 
@@ -352,6 +358,7 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
                         <p className="line-clamp-2 text-sm font-medium leading-snug">{l.nombre}</p>
                         <p className="text-xs text-muted-foreground">
                           {l.empaque ? `${l.empaque}${l.unidades > 1 ? ` (${l.unidades} u.)` : ""} · ` : ""}{formatPrice(l.precio)} c/u
+                          {l.impuesto_pct != null && <> · <EtiquetaIva pct={l.impuesto_pct} nombre={l.impuesto_nombre} className="text-xs" /></>}
                         </p>
                       </div>
                       <p className="shrink-0 text-sm font-semibold tabular-nums">{formatPrice(l.precio * l.cantidad)}</p>
@@ -417,6 +424,7 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
                             <p className="line-clamp-2 text-sm font-medium leading-snug">{p.nombre}</p>
                             <p className="text-xs text-muted-foreground">
                               {formatPrice(precioMostrado(p))}
+                              {p.impuesto_pct != null && <> · <EtiquetaIva pct={p.impuesto_pct} nombre={p.impuesto_nombre} className="text-xs" /></>}
                               {nEmp > 1 ? ` · ${nEmp} presentaciones` : ""}
                               {Number.isFinite(libre) ? (agotado ? " · Sin disponible" : ` · ${Math.floor(libre).toLocaleString("es-VE")} disp.`) : ""}
                               {enPedido > 0 ? ` · ${enPedido} en el pedido` : ""}
@@ -457,35 +465,21 @@ export const EditorPedidoPendiente = ({ ordenId, modo, onCancelar, onGuardado, o
           </section>
         )}
 
-        {/* Total estimado */}
+        {/* Total (cotizado por el servidor) */}
         <section className="space-y-2 rounded-xl bg-muted p-4" data-testid="totales-edicion">
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Subtotal</span>
-            <span className="tabular-nums">{formatPrice(subtotal)}</span>
-          </div>
-          {descuento > 0 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Descuento</span>
-              <span className="tabular-nums">-{formatPrice(descuento)}</span>
-            </div>
+          {envioInvalido ? (
+            <p className="text-sm text-muted-foreground">Corrige el cargo de envío para ver el total.</p>
+          ) : (
+            <ResumenCotizacion {...cotizacionEstado} envioCero={modo === "vendedor" && orden.vendedor_id ? "Sin envío" : "Gratis"} />
           )}
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">IVA ({cfg.iva}%)</span>
-            <span className="tabular-nums">{formatPrice(impuesto)}</span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Envío</span>
-            <span className="tabular-nums">
-              {envioEstimado > 0 ? formatPrice(envioEstimado) : modo === "vendedor" && orden.vendedor_id ? "Sin envío" : "Gratis"}
-            </span>
-          </div>
-          <div className="flex justify-between border-t border-border pt-2 font-semibold">
-            <span>Total estimado</span>
-            <span className="tabular-nums" data-testid="total-estimado">{formatPrice(total)}</span>
-          </div>
+          {descuentoSinCupon > 0 && (
+            <p className="text-xs text-amber-700">
+              Este pedido tiene un descuento de {formatPrice(descuentoSinCupon)} que GUDS conserva al guardar; el total de arriba no lo incluye.
+            </p>
+          )}
           <p className="flex gap-2 pt-1 text-xs text-muted-foreground">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Es un estimado. El total final lo calcula GUDS al guardar, con los precios vigentes, el IVA y el envío.
+            Calculado por GUDS con los precios vigentes, el IVA de cada producto (exento o gravado) y el envío. Se confirma al guardar.
           </p>
         </section>
       </div>

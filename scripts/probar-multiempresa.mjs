@@ -334,7 +334,7 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
 
 // ── Aprobación de pedidos (19g): cliente/vendedor → por aprobar; admin aprueba (→ Odoo) o rechaza con motivo ──
 {
-  const prod = (await sql(`select id, comprometido_guds from productos where empresa_id = '${guds.id}' and controla_stock and stock_disponible > 100 and activo limit 1`))[0];
+  const prod = (await sql(`select id, comprometido_guds, impuesto_pct from productos where empresa_id = '${guds.id}' and controla_stock and stock_disponible > 100 and activo limit 1`))[0];
   const vend = vendGuds ? (await sql(`select u.id, c.id cliente from usuarios u join clientes c on c.vendedor_asignado_id = u.id
     where u.auth_id = '${vendGuds}' and c.activo and c.empresa_id = '${guds.id}' limit 1`))[0] : null;
   const claims = (uid) => JSON.stringify({ sub: uid, role: 'authenticated' }).replace(/'/g, "''");
@@ -383,6 +383,22 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
           `select row_to_json(t)::text from public.editar_pedido_pendiente(current_setting('guds.prueba_orden')::uuid, ${items5}) t`));
     }
 
+    // ── IVA por producto desde Odoo y cotización en el servidor (20a/20b) ──
+    await caso('IVA: el pedido del vendedor (GUDS) guarda el IVA de cada línea y el del pedido por grupo de tasa', (r) =>
+      Number(r?.pct) === Number(prod.impuesto_pct ?? 16) && Math.abs(Number(r?.impuesto) - Math.round(Number(r?.subtotal) * Number(r?.pct)) / 100) < 0.011,
+      como({ empresa: guds.id, previo: previoVend },
+        `select row_to_json(t)::text from (select o.subtotal, o.impuesto, (select max(i.impuesto_pct) from orden_items i where i.orden_id = o.id) pct from ordenes o where o.id = ${idPend}) t`));
+    await caso('Cotización: cotizar_pedido da el mismo total que el pedido guardado', (r) => r?.ok === true,
+      como({ uid: vendGuds, empresa: guds.id, previo: previoVend },
+        `select row_to_json(t)::text from (select (public.cotizar_pedido('${vend.cliente}', ${items}, null, 0) ->> 'total')::numeric = (select total from ordenes where id = ${idPend}) ok) t`));
+
+    await caso('Cotización: la edición de un pedido cotiza lo mismo que guarda editar_pedido_pendiente', (r) => r?.ok === true,
+      como({ uid: vendGuds, empresa: guds.id, previo: `${previoVend} perform set_config('guds.prueba_orden', ${idPend}::text, true);
+        perform set_config('guds.prueba_cot', (public.cotizar_pedido('${vend.cliente}', '[{"producto_id":"${prod.id}","cantidad":5}]'::jsonb, null, 7.5,
+          current_setting('guds.prueba_orden')::uuid) ->> 'total'), true);
+        perform public.editar_pedido_pendiente(current_setting('guds.prueba_orden')::uuid, '[{"producto_id":"${prod.id}","cantidad":5}]'::jsonb, null, 7.5);` },
+        `select row_to_json(t)::text from (select current_setting('guds.prueba_cot')::numeric = (select total from ordenes where id = current_setting('guds.prueba_orden')::uuid) ok) t`));
+
     // ── Cupón, pago del pedido editado, vendedor y cuentas por empresa (19x) ──
     const fijarId = `perform set_config('guds.prueba_orden', ${idPend}::text, true);`;
     const cuponPct = `insert into cupones (id, codigo, tipo, valor, empresa_id) values ('00000000-0000-0000-0000-0000000c0010', 'PRUEBA-PCT', 'porcentaje', 10, '${guds.id}');
@@ -415,6 +431,28 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
         como({ uid: vendGuds, empresa: guds.id }, `select public.registrar_pago('${vend.cliente}', null, '${bancoQrt}', 'transferencia', 10, 'USD', null, 'REF-PRUEBA', null)::text`));
     }
   }
+}
+
+// ── IVA por producto: Quirutec exento vs gravado (20a) ──
+{
+  const exento = (await sql(`select id from productos where empresa_id = '${qrt.id}' and activo and impuesto_pct = 0 and odoo_id is not null limit 1`))[0]?.id;
+  const gravado = (await sql(`select id from productos where empresa_id = '${qrt.id}' and activo and impuesto_pct = 16 and odoo_id is not null limit 1`))[0]?.id;
+  if (exento) {
+    await caso('IVA: un producto exento de Quirutec cotiza con IVA 0', (r) => Number(r?.impuesto) === 0 && Number(r?.subtotal) > 0,
+      como({ empresa: qrt.id }, `select (public.cotizar_pedido('${cliQrt}', '[{"producto_id":"${exento}","cantidad":3}]'::jsonb, null, 0))::text`));
+  }
+  if (gravado) {
+    await caso('IVA: un producto gravado de Quirutec cotiza con IVA 16 %', (r) => Math.abs(Number(r?.impuesto) - Math.round(Number(r?.subtotal) * 16) / 100) < 0.011 && Number(r?.impuesto) > 0,
+      como({ empresa: qrt.id }, `select (public.cotizar_pedido('${cliQrt}', '[{"producto_id":"${gravado}","cantidad":3}]'::jsonb, null, 0))::text`));
+  }
+  if (vendGuds) {
+    await caso('Cotización: un vendedor no cotiza para un cliente que no es suyo', 'No puedes cotizar',
+      como({ uid: vendGuds, empresa: qrt.id }, `select (public.cotizar_pedido('${cliQrt}', '[]'::jsonb))::text`));
+  }
+  await caso('IVA: las funciones internas de impuestos no se ejecutan por la API', (r) => r?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace
+      and p.proname in ('impuesto_producto', 'impuesto_de_items', 'impuesto_envio', 'aplicar_impuestos_orden')
+      and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))) t`));
 }
 
 // ── Facturas: no se eliminan, se anulan, con historial (19x) ──

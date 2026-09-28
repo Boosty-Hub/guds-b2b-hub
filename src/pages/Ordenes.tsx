@@ -48,6 +48,10 @@ import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { FichaCampos } from "@/components/datos/FichaCampos";
 import { useColumnas } from "@/components/datos/columnas";
+import { useCotizacion } from "@/hooks/useCotizacion";
+import { ResumenCotizacion } from "@/components/portal/ResumenCotizacion";
+import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
+import { textoIva } from "@/lib/iva";
 
 interface OrdenDB {
   id: string;
@@ -427,7 +431,13 @@ const Ordenes = () => {
     </TableRow>
   );
 
-  const orderTotal = newOrder.items.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
+  // Total exacto de la orden nueva (cotizar_pedido): precio del cliente, IVA de cada producto (Odoo) y envío, como crear_orden_admin
+  const cotizacionEstado = useCotizacion({ clienteId: newOrder.cliente_id || null, items: newOrder.items, activo: isCreateOpen });
+  const clienteNuevo = clientes.find((c) => c.id === newOrder.cliente_id) as (Cliente & { empresa_id?: string | null }) | undefined;
+  // Solo productos de la empresa del cliente (no se mezclan GUDS y Quirutec en un pedido)
+  const productosVenta = clienteNuevo?.empresa_id
+    ? productos.filter((p) => !p.empresa_id || p.empresa_id === clienteNuevo.empresa_id)
+    : productos;
   const porAprobar = ordenes.filter((o) => o.aprobacion === "pendiente").length;
 
   // Mantener abierto el detalle con los datos frescos después de aprobar/rechazar (el envío a Odoo tarda unos segundos)
@@ -875,9 +885,10 @@ const Ordenes = () => {
                     <SelectValue placeholder="Seleccionar producto" />
                   </SelectTrigger>
                   <SelectContent>
-                    {productos.map((producto) => (
+                    {productosVenta.map((producto) => (
                       <SelectItem key={producto.id} value={producto.id}>
                         {producto.nombre} - {formatPrice(producto.en_oferta && producto.precio_oferta ? producto.precio_oferta : producto.precio_base)}
+                        {textoIva(producto.impuesto_pct) ? ` · ${textoIva(producto.impuesto_pct)}` : ""}
                         {producto.controla_stock !== false ? ` · ${Math.floor(Number(producto.stock_disponible ?? producto.stock_actual ?? 0)).toLocaleString("es-VE")} disp.` : ""}
                       </SelectItem>
                     ))}
@@ -903,16 +914,19 @@ const Ordenes = () => {
                 <div className="border rounded-lg divide-y">
                   {newOrder.items.map((item, index) => {
                     const producto = productos.find(p => p.id === item.producto_id);
+                    // Precio que cobra el servidor para este cliente (lista, oferta o base); mientras llega, el del catálogo
+                    const precio = cotizacionEstado.lineaDe(item.producto_id, null)?.precio_unitario ?? item.precio;
                     return (
-                      <div key={index} className="flex items-center justify-between p-3">
-                        <div>
+                      <div key={index} className="flex items-center justify-between gap-2 p-3">
+                        <div className="min-w-0">
                           <p className="font-medium">{producto?.nombre}</p>
                           <p className="text-sm text-muted-foreground">
-                            {item.cantidad} x {formatPrice(item.precio)}
+                            {item.cantidad} x {formatPrice(precio)}
+                            {producto?.impuesto_pct != null && <> · <EtiquetaIva pct={producto.impuesto_pct} nombre={producto.impuesto_nombre} className="text-xs" /></>}
                           </p>
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className="font-medium">{formatPrice(item.precio * item.cantidad)}</span>
+                          <span className="whitespace-nowrap font-medium">{formatPrice(precio * item.cantidad)}</span>
                           <Button variant="ghost" size="icon" onClick={() => removeItemFromOrder(index)}>
                             <X className="h-4 w-4" />
                           </Button>
@@ -921,10 +935,10 @@ const Ordenes = () => {
                     );
                   })}
                 </div>
-                <div className="flex justify-between font-bold text-lg pt-2">
-                  <span>Total:</span>
-                  <span className="text-primary">{formatPrice(orderTotal)}</span>
+                <div className="rounded-lg bg-muted p-3" data-testid="resumen-orden-nueva">
+                  <ResumenCotizacion {...cotizacionEstado} claseTotal="text-primary" vacio="Elige el cliente para ver el total con su IVA." />
                 </div>
+                <p className="text-xs text-muted-foreground">El IVA depende de cada producto (exento o gravado, como en Odoo). GUDS confirma el total al crear la orden.</p>
               </div>
             )}
 

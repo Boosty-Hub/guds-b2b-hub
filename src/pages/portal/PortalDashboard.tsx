@@ -22,6 +22,7 @@ import { ProductImage } from "@/components/portal/ProductImage";
 import { BannerVisual } from "@/components/BannerVisual";
 import { useDeviceType } from "@/hooks/use-mobile";
 import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
+import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
 
 interface Orden {
   id: string;
@@ -269,6 +270,7 @@ const PortalDashboard = () => {
                         </p>
                       )}
                     </div>
+                    <EtiquetaIva pct={product.impuesto_pct} nombre={product.impuesto_nombre} className="block" />
                   </div>
                 </div>
               </Link>

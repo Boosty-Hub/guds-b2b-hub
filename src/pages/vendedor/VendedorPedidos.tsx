@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { VendedorLayout } from "@/components/vendedor/VendedorLayout";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -28,6 +28,10 @@ import { useResumenVendedor, mesDe } from "@/components/vendedor/resumen";
 import { EditarPedidoDialog } from "@/components/vendedor/EditarPedidoDialog";
 import { pedidoEditable, type ResultadoEdicion } from "@/components/portal/pedidoEditable";
 import { textoPagoEdicion } from "@/components/portal/ResumenPagoPedido";
+import { useCotizacion } from "@/hooks/useCotizacion";
+import { ResumenCotizacion } from "@/components/portal/ResumenCotizacion";
+import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
+import { textoIva } from "@/lib/iva";
 
 interface Orden { id: string; numero: string; total: number; estado: string; created_at: string; fecha_pedido: string | null; odoo_id: number | null;
   aprobacion: "pendiente" | "aprobada" | "rechazada" | null; rechazo_motivo: string | null; cliente?: { nombre_negocio: string } | null;
@@ -36,8 +40,9 @@ interface Cli { id: string; nombre_negocio: string; }
 interface TipoEmpaque { id: string; nombre: string; unidades: number; }
 interface ProductoEmp { id: string; tipo_empaque_id: string; precio_empaque: number; activo: boolean; tipo_empaque: TipoEmpaque | null; }
 interface Prod { id: string; nombre: string; precio_base: number; en_oferta: boolean | null; precio_oferta: number | null; producto_empaques?: ProductoEmp[];
-  stock_disponible: number | null; controla_stock: boolean | null; }
-interface Linea { producto_id: string; tipo_empaque_id: string | null; nombre: string; empaque: string | null; precio: number; cantidad: number; }
+  stock_disponible: number | null; controla_stock: boolean | null; impuesto_pct: number | null; impuesto_nombre: string | null; }
+interface Linea { producto_id: string; tipo_empaque_id: string | null; nombre: string; empaque: string | null; precio: number; cantidad: number;
+  impuesto_pct: number | null; impuesto_nombre: string | null; }
 
 const estadoConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
   pendiente: { label: "Pendiente", variant: "secondary" }, confirmado: { label: "Confirmado", variant: "default" },
@@ -62,7 +67,6 @@ const VendedorPedidos = () => {
   const [saving, setSaving] = useState(false);
   // Cargo de envío que estipula el vendedor (vacío = sin envío: sus pedidos no llevan envío automático)
   const [envio, setEnvio] = useState("");
-  const [iva, setIva] = useState(16);
   // Clientes de su cartera (activos o no): solo en esos puede editar pedidos por aprobar
   const [asignados, setAsignados] = useState<string[]>([]);
   const [editar, setEditar] = useState<Orden | null>(null);
@@ -83,15 +87,12 @@ const VendedorPedidos = () => {
     const ids = ((asignados ?? []) as { id: string }[]).map((c) => c.id);
     const filtro = ids.length ? `vendedor_id.eq.${user.id},cliente_id.in.(${ids.join(",")})` : `vendedor_id.eq.${user.id}`;
     setAsignados(ids);
-    const [oRes, cRes, pRes, ivaRes] = await Promise.all([
+    const [oRes, cRes, pRes] = await Promise.all([
       supabase.from("ordenes").select("id, numero, total, estado, created_at, fecha_pedido, odoo_id, aprobacion, rechazo_motivo, cliente_id, vendedor_id, ediciones, editado_at, cliente:clientes(nombre_negocio)").or(filtro).order("created_at", { ascending: false }),
       // Solo los clientes activos asignados a este vendedor
       supabase.from("clientes").select("id, nombre_negocio").eq("activo", true).eq("vendedor_asignado_id", user.id).order("nombre_negocio"),
-      supabase.from("productos").select("id, nombre, precio_base, en_oferta, precio_oferta, stock_disponible, controla_stock, producto_empaques(id, tipo_empaque_id, precio_empaque, activo, tipo_empaque:tipos_empaque(id, nombre, unidades))").eq("activo", true).order("nombre"),
-      supabase.from("configuracion").select("valor").eq("clave", "iva_porcentaje").limit(1),
+      supabase.from("productos").select("id, nombre, precio_base, en_oferta, precio_oferta, stock_disponible, controla_stock, impuesto_pct, impuesto_nombre, producto_empaques(id, tipo_empaque_id, precio_empaque, activo, tipo_empaque:tipos_empaque(id, nombre, unidades))").eq("activo", true).order("nombre"),
     ]);
-    const ivaCfg = Number((ivaRes.data as { valor: unknown }[] | null)?.[0]?.valor);
-    if (Number.isFinite(ivaCfg)) setIva(ivaCfg);
     if (oRes.data) setOrdenes(oRes.data as unknown as Orden[]);
     if (cRes.data) setClientes(cRes.data as Cli[]);
     if (pRes.data) setProductos(pRes.data as unknown as Prod[]);
@@ -160,6 +161,8 @@ const VendedorPedidos = () => {
       empaque: emp?.tipo_empaque?.nombre || null,
       precio,
       cantidad: 1,
+      impuesto_pct: p.impuesto_pct ?? null,
+      impuesto_nombre: p.impuesto_nombre ?? null,
     });
     setPendingEmpaque(null);
     setAddProd("");
@@ -186,13 +189,13 @@ const VendedorPedidos = () => {
     if (d > 0 && p && !cabe(p, l.tipo_empaque_id, d)) return [l];
     const n = l.cantidad + d; return n <= 0 ? [] : [{ ...l, cantidad: n }];
   }));
-  const subtotal = lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
-  // Resumen estimado: IVA según la configuración y el envío solo si el vendedor lo indica (el servidor calcula el total real)
+  // Total exacto del servidor (cotizar_pedido): precio del cliente, IVA de cada producto (Odoo) y el envío solo si el vendedor lo indica
   const envioNum = envio.trim() === "" ? null : Number(envio.replace(",", "."));
   const envioInvalido = envioNum != null && (!Number.isFinite(envioNum) || envioNum < 0);
   const envioEstimado = envioNum != null && !envioInvalido ? Math.round(envioNum * 100) / 100 : 0;
-  const ivaEstimado = Math.round(subtotal * iva) / 100;
-  const totalEstimado = subtotal + ivaEstimado + envioEstimado;
+  const itemsCotizar = useMemo(() => lineas.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad, tipo_empaque_id: l.tipo_empaque_id })), [lineas]);
+  // Sin envío automático en sus pedidos: vacío = 0 (igual que crear_orden_vendedor)
+  const cotizacionEstado = useCotizacion({ clienteId, items: itemsCotizar, envio: envioEstimado, activo: open && !envioInvalido });
 
   const resetForm = () => { setClienteId(""); setLineas([]); setMetodo("transferencia"); setPendingEmpaque(null); setAddProd(""); setEnvio(""); };
 
@@ -337,7 +340,7 @@ const VendedorPedidos = () => {
                     const n = empaquesDe(p).length;
                     return (
                       <SelectItem key={p.id} value={p.id}>
-                        {p.nombre} · {formatPrice(Number(p.precio_base))}{n > 1 ? ` · ${n} presentaciones` : ""}
+                        {p.nombre} · {formatPrice(Number(p.precio_base))}{textoIva(p.impuesto_pct) ? ` · ${textoIva(p.impuesto_pct)}` : ""}{n > 1 ? ` · ${n} presentaciones` : ""}
                         {p.controla_stock !== false ? ` · ${Math.floor(Number(p.stock_disponible ?? 0)).toLocaleString("es-VE")} disp.` : ""}
                       </SelectItem>
                     );
@@ -380,7 +383,10 @@ const VendedorPedidos = () => {
                     <div key={key} className="flex items-center justify-between gap-2 p-2 text-sm">
                       <div className="min-w-0 flex-1">
                         <p className="truncate">{l.nombre}{l.empaque ? <span className="text-muted-foreground"> · {l.empaque}</span> : null}</p>
-                        <p className="text-xs text-muted-foreground">{formatPrice(l.precio)} c/u</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatPrice(l.precio)} c/u
+                          {l.impuesto_pct != null && <> · <EtiquetaIva pct={l.impuesto_pct} nombre={l.impuesto_nombre} className="text-xs" /></>}
+                        </p>
                       </div>
                       <div className="flex items-center gap-1">
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => cambiarCant(key, -1)}><Minus className="h-3.5 w-3.5" /></Button>
@@ -391,7 +397,6 @@ const VendedorPedidos = () => {
                     </div>
                   );
                 })}
-                <div className="flex justify-between p-2 font-semibold"><span>Subtotal</span><span>{formatPrice(subtotal)}</span></div>
               </div>
             )}
             <div><Label>Método de pago</Label>
@@ -414,14 +419,13 @@ const VendedorPedidos = () => {
                 : <p className="mt-1 text-xs text-muted-foreground">Tus pedidos no llevan envío automático: vacío = sin envío.</p>}
             </div>
             {lineas.length > 0 && (
-              <div className="space-y-1 rounded-lg bg-muted p-3 text-sm" data-testid="resumen-nuevo">
-                <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{formatPrice(subtotal)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">IVA ({iva}%)</span><span className="tabular-nums">{formatPrice(ivaEstimado)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Envío</span><span className="tabular-nums">{envioEstimado > 0 ? formatPrice(envioEstimado) : "Sin envío"}</span></div>
-                <div className="flex justify-between border-t border-border pt-1 font-semibold"><span>Total estimado</span><span className="tabular-nums">{formatPrice(totalEstimado)}</span></div>
+              <div className="rounded-lg bg-muted p-3" data-testid="resumen-nuevo">
+                {envioInvalido
+                  ? <p className="text-sm text-muted-foreground">Corrige el cargo de envío para ver el total.</p>
+                  : <ResumenCotizacion {...cotizacionEstado} envioCero="Sin envío" vacio="Elige el cliente para ver el total con su IVA." />}
               </div>
             )}
-            <p className="text-xs text-muted-foreground">El IVA se aplica según la configuración y el envío solo si lo indicas. El total final se calcula en el servidor.</p>
+            <p className="text-xs text-muted-foreground">El IVA depende de cada producto (exento o gravado, como en Odoo) y el envío solo va si lo indicas. GUDS confirma el total al crear el pedido.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setOpen(false); resetForm(); }} disabled={saving}>Cancelar</Button>

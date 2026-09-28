@@ -10,6 +10,21 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-28 · Etapa 2: IVA de cada producto desde Odoo, cotización en el servidor y listas de precios
+
+- **IVA por producto** (`20260928_fase20a_impuestos_cotizacion_listas.sql`, `…20b_impuesto_por_grupo.sql`, importador): en Odoo
+  GUDS vende casi todo con IVA 16 % y Quirutec la mayoría **exento** (0 %) y algunos al 16 %; ningún impuesto va incluido en el
+  precio y no hay posiciones fiscales que lo cambien. GUDS aplicaba 16 % a todo: en los pedidos de Quirutec desde julio eso
+  inflaba el IVA de 0,50 M a 0,96 M USD. Ahora `productos.impuesto_pct` lo trae la sincronización y los cuatro caminos de pedido
+  (portal, vendedor, admin, edición) calculan el IVA por producto, redondeado por grupo de tasa como Odoo, y cada línea guarda el
+  suyo. Validado contra los pedidos reales de Odoo desde julio: coincide exacto en 440 de 441 (GUDS) y 405 de 408 (Quirutec).
+- **`cotizar_pedido()`**: el mismo cálculo para que las pantallas muestren el total exacto antes de enviar. Al enviar un pedido a
+  Odoo se compara su total con el de GUDS y, si difiere, queda un aviso en el pedido.
+- **Listas de precios**: en Odoo el precio de lista es un valor de relleno ($1) en casi todos los productos y las 4 listas no
+  tienen reglas; GUDS sigue usando el último precio vendido (decisión 27-sep). La sincronización ya trae las listas, sus reglas y
+  la lista de cada cliente, y `precio_efectivo` aplica las reglas de precio fijo o descuento de listas en USD si se cargan en Odoo.
+- Verificado: pruebas de base (153 casos) y sincronización real.
+
 ## 2026-09-28 · Correo con Resend, sin Lovable, facturas con trazabilidad, escrituras acotadas hacia Odoo
 
 Decisiones del dueño: los documentos de entrega de Odoo salen tal cual y se asignan a un repartidor; lo único que GUDS escribe
