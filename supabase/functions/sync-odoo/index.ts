@@ -8,12 +8,15 @@
 // - ?simular=1 lee todo y calcula sin escribir (para probar credenciales y tiempos).
 // - ?enviar=<orden_id> crea en Odoo (cotización en borrador) un pedido APROBADO en GUDS (Fase 9b). Lo dispara
 //   aprobar_pedido() por pg_net. Cada sincronización reintenta los aprobados que no llegaron a enviarse.
+// - ?escritura=<id> procesa una fila de odoo_escrituras (estado de entregas, contacto y direcciones de clientes; 19u).
+//   La disparan las funciones que encolan por pg_net; cada sincronización reintenta las pendientes o con error.
 //
 // Secretos: ODOO_URL, ODOO_DB, ODOO_USER, ODOO_API_KEY, SYNC_ODOO_SECRET (+ SUPABASE_DB_URL, que ya trae la plataforma).
 import postgres from "npm:postgres@3.4.5";
 import { crearClienteOdoo } from "../_shared/odoo-sync/odoo.js";
 import { importarOdoo } from "../_shared/odoo-sync/importar.js";
 import { enviarPedido } from "../_shared/odoo-sync/enviar.js";
+import { procesarEscritura } from "../_shared/odoo-sync/escrituras.js";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -72,9 +75,17 @@ async function enviarAprobado(ordenId: string) {
   try { await enviarUno(sql, ordenId); } finally { await cerrar(); }
 }
 
+async function escribirUna(id: string) {
+  const { sql, cerrar } = crearSql();
+  try {
+    await procesarEscritura({ odoo: nuevoOdoo(), sql, id, log: (m: string) => console.log("sync-odoo escritura:", m) });
+  } finally { await cerrar(); }
+}
+
 async function sincronizar(simular: boolean) {
   const { sql, cerrar } = crearSql();
   const t0 = Date.now();
+  let trazaId: string | null = null;
   try {
     const enCurso = await sql(`select count(*)::int n from sync_corridas where estado = 'en_curso' and iniciado_en > now() - interval '10 minutes'`);
     if (!simular && enCurso[0].n > 0) {
@@ -85,8 +96,8 @@ async function sincronizar(simular: boolean) {
     await sql(`delete from sync_corridas where (modo in ('traza', 'simulacion') and iniciado_en < now() - interval '2 days')
       or iniciado_en < now() - interval '60 days'`);
     // Traza de progreso (etapa, segundos, memoria) para ver hasta dónde llega si la plataforma corta la función
-    const [{ id: trazaId }] = await sql(`insert into sync_corridas (modo, origen, estado, resumen) values ('traza', 'edge-cron', 'en_curso',
-      jsonb_build_object('simular', ${simular}, 'etapas', '[]'::jsonb)) returning id`);
+    [{ id: trazaId }] = await sql(`insert into sync_corridas (modo, origen, estado, resumen) values ('traza', 'edge-cron', 'en_curso',
+      jsonb_build_object('simular', ${simular}, 'etapas', '[]'::jsonb)) returning id`) as { id: string }[];
     let etapas = 0;
     const traza = (etapa: string) => {
       etapas++;
@@ -100,6 +111,15 @@ async function sincronizar(simular: boolean) {
       const pendientes = await sql(`select id from ordenes where aprobacion = 'aprobada' and aprobado_por is not null and odoo_id is null and odoo_envio_error is null
         and estado <> 'cancelado' and aprobado_at < now() - interval '2 minutes' order by aprobado_at limit 10`);
       for (const p of pendientes) { await enviarUno(sql, String(p.id), odoo); await traza(`reintento envío ${p.id}`); }
+      // Escrituras hacia Odoo que no se completaron (máximo 5 intentos)
+      const escrituras = await sql(`select id from odoo_escrituras where (estado = 'pendiente' or (estado = 'error' and intentos < 5)
+        or (estado = 'procesando' and procesado_at is null and created_at < now() - interval '15 minutes'))
+        and created_at < now() - interval '2 minutes' order by created_at limit 20`);
+      for (const e of escrituras) {
+        await sql(`update odoo_escrituras set estado = 'pendiente' where id = '${e.id}' and estado = 'procesando'`);
+        await procesarEscritura({ odoo, sql, id: String(e.id), log: (m: string) => console.log("sync-odoo escritura:", m) });
+        await traza(`reintento escritura ${e.id}`);
+      }
     }
     const lineas: string[] = [];
     const resumen = await importarOdoo({
@@ -118,6 +138,8 @@ async function sincronizar(simular: boolean) {
   } catch (e) {
     const msg = String((e as Error).message).replace(/'/g, "''");
     console.error("sync-odoo ERROR:", msg);
+    // La traza no queda "en curso": si no, bloquea las corridas siguientes durante 10 minutos
+    if (trazaId) await sql(`update sync_corridas set estado = 'error', terminado_en = now() where id = '${trazaId}'`).catch(() => {});
     // Si falló antes de que el importador abriera su corrida (credenciales, red), se registra igual
     await sql(`insert into sync_corridas (modo, origen, estado, terminado_en, error, resumen)
       select '${simular ? "simulacion" : "completo"}', 'edge-cron', 'error', now(), '${msg}', jsonb_build_object('segundos_totales', ${Math.round((Date.now() - t0) / 1000)})
@@ -153,6 +175,12 @@ Deno.serve(async (req) => {
     if (!/^[0-9a-f-]{36}$/i.test(enviar)) return new Response("enviar: id inválido", { status: 400 });
     EdgeRuntime.waitUntil(enviarAprobado(enviar));
     return Response.json({ ok: true, enviar, mensaje: "Enviando el pedido a Odoo" }, { status: 202 });
+  }
+  const escritura = url.searchParams.get("escritura");
+  if (escritura) {
+    if (!/^[0-9a-f-]{36}$/i.test(escritura)) return new Response("escritura: id inválido", { status: 400 });
+    EdgeRuntime.waitUntil(escribirUna(escritura));
+    return Response.json({ ok: true, escritura, mensaje: "Procesando la escritura en Odoo" }, { status: 202 });
   }
   const simular = url.searchParams.get("simular") === "1";
   EdgeRuntime.waitUntil(sincronizar(simular));

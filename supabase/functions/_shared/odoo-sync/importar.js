@@ -305,6 +305,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           rif: txt(p.rif) || txt(p.vat) || txt(p.cedula) || 'N/D', cedula: txt(p.cedula),
           email: txt(p.email, 255), telefono: txt(p.phone), celular: txt(p.mobile),
           direccion: [txt(p.street), txt(p.street2)].filter(Boolean).join(', ') || null,
+          calle: txt(p.street), complemento: txt(p.street2),
           ciudad: txt(p.city, 100), estado: m2oNombre(p.state_id),
           latitud: p.partner_latitude || null, longitud: p.partner_longitude || null,
           es_empresa: !!p.is_company, tipo_negocio: p.is_company ? 'Empresa' : 'Persona Natural',
@@ -608,19 +609,19 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
 
       for (const lote of lotes(clientes, 500)) {
         await escribir(`
-          insert into clientes (odoo_id, empresa_id, codigo, nombre_negocio, rif, cedula, email, telefono, celular, direccion, ciudad,
+          insert into clientes (odoo_id, empresa_id, codigo, nombre_negocio, rif, cedula, email, telefono, celular, direccion, calle, complemento, ciudad,
             estado, latitud, longitud, es_empresa, tipo_negocio, tipo_residencia, vendedor_odoo, vendedor_asignado_id, condicion_pago,
             dias_credito, limite_credito, licencia_actividad, sitio_web, notas, fecha_registro_odoo, activo, contribuyente_especial, odoo_sync_at)
-          select x.odoo_id, x.empresa_id, x.codigo, x.nombre_negocio, x.rif, x.cedula, x.email, x.telefono, x.celular, x.direccion, x.ciudad,
+          select x.odoo_id, x.empresa_id, x.codigo, x.nombre_negocio, x.rif, x.cedula, x.email, x.telefono, x.celular, x.direccion, x.calle, x.complemento, x.ciudad,
             x.estado, x.latitud, x.longitud, x.es_empresa, x.tipo_negocio, x.tipo_residencia, x.vendedor_odoo, x.vendedor_id, x.condicion_pago,
             x.dias_credito, x.limite_credito, x.licencia_actividad, x.sitio_web, x.notas, x.fecha_registro_odoo, x.activo, false, '${ts}'
           from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, empresa_id uuid, codigo text, nombre_negocio text, rif text, cedula text,
-            email text, telefono text, celular text, direccion text, ciudad text, estado text, latitud numeric, longitud numeric, es_empresa boolean,
+            email text, telefono text, celular text, direccion text, calle text, complemento text, ciudad text, estado text, latitud numeric, longitud numeric, es_empresa boolean,
             tipo_negocio text, tipo_residencia text, vendedor_odoo text, vendedor_id uuid, condicion_pago text, dias_credito int, limite_credito numeric,
             licencia_actividad text, sitio_web text, notas text, fecha_registro_odoo timestamptz, activo boolean)
           on conflict (odoo_id) do update set empresa_id = excluded.empresa_id, nombre_negocio = excluded.nombre_negocio, rif = excluded.rif,
             cedula = excluded.cedula, email = excluded.email, telefono = excluded.telefono, celular = excluded.celular,
-            direccion = excluded.direccion, ciudad = excluded.ciudad, estado = excluded.estado, latitud = excluded.latitud,
+            direccion = excluded.direccion, calle = excluded.calle, complemento = excluded.complemento, ciudad = excluded.ciudad, estado = excluded.estado, latitud = excluded.latitud,
             longitud = excluded.longitud, es_empresa = excluded.es_empresa, tipo_negocio = excluded.tipo_negocio,
             tipo_residencia = excluded.tipo_residencia, vendedor_odoo = excluded.vendedor_odoo,
             vendedor_asignado_id = coalesce(excluded.vendedor_asignado_id, clientes.vendedor_asignado_id),
@@ -629,11 +630,11 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
             licencia_actividad = excluded.licencia_actividad, sitio_web = excluded.sitio_web, notas = excluded.notas,
             fecha_registro_odoo = excluded.fecha_registro_odoo, activo = excluded.activo, odoo_sync_at = excluded.odoo_sync_at, updated_at = now()
           where (clientes.empresa_id, clientes.nombre_negocio, clientes.rif, clientes.cedula, clientes.email, clientes.telefono, clientes.celular,
-            clientes.direccion, clientes.ciudad, clientes.estado, clientes.latitud, clientes.longitud, clientes.es_empresa, clientes.tipo_residencia,
+            clientes.direccion, clientes.calle, clientes.complemento, clientes.ciudad, clientes.estado, clientes.latitud, clientes.longitud, clientes.es_empresa, clientes.tipo_residencia,
             clientes.vendedor_odoo, clientes.vendedor_asignado_id, clientes.condicion_pago, clientes.dias_credito, clientes.limite_credito,
             clientes.licencia_actividad, clientes.sitio_web, clientes.notas, clientes.activo)
           is distinct from (excluded.empresa_id, excluded.nombre_negocio, excluded.rif, excluded.cedula, excluded.email, excluded.telefono,
-            excluded.celular, excluded.direccion, excluded.ciudad, excluded.estado, excluded.latitud, excluded.longitud, excluded.es_empresa,
+            excluded.celular, excluded.direccion, excluded.calle, excluded.complemento, excluded.ciudad, excluded.estado, excluded.latitud, excluded.longitud, excluded.es_empresa,
             excluded.tipo_residencia, excluded.vendedor_odoo, coalesce(excluded.vendedor_asignado_id, clientes.vendedor_asignado_id),
             excluded.condicion_pago, excluded.dias_credito, case when clientes.limite_credito_pendiente then clientes.limite_credito else excluded.limite_credito end,
             excluded.licencia_actividad, excluded.sitio_web,
@@ -961,23 +962,24 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       // Direcciones de entrega (la empresa es la del cliente)
       const filasDir = direcciones.map((a) => ({
         odoo_id: a.id, cliente_odoo_id: m2oId(a.parent_id), nombre: txt(a.name),
-        direccion: [txt(a.street), txt(a.street2)].filter(Boolean).join(', ') || null, ciudad: txt(a.city), estado: m2oNombre(a.state_id),
-        telefono: txt(a.phone) || txt(a.mobile), activo: !!a.active,
+        direccion: [txt(a.street), txt(a.street2)].filter(Boolean).join(', ') || null, calle: txt(a.street), complemento: txt(a.street2),
+        ciudad: txt(a.city), estado: m2oNombre(a.state_id), telefono: txt(a.phone) || txt(a.mobile), activo: !!a.active,
       }));
       for (const lote of lotes(filasDir, 500)) {
         await escribir(`
-          insert into cliente_direcciones (odoo_id, cliente_id, empresa_id, nombre, direccion, ciudad, estado, telefono, activo, odoo_sync_at)
-          select x.odoo_id, c.id, c.empresa_id, x.nombre, x.direccion, x.ciudad, x.estado, x.telefono, x.activo, '${ts}'
-          from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, cliente_odoo_id int, nombre text, direccion text, ciudad text,
-            estado text, telefono text, activo boolean)
+          insert into cliente_direcciones (odoo_id, cliente_id, empresa_id, nombre, direccion, calle, complemento, ciudad, estado, telefono, activo, odoo_sync_at)
+          select x.odoo_id, c.id, c.empresa_id, x.nombre, x.direccion, x.calle, x.complemento, x.ciudad, x.estado, x.telefono, x.activo, '${ts}'
+          from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, cliente_odoo_id int, nombre text, direccion text, calle text, complemento text,
+            ciudad text, estado text, telefono text, activo boolean)
           join clientes c on c.odoo_id = x.cliente_odoo_id
           on conflict (odoo_id) do update set cliente_id = excluded.cliente_id, empresa_id = excluded.empresa_id, nombre = excluded.nombre,
-            direccion = excluded.direccion, ciudad = excluded.ciudad, estado = excluded.estado, telefono = excluded.telefono,
-            activo = excluded.activo, odoo_sync_at = excluded.odoo_sync_at, updated_at = now()
+            direccion = excluded.direccion, calle = excluded.calle, complemento = excluded.complemento, ciudad = excluded.ciudad,
+            estado = excluded.estado, telefono = excluded.telefono, activo = excluded.activo, odoo_sync_at = excluded.odoo_sync_at, updated_at = now()
           where (cliente_direcciones.cliente_id, cliente_direcciones.empresa_id, cliente_direcciones.nombre, cliente_direcciones.direccion,
-            cliente_direcciones.ciudad, cliente_direcciones.estado, cliente_direcciones.telefono, cliente_direcciones.activo)
-          is distinct from (excluded.cliente_id, excluded.empresa_id, excluded.nombre, excluded.direccion, excluded.ciudad, excluded.estado,
-            excluded.telefono, excluded.activo)`);
+            cliente_direcciones.calle, cliente_direcciones.complemento, cliente_direcciones.ciudad, cliente_direcciones.estado,
+            cliente_direcciones.telefono, cliente_direcciones.activo)
+          is distinct from (excluded.cliente_id, excluded.empresa_id, excluded.nombre, excluded.direccion, excluded.calle, excluded.complemento,
+            excluded.ciudad, excluded.estado, excluded.telefono, excluded.activo)`);
       }
 
       // ── 6. Derivados ────────────────────────────────────────────────────

@@ -10,6 +10,47 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-28 · Correo con Resend, sin Lovable, facturas con trazabilidad, escrituras acotadas hacia Odoo
+
+Decisiones del dueño: los documentos de entrega de Odoo salen tal cual y se asignan a un repartidor; lo único que GUDS escribe
+en Odoo de una entrega es su estado (solo las que tienen repartidor), con la API key actual; en el cliente se editan
+direcciones y teléfonos y se actualizan en Odoo; las facturas no se eliminan, solo se anulan, con trazabilidad; nada de Lovable;
+si el cliente pagó y cambia el pedido, se recalcula el pago; cupones de porcentaje o monto exacto; badge para asignar vendedor.
+
+- **Correo**: SMTP de Resend en Supabase Auth (remitente `no-responder@portal.guds-supply.com`, 60 por hora). Probado: envío por
+  la API de Resend y correo de recuperación por Supabase a la dirección de pruebas de Resend.
+- **Lovable fuera**: `favicon.ico` era el corazón de Lovable (el navegador lo pide al cargar); imagen para compartir y metadatos
+  de GUDS; se quitaron el plugin `lovable-tagger` y el placeholder.
+- **Cliente de Odoo** (`odoo.js`): además de crear pedidos, ahora `escribir` (solo res.partner: dirección y teléfonos; y
+  stock.move/stock.move.line: cantidades entregadas), `accion` (solo `stock.picking.button_validate`) y crear direcciones hijas.
+  Sigue sin existir borrar.
+- **Cola de escrituras hacia Odoo** (`20260928_fase19u_cola_escrituras_odoo.sql`, `escrituras.js`): cada escritura queda
+  registrada en `odoo_escrituras` (quién, qué, resultado), la procesa la función edge (`?escritura=`) y cada sincronización
+  reintenta. Modo por tipo en configuración: `odoo_escritura_entregas` y `odoo_escritura_clientes` ('simular' / 'activo').
+- **Facturas** (`…19x_facturas_cupones_pagos_vendedor.sql`): no se eliminan (ni por la API ni por la sincronización), se
+  anulan con motivo, fecha y quién (`anular_factura()`, solo las creadas en GUDS; las de Odoo se anulan en Odoo) y todo alta,
+  cambio o anulación queda en `facturas_historial`, también lo que llega de Odoo. La lista de Facturas mostraba solo las
+  contabilizadas: ahora incluye las 87 anuladas (filtro "Anuladas") y el detalle muestra el historial.
+- **Cupones**: porcentaje (1–100 %, con tope opcional) o monto exacto; el pedido guarda el cupón y al editarlo se recalcula
+  según su tipo.
+- **Pedido editado después de pagar**: se compara con lo pagado (verificado y por verificar) y se indica cuánto falta o cuánto
+  queda a favor, en el portal, el vendedor, el admin y en el aviso al cliente (`resumen_pago_orden()`).
+- **Órdenes**: insignia "Sin vendedor" que abre la asignación (`asignar_vendedor_orden()`, solo vendedores de la empresa).
+- **Cuentas por empresa**: un pago solo se declara a una cuenta de la misma empresa del cliente (también en el checkout).
+- **Delivery con los documentos de Odoo** (agente, `…19v_delivery_documentos_odoo.sql`, `escribir-entrega.js`): la cola del
+  admin son las órdenes de entrega y las reposiciones a consignación de Odoo tal cual (número, origen, cliente, dirección y
+  teléfono, fecha, estado, líneas con lote); se asignan y reasignan a un repartidor (solo las "Listas"). App del repartidor con
+  llamar, Google Maps/Waze y los 4 cierres con su evidencia. Solo entregado completo / incompleto encolan la escritura a Odoo
+  (cantidades por lote + `button_validate`; pendiente según el motivo; sin apagar el SMS que Odoo manda al cliente). Si Odoo valida
+  o cancela un documento asignado, GUDS lo cierra con la insignia "Actualizado desde Odoo". **`odoo_escritura_entregas` sigue en
+  'simular'**: planes verificados contra documentos reales (solo lectura); falta el piloto acordado con el dueño.
+- **Clientes → Odoo** (agente, `…19w_editar_clientes_odoo.sql`, `escribir-cliente.js`): en la ficha del cliente se editan
+  teléfono, celular, dirección y direcciones de entrega (y se crean nuevas); se escriben en Odoo y la ficha se actualiza con lo que
+  quedó en Odoo; pestaña "Cambios a Odoo" con el historial. Una escritura real sin cambio de datos confirmó el camino y quedó
+  **activo**. Calle y complemento se guardan por separado (19y) para no juntarlos en Odoo al editar.
+- Verificado: pruebas de base (147 casos), sincronización real, Playwright en facturas, cupones, asignación de vendedor, delivery
+  (admin y repartidor) y edición de clientes.
+
 ## 2026-09-28 · Decisiones del plan de portales, dominio nuevo, cuentas de pago, seguridad de funciones y reversos
 
 Decisiones del dueño registradas en `docs/PLAN-PORTALES-Y-FLUJOS.md` §9 (impuestos y listas de precios desde Odoo, sin envío

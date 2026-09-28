@@ -27,7 +27,16 @@ export async function leerInventario(odoo, cid, deEmpresa) {
     ['name', 'picking_type_id', 'picking_type_code', 'partner_id', 'origin', 'state', 'scheduled_date', 'date_deadline', 'date_done',
       'location_id', 'location_dest_id', 'sale_id', 'purchase_id', 'user_id', 'carrier_id', 'note', 'backorder_id', 'return_id', 'write_date']);
   d.movimientos = await L('stock.move', [['company_id', '=', cid], ['picking_id', '!=', false]],
-    ['picking_id', 'product_id', 'description_picking', 'product_uom_qty', 'quantity', 'state', 'write_date']);
+    ['picking_id', 'product_id', 'description_picking', 'product_uom_qty', 'quantity', 'state', 'product_uom', 'picked', 'write_date']);
+  // Dirección y teléfono de entrega de cada documento de salida: los de su contacto (la sucursal o el cliente) y, si el
+  // contacto no los tiene, los de su empresa (commercial_partner_id). Las reposiciones a consignación usan el cliente del
+  // almacén destino (ver escribirInventario).
+  const CAMPOS_CONTACTO = ['street', 'street2', 'city', 'state_id', 'phone', 'mobile', 'commercial_partner_id'];
+  const idsContacto = [...new Set(d.transferencias.filter((t) => t.picking_type_code === 'outgoing').map((t) => m2oId(t.partner_id)).filter(Boolean))];
+  d.contactos = idsContacto.length ? await L('res.partner', [['id', 'in', idsContacto]], CAMPOS_CONTACTO) : [];
+  const leidos = new Set(idsContacto);
+  const comerciales = [...new Set(d.contactos.map((p) => m2oId(p.commercial_partner_id)).filter((id) => id && !leidos.has(id)))];
+  if (comerciales.length) d.contactos.push(...(await L('res.partner', [['id', 'in', comerciales]], CAMPOS_CONTACTO)));
   d.lineas = await L('stock.move.line', [['company_id', '=', cid], ['picking_id', '!=', false], '|', ['lot_id', '!=', false], ['lot_name', '!=', false]],
     ['move_id', 'picking_id', 'product_id', 'lot_id', 'lot_name', 'quantity', 'date', 'write_date']);
   // Ajustes de inventario: movimientos hechos sin transferencia (conteos y correcciones de cantidad)
@@ -65,6 +74,14 @@ export function clientesPorEntregas(inv, almacenDe, clienteDe) {
   return res;
 }
 
+// Entregas abiertas en GUDS (asignadas o en camino) cuyo documento ya se validó o se canceló directamente en Odoo, o dejó de
+// existir: se cierran con origen "odoo" (insignia "Actualizado desde Odoo") y se avisa al repartidor. La lógica vive en la
+// base (cerrar_entregas_desde_odoo, fase 19v) para probarla con la suite; es idempotente y solo toca entregas abiertas.
+export async function cerrarEntregasDesdeOdoo(sql, E) {
+  const [{ n }] = await sql(`select public.cerrar_entregas_desde_odoo('${E}') n`);
+  return Number(n) || 0;
+}
+
 // ── Transformación + escritura ─────────────────────────────────────────
 export async function escribirInventario({ inv, quants, E, sql, escribir, ts, aplicar, plantillaDe, almacenDe, clienteDe, provDe, empDe, log }) {
   const tmpl = (pid) => plantillaDe.get(pid) ?? null;
@@ -84,6 +101,28 @@ export async function escribirInventario({ inv, quants, E, sql, escribir, ts, ap
     fecha_ingreso: fechaOdoo(q.in_date),
   })).filter((q) => q.producto_tmpl && (Math.abs(q.cantidad) > 0.0001 || Math.abs(q.reservado) > 0.0001));
 
+  const contactoDe = new Map((inv.contactos || []).map((p) => [p.id, p]));
+  const limpio = (v) => { const t = txt(v); return t ? t.replace(/_x000D_/g, ' ').replace(/\s+/g, ' ').trim() || null : null; };
+  const calle = (p) => [limpio(p.street), limpio(p.street2)].filter(Boolean).join(', ') || null;
+  const telefono = (p) => [txt(p.phone), txt(p.mobile)].find((t) => t && t.replace(/\D/g, '').length >= 7) || null;
+  // Reposiciones a consignación (traslado interno hacia un almacén de consignación): se entregan en el cliente ligado al
+  // almacén destino (almacenes.cliente_id: vínculo por nombre, por entregas o manual). Su contacto en Odoo es un empleado.
+  const clienteConsig = new Map((await sql(`select a.odoo_id wh, c.direccion, c.ciudad, c.estado, c.telefono, c.celular
+    from almacenes a join clientes c on c.id = a.cliente_id where a.tipo = 'consignacion' and a.odoo_id is not null`)).map((r) => [r.wh, r]));
+  const direccionEntrega = (t) => {
+    const cc = t.picking_type_code === 'internal' ? clienteConsig.get(almacenDe.get(m2oId(t.location_dest_id))) : null;
+    if (cc) {
+      return { direccion_entrega: limpio(cc.direccion), ciudad_entrega: limpio(cc.ciudad)?.replace(/"/g, '').trim() || null,
+        region_entrega: txt(cc.estado), telefono_entrega: telefono({ phone: cc.telefono, mobile: cc.celular }) };
+    }
+    const p = t.picking_type_code === 'outgoing' ? contactoDe.get(m2oId(t.partner_id)) : null;
+    if (!p) return { direccion_entrega: null, ciudad_entrega: null, region_entrega: null, telefono_entrega: null };
+    const c = contactoDe.get(m2oId(p.commercial_partner_id)) || p;
+    const src = calle(p) ? p : c;
+    return { direccion_entrega: calle(src), ciudad_entrega: limpio(src.city)?.replace(/"/g, '').trim() || null,
+      region_entrega: txt(m2oNombre(src.state_id)), telefono_entrega: telefono(p) || telefono(c) };
+  };
+
   const filasTransf = inv.transferencias.map((t) => {
     const partner = m2oId(t.partner_id);
     return {
@@ -96,13 +135,14 @@ export async function escribirInventario({ inv, quants, E, sql, escribir, ts, ap
       fecha_programada: fechaOdoo(t.scheduled_date), fecha_limite: fechaOdoo(t.date_deadline), fecha_realizada: fechaOdoo(t.date_done),
       responsable: txt(m2oNombre(t.user_id)), transportista: txt(m2oNombre(t.carrier_id)),
       devolucion_de_odoo_id: m2oId(t.return_id), pendiente_de_odoo_id: m2oId(t.backorder_id), notas: stripHtml(t.note),
+      partner_odoo_id: partner, ...direccionEntrega(t),
     };
   });
 
   const filasItems = inv.movimientos.map((m) => ({
     odoo_id: m.id, empresa_id: E, transferencia_odoo_id: m2oId(m.picking_id), producto_tmpl: tmpl(m2oId(m.product_id)),
     nombre_producto: txt(m2oNombre(m.product_id)), cantidad_demandada: round2(m.product_uom_qty), cantidad_hecha: round2(m.quantity),
-    estado: ESTADO[m.state] || m.state,
+    estado: ESTADO[m.state] || m.state, unidad: txt(m2oNombre(m.product_uom)), preparado: !!m.picked,
   }));
 
   const filasLineas = inv.lineas.map((l) => ({
@@ -166,33 +206,39 @@ export async function escribirInventario({ inv, quants, E, sql, escribir, ts, ap
   await upsert(filasTransf, 500, (j) => `
     insert into transferencias (odoo_id, empresa_id, numero, tipo, tipo_operacion, estado, origen, contacto, cliente_id, proveedor_id,
       orden_id, orden_compra_id, almacen_origen_id, almacen_destino_id, ubicacion_origen, ubicacion_destino, fecha_programada,
-      fecha_limite, fecha_realizada, responsable, transportista, notas, odoo_sync_at)
+      fecha_limite, fecha_realizada, responsable, transportista, notas, partner_odoo_id, direccion_entrega, ciudad_entrega,
+      region_entrega, telefono_entrega, odoo_sync_at)
     select x.odoo_id, x.empresa_id, x.numero, x.tipo, x.tipo_operacion, x.estado, x.origen, x.contacto,
       (select c.id from clientes c where c.odoo_id = x.cliente_odoo_id), (select pv.id from proveedores pv where pv.odoo_id = x.proveedor_odoo_id),
       (select o.id from ordenes o where o.odoo_id = x.orden_odoo_id), (select oc.id from ordenes_compra oc where oc.odoo_id = x.orden_compra_odoo_id),
       (select a.id from almacenes a where a.odoo_id = x.wh_origen), (select a.id from almacenes a where a.odoo_id = x.wh_destino),
       x.ubicacion_origen, x.ubicacion_destino, x.fecha_programada, x.fecha_limite, x.fecha_realizada, x.responsable, x.transportista,
-      x.notas, '${ts}'
+      x.notas, x.partner_odoo_id, x.direccion_entrega, x.ciudad_entrega, x.region_entrega, x.telefono_entrega, '${ts}'
     from jsonb_to_recordset(${j}) as x(odoo_id int, empresa_id uuid, numero text, tipo text, tipo_operacion text, estado text, origen text,
       contacto text, cliente_odoo_id int, proveedor_odoo_id int, orden_odoo_id int, orden_compra_odoo_id int, wh_origen int, wh_destino int,
       ubicacion_origen text, ubicacion_destino text, fecha_programada timestamptz, fecha_limite timestamptz, fecha_realizada timestamptz,
-      responsable text, transportista text, notas text)
+      responsable text, transportista text, notas text, partner_odoo_id int, direccion_entrega text, ciudad_entrega text,
+      region_entrega text, telefono_entrega text)
     on conflict (odoo_id) do update set numero = excluded.numero, tipo = excluded.tipo, tipo_operacion = excluded.tipo_operacion,
       estado = excluded.estado, origen = excluded.origen, contacto = excluded.contacto, cliente_id = excluded.cliente_id,
       proveedor_id = excluded.proveedor_id, orden_id = excluded.orden_id, orden_compra_id = excluded.orden_compra_id,
       almacen_origen_id = excluded.almacen_origen_id, almacen_destino_id = excluded.almacen_destino_id,
       ubicacion_origen = excluded.ubicacion_origen, ubicacion_destino = excluded.ubicacion_destino,
       fecha_programada = excluded.fecha_programada, fecha_limite = excluded.fecha_limite, fecha_realizada = excluded.fecha_realizada,
-      responsable = excluded.responsable, transportista = excluded.transportista, notas = excluded.notas, odoo_sync_at = excluded.odoo_sync_at
+      responsable = excluded.responsable, transportista = excluded.transportista, notas = excluded.notas,
+      partner_odoo_id = excluded.partner_odoo_id, direccion_entrega = excluded.direccion_entrega, ciudad_entrega = excluded.ciudad_entrega,
+      region_entrega = excluded.region_entrega, telefono_entrega = excluded.telefono_entrega, odoo_sync_at = excluded.odoo_sync_at
     where (transferencias.numero, transferencias.tipo, transferencias.tipo_operacion, transferencias.estado, transferencias.origen,
       transferencias.contacto, transferencias.cliente_id, transferencias.proveedor_id, transferencias.orden_id, transferencias.orden_compra_id,
       transferencias.almacen_origen_id, transferencias.almacen_destino_id, transferencias.ubicacion_origen, transferencias.ubicacion_destino,
       transferencias.fecha_programada, transferencias.fecha_limite, transferencias.fecha_realizada, transferencias.responsable,
-      transferencias.transportista, transferencias.notas)
+      transferencias.transportista, transferencias.notas, transferencias.partner_odoo_id, transferencias.direccion_entrega,
+      transferencias.ciudad_entrega, transferencias.region_entrega, transferencias.telefono_entrega)
     is distinct from (excluded.numero, excluded.tipo, excluded.tipo_operacion, excluded.estado, excluded.origen, excluded.contacto,
       excluded.cliente_id, excluded.proveedor_id, excluded.orden_id, excluded.orden_compra_id, excluded.almacen_origen_id,
       excluded.almacen_destino_id, excluded.ubicacion_origen, excluded.ubicacion_destino, excluded.fecha_programada, excluded.fecha_limite,
-      excluded.fecha_realizada, excluded.responsable, excluded.transportista, excluded.notas)`);
+      excluded.fecha_realizada, excluded.responsable, excluded.transportista, excluded.notas, excluded.partner_odoo_id,
+      excluded.direccion_entrega, excluded.ciudad_entrega, excluded.region_entrega, excluded.telefono_entrega)`);
 
   // Devoluciones y pendientes (referencias entre transferencias, una vez que todas existen)
   const refs = filasTransf.filter((t) => t.devolucion_de_odoo_id || t.pendiente_de_odoo_id)
@@ -205,18 +251,21 @@ export async function escribirInventario({ inv, quants, E, sql, escribir, ts, ap
       ((select d.id from transferencias d where d.odoo_id = x.devolucion_de_odoo_id), (select b.id from transferencias b where b.odoo_id = x.pendiente_de_odoo_id))`);
 
   await upsert(filasItems, 1000, (j) => `
-    insert into transferencia_items (odoo_id, empresa_id, transferencia_id, producto_id, nombre_producto, cantidad_demandada, cantidad_hecha, estado, odoo_sync_at)
-    select x.odoo_id, x.empresa_id, t.id, ${prod('producto_tmpl')}, x.nombre_producto, x.cantidad_demandada, x.cantidad_hecha, x.estado, '${ts}'
+    insert into transferencia_items (odoo_id, empresa_id, transferencia_id, producto_id, nombre_producto, cantidad_demandada, cantidad_hecha, estado,
+      unidad, preparado, odoo_sync_at)
+    select x.odoo_id, x.empresa_id, t.id, ${prod('producto_tmpl')}, x.nombre_producto, x.cantidad_demandada, x.cantidad_hecha, x.estado,
+      x.unidad, x.preparado, '${ts}'
     from jsonb_to_recordset(${j}) as x(odoo_id int, empresa_id uuid, transferencia_odoo_id int, producto_tmpl int, nombre_producto text,
-      cantidad_demandada numeric, cantidad_hecha numeric, estado text)
+      cantidad_demandada numeric, cantidad_hecha numeric, estado text, unidad text, preparado boolean)
     join transferencias t on t.odoo_id = x.transferencia_odoo_id
     on conflict (odoo_id) do update set transferencia_id = excluded.transferencia_id, producto_id = excluded.producto_id,
       nombre_producto = excluded.nombre_producto, cantidad_demandada = excluded.cantidad_demandada, cantidad_hecha = excluded.cantidad_hecha,
-      estado = excluded.estado, odoo_sync_at = excluded.odoo_sync_at
+      estado = excluded.estado, unidad = excluded.unidad, preparado = excluded.preparado, odoo_sync_at = excluded.odoo_sync_at
     where (transferencia_items.transferencia_id, transferencia_items.producto_id, transferencia_items.nombre_producto,
-      transferencia_items.cantidad_demandada, transferencia_items.cantidad_hecha, transferencia_items.estado)
+      transferencia_items.cantidad_demandada, transferencia_items.cantidad_hecha, transferencia_items.estado, transferencia_items.unidad,
+      transferencia_items.preparado)
     is distinct from (excluded.transferencia_id, excluded.producto_id, excluded.nombre_producto, excluded.cantidad_demandada,
-      excluded.cantidad_hecha, excluded.estado)`);
+      excluded.cantidad_hecha, excluded.estado, excluded.unidad, excluded.preparado)`);
 
   await upsert(filasLineas, 1000, (j) => `
     insert into transferencia_lotes (odoo_id, empresa_id, transferencia_id, item_id, producto_id, lote_id, lote_nombre, cantidad, fecha, odoo_sync_at)
@@ -255,6 +304,8 @@ export async function escribirInventario({ inv, quants, E, sql, escribir, ts, ap
   await limpiar('transferencia_items', filasItems.map((i) => i.odoo_id));
   await limpiar('transferencias', filasTransf.map((t) => t.odoo_id));
   await limpiar('inventario_lotes', filasQuants.map((q) => q.odoo_id));
+  resumen.entregas_cerradas_odoo = await cerrarEntregasDesdeOdoo(sql, E);
+  if (resumen.entregas_cerradas_odoo) log(`    ${resumen.entregas_cerradas_odoo} entregas cerradas porque el documento se validó o canceló en Odoo`);
   await limpiar('lotes', lotesUnicos.filter((l) => l.empresa_id).map((l) => l.odoo_id));
   const sinProducto = filasQuants.length - (await sql(`select count(*)::int n from inventario_lotes where empresa_id = '${E}'`))[0].n;
   if (sinProducto > 0) log(`    ${sinProducto} existencias por lote de productos que no están en GUDS (archivados en Odoo)`);

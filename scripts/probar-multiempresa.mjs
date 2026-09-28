@@ -382,6 +382,59 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
         como({ uid: otroVend, empresa: guds.id, previo: `${previoVend} perform set_config('guds.prueba_orden', ${idPend}::text, true);` },
           `select row_to_json(t)::text from public.editar_pedido_pendiente(current_setting('guds.prueba_orden')::uuid, ${items5}) t`));
     }
+
+    // ── Cupón, pago del pedido editado, vendedor y cuentas por empresa (19x) ──
+    const fijarId = `perform set_config('guds.prueba_orden', ${idPend}::text, true);`;
+    const cuponPct = `insert into cupones (id, codigo, tipo, valor, empresa_id) values ('00000000-0000-0000-0000-0000000c0010', 'PRUEBA-PCT', 'porcentaje', 10, '${guds.id}');
+      update ordenes set cupon_id = '00000000-0000-0000-0000-0000000c0010', descuento = 1 where id = current_setting('guds.prueba_orden')::uuid;`;
+    await caso('Editar pendiente: un cupón de porcentaje se recalcula sobre el subtotal nuevo', (r) => Math.abs(Number(r?.descuento) - Math.round(Number(r?.subtotal) * 10) / 100) < 0.011,
+      como({ uid: vendGuds, empresa: guds.id, previo: `${previoVend} ${fijarId} ${cuponPct} ${comoUsuario(vendGuds)} perform public.editar_pedido_pendiente(current_setting('guds.prueba_orden')::uuid, ${items5});` },
+        `select row_to_json(t)::text from (select subtotal, descuento from ordenes where id = current_setting('guds.prueba_orden')::uuid) t`));
+    await caso('Cupones: solo porcentaje (hasta 100) o monto exacto', 'cupones_tipo_valor',
+      como({ rol: 'postgres', empresa: guds.id }, `with x as (insert into cupones (codigo, tipo, valor, empresa_id) values ('PRUEBA-MAL', 'porcentaje', 150, '${guds.id}') returning 1) select count(*)::text from x`));
+    const pagoPrevio = (monto) => `insert into pagos (cliente_id, orden_id, monto, monto_moneda, moneda, metodo, estado, empresa_id) values ('${vend.cliente}', current_setting('guds.prueba_orden')::uuid, ${monto}, ${monto}, 'USD', 'transferencia', 'pendiente', '${guds.id}');`;
+    await caso('Editar pendiente: si ya pagó más que el total nuevo, queda a favor', (r) => Number(r?.a_favor) > 0 && Number(r?.falta) === 0,
+      como({ uid: vendGuds, empresa: guds.id, previo: `${previoVend} ${fijarId} ${pagoPrevio(1000)}` },
+        `select row_to_json(t)::text from public.editar_pedido_pendiente(current_setting('guds.prueba_orden')::uuid, ${items5}) t`));
+    await caso('Editar pendiente: si pagó menos que el total nuevo, indica cuánto falta', (r) => Number(r?.falta) > 0 && Number(r?.a_favor) === 0 && Number(r?.pagado) === 1,
+      como({ uid: vendGuds, empresa: guds.id, previo: `${previoVend} ${fijarId} ${pagoPrevio(1)}` },
+        `select row_to_json(t)::text from public.editar_pedido_pendiente(current_setting('guds.prueba_orden')::uuid, ${items5}) t`));
+    await caso('Pago del pedido: el vendedor ve lo pagado y lo que falta', (r) => Number(r?.por_verificar) === 1 && Number(r?.falta) > 0,
+      como({ uid: vendGuds, empresa: guds.id, previo: `${previoVend} ${fijarId} ${pagoPrevio(1)}` },
+        `select row_to_json(t)::text from public.resumen_pago_orden(current_setting('guds.prueba_orden')::uuid) t`));
+    await caso('Vendedor del pedido: un vendedor no puede asignar vendedores', 'No tienes permiso para asignar',
+      como({ uid: vendGuds, empresa: guds.id, previo: `${previoVend} ${fijarId}` },
+        `select public.asignar_vendedor_orden(current_setting('guds.prueba_orden')::uuid, (select id from usuarios where auth_id = '${vendGuds}'))::text`));
+    await caso('Vendedor del pedido: el admin lo asigna', (r) => r?.ok === true,
+      como({ empresa: guds.id, previo: `${previoVend} ${fijarId} ${comoUsuario(admin)}
+        perform public.asignar_vendedor_orden(current_setting('guds.prueba_orden')::uuid, (select id from usuarios where auth_id = '${vendGuds}'));` },
+        `select row_to_json(t)::text from (select vendedor_id = (select id from usuarios where auth_id = '${vendGuds}') ok from ordenes where id = current_setting('guds.prueba_orden')::uuid) t`));
+    const bancoQrt = (await sql(`select id from bancos where empresa_id = '${qrt.id}' and visible_portal limit 1`))[0]?.id;
+    if (bancoQrt) {
+      await caso('Pagos: no se declara a una cuenta de otra empresa', 'otra empresa',
+        como({ uid: vendGuds, empresa: guds.id }, `select public.registrar_pago('${vend.cliente}', null, '${bancoQrt}', 'transferencia', 10, 'USD', null, 'REF-PRUEBA', null)::text`));
+    }
+  }
+}
+
+// ── Facturas: no se eliminan, se anulan, con historial (19x) ──
+{
+  const fac = (await sql(`select id from facturas where empresa_id = '${guds.id}' and odoo_id is not null and estado = 'posted' limit 1`))[0]?.id;
+  if (fac) {
+    await caso('Facturas: el admin no puede eliminar una factura por la API', 'permission denied',
+      como({ empresa: guds.id }, `with x as (delete from facturas where id = '${fac}' returning 1) select count(*)::text from x`));
+    await caso('Facturas: nadie las elimina, ni la sincronización', 'no se eliminan',
+      como({ rol: 'postgres', empresa: guds.id }, `with x as (delete from facturas where id = '${fac}' returning 1) select count(*)::text from x`));
+    await caso('Facturas: cada cambio queda en el historial (también los que llegan de Odoo)', (r) => r?.n === 1 && r?.origen === 'odoo',
+      como({ rol: 'postgres', empresa: guds.id, previo: `update facturas set nro_control = coalesce(nro_control, '') || '-prueba' where id = '${fac}';` },
+        `select row_to_json(t)::text from (select count(*) n, max(origen) origen from facturas_historial where factura_id = '${fac}' and accion = 'modificada' and cambios ? 'nro_control') t`));
+    await caso('Facturas: una factura de Odoo se anula en Odoo, no en GUDS', 'viene de Odoo',
+      como({ empresa: guds.id }, `select public.anular_factura('${fac}', 'Prueba de anulación')::text`));
+  }
+  const conLineas = (await sql(`select fi.id from factura_items fi join facturas f on f.id = fi.factura_id where f.empresa_id = '${guds.id}' limit 1`))[0]?.id;
+  if (conLineas) {
+    await caso('Facturas: sus líneas no se eliminan por la API', 'permission denied',
+      como({ empresa: guds.id }, `with x as (delete from factura_items where id = '${conLineas}' returning 1) select count(*)::text from x`));
   }
 }
 
@@ -503,6 +556,151 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
   }
   await caso('Admin: ve las entregas del módulo delivery', (r) => r?.n >= 1,
     como({ empresa: guds.id, previo: entregaAjena }, `select row_to_json(t)::text from (select count(*) n from entregas) t`));
+}
+
+// ── Delivery sobre los documentos de entrega de Odoo (19v): asignar, ver lo suyo, cerrar, escritura en Odoo y sync ──
+{
+  const docs = await sql(`select t.id, t.odoo_id, t.numero from transferencias t where t.empresa_id = '${guds.id}' and t.tipo = 'entrega' and t.estado = 'lista'
+    and exists (select 1 from transferencia_items ti where ti.transferencia_id = t.id and ti.cantidad_hecha > 0)
+    and not exists (select 1 from entregas e where e.transferencia_odoo_id = t.odoo_id and e.estado in ('asignada', 'en_camino')) order by t.numero limit 2`);
+  const noLista = (await sql(`select id from transferencias where empresa_id = '${guds.id}' and tipo = 'entrega' and estado in ('en_espera', 'borrador') limit 1`))[0]?.id;
+  const repReal = (await sql(`select u.auth_id from usuarios u join usuario_empresas ue on ue.usuario_id = u.id and ue.empresa_id = '${guds.id}'
+    where u.role = 'delivery' and u.activo and u.auth_id is not null limit 1`))[0]?.auth_id;
+  if (docs.length === 2 && repReal) {
+    const [a, b] = docs;
+    const REP = '00000000-0000-0000-0000-00000000d19a';
+    // Sesión simulada dentro del bloque (las funciones security definer leen auth.uid() y la empresa del header)
+    const sesion = (uid) => `perform set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
+      perform set_config('request.headers', '{"x-empresa-id":"${guds.id}"}', true);`;
+    const repFalso = `insert into usuarios (id, email, nombre, apellido, role, rol_id, activo) select '${REP}', 'prueba.19v@guds.test', 'Prueba', 'Repartidor', 'delivery', r.id, true
+        from roles r where lower(r.nombre) = 'delivery' limit 1;
+      insert into usuario_empresas (usuario_id, empresa_id, por_defecto) values ('${REP}', '${guds.id}', true);`;
+    const asignarA = (rep) => `${sesion(admin)} perform public.asignar_entrega_documento('${a.id}', ${rep}, 'normal');`;
+    const idRepReal = `(select id from usuarios where auth_id = '${repReal}')`;
+    const evidencia = `insert into storage.objects (bucket_id, name) select 'evidencias-entrega', e.id || x.f from entregas e, (values ('/firma-19v.png'), ('/foto-19v.jpg')) x(f)
+      where e.transferencia_odoo_id = ${a.odoo_id} and e.estado = 'asignada';`;
+    const cerrarA = (resultado, datos) => `with e as (select id from entregas where transferencia_odoo_id = ${a.odoo_id} and estado in ('asignada', 'en_camino'))
+      select public.cerrar_entrega(e.id, '${resultado}', ${datos})::text from e`;
+
+    await caso('Delivery 19v: el admin asigna un documento "Listo" de Odoo a un repartidor', (r) => r?.estado === 'asignada' && r?.transferencia_odoo_id === a.odoo_id && r?.empresa_id === guds.id,
+      como({ empresa: guds.id, previo: `${repFalso} ${asignarA(`'${REP}'`)}` },
+        `select row_to_json(t)::text from (select estado, transferencia_odoo_id, empresa_id from entregas where transferencia_odoo_id = ${a.odoo_id} and estado = 'asignada') t`));
+    if (noLista) {
+      await caso('Delivery 19v: no se asigna un documento que no está "Listo" en Odoo', 'no está listo',
+        como({ empresa: guds.id, previo: repFalso }, `select public.asignar_entrega_documento('${noLista}', '${REP}', 'normal')::text`));
+    }
+    if (vendGuds) {
+      await caso('Delivery 19v: un vendedor no puede asignar documentos de entrega', 'Solo administración',
+        como({ uid: vendGuds, empresa: guds.id, previo: repFalso }, `select public.asignar_entrega_documento('${a.id}', '${REP}', 'normal')::text`));
+    }
+    await caso('Delivery 19v: el repartidor solo ve sus documentos (tabla y mis_entregas_reparto)', (r) => r?.mio === 1 && r?.ajeno === 0 && r?.ajenas_tabla === 0,
+      como({ uid: repReal, empresa: guds.id, previo: `${repFalso} ${asignarA(idRepReal)} perform public.asignar_entrega_documento('${b.id}', '${REP}', 'normal');` },
+        `select row_to_json(t)::text from (select
+          count(*) filter (where x->>'numero' = '${a.numero}' and x->>'empresa_id' = '${guds.id}') mio,
+          count(*) filter (where x->>'numero' = '${b.numero}' and x->>'empresa_id' = '${guds.id}') ajeno,
+          (select count(*) from entregas where repartidor_id is distinct from ${idRepReal}) ajenas_tabla
+          from jsonb_array_elements(public.mis_entregas_reparto()) x) t`));
+    await caso('Delivery 19v: cerrar "entregado completo" encola la escritura entrega_estado en Odoo', (r) => r?.estado === 'entregada' && !!r?.escritura_id,
+      como({ uid: repReal, empresa: guds.id, previo: `${asignarA(idRepReal)} ${evidencia}` },
+        cerrarA('completa', `jsonb_build_object('receptor', 'Prueba 19v', 'firma', e.id || '/firma-19v.png', 'foto', e.id || '/foto-19v.jpg')`)));
+    await caso('Delivery 19v: rechazar queda solo en GUDS (no encola escritura en Odoo)', (r) => r?.estado === 'rechazada' && r?.escritura_id === null,
+      como({ uid: repReal, empresa: guds.id, previo: `${asignarA(idRepReal)} ${evidencia}` },
+        cerrarA('rechazada', `jsonb_build_object('motivo', 'precio', 'foto', e.id || '/foto-19v.jpg')`)));
+    await caso('Delivery 19v: "entregado completo" sin firma ni foto se rechaza', 'firma',
+      como({ uid: repReal, empresa: guds.id, previo: asignarA(idRepReal) }, cerrarA('completa', `jsonb_build_object('receptor', 'Prueba 19v')`)));
+    await caso('Delivery 19v: reprogramar exige una fecha de hoy en adelante', 'anterior a hoy',
+      como({ uid: repReal, empresa: guds.id, previo: asignarA(idRepReal) }, cerrarA('reprogramada', `jsonb_build_object('motivo', 'cerrado', 'fecha', '2020-01-01')`)));
+    await caso('Delivery 19v: otro repartidor no puede cerrar la entrega', 'no está asignada a ti',
+      como({ uid: repReal, empresa: guds.id, previo: `${repFalso} ${asignarA(`'${REP}'`)} perform set_config('guds.prueba_ent', (select id from entregas where transferencia_odoo_id = ${a.odoo_id} and estado = 'asignada')::text, true);` },
+        `select public.cerrar_entrega(current_setting('guds.prueba_ent')::uuid, 'rechazada', '{"motivo":"precio"}'::jsonb)::text`));
+    await caso('Delivery 19v: si Odoo valida el documento, la sincronización cierra la entrega ("Actualizado desde Odoo")', (r) => r?.n >= 1 && r?.estado === 'entregada' && r?.origen === 'odoo',
+      como({ rol: 'postgres', empresa: guds.id, previo: `${repFalso} ${asignarA(`'${REP}'`)} update transferencias set estado = 'hecha' where id = '${a.id}';
+        perform set_config('guds.prueba_n', public.cerrar_entregas_desde_odoo('${guds.id}')::text, true);` },
+        `select row_to_json(t)::text from (select current_setting('guds.prueba_n')::int n, estado, origen_cierre origen from entregas where transferencia_odoo_id = ${a.odoo_id} order by created_at desc limit 1) t`));
+  }
+  // Reposiciones a consignación (traslado interno propio → consignación): entran en la cola y se entregan en el cliente del almacén
+  {
+    const [repo] = await sql(`select t.id, t.numero, ad.cliente_id from transferencias t join almacenes ad on ad.id = t.almacen_destino_id
+      where t.empresa_id = '${guds.id}' and t.tipo = 'interna' and ad.tipo = 'consignacion' and ad.cliente_id is not null and t.estado = 'lista'
+        and exists (select 1 from transferencia_items ti where ti.transferencia_id = t.id and ti.cantidad_hecha > 0)
+        and not exists (select 1 from entregas e where e.transferencia_odoo_id = t.odoo_id and e.estado in ('asignada', 'en_camino')) limit 1`);
+    const [entrePropios] = await sql(`select t.id from transferencias t join almacenes ao on ao.id = t.almacen_origen_id join almacenes ad on ad.id = t.almacen_destino_id
+      where t.empresa_id = '${guds.id}' and t.tipo = 'interna' and ao.tipo = 'propio' and ad.tipo = 'propio' limit 1`);
+    const repReal2 = (await sql(`select u.auth_id from usuarios u join usuario_empresas ue on ue.usuario_id = u.id and ue.empresa_id = '${guds.id}'
+      where u.role = 'delivery' and u.activo and u.auth_id is not null limit 1`))[0]?.auth_id;
+    const sesionAdmin = `perform set_config('request.jwt.claims', '{"sub":"${admin}","role":"authenticated"}', true);
+      perform set_config('request.headers', '{"x-empresa-id":"${guds.id}"}', true);`;
+    if (repo && repReal2) {
+      const asignarRepo = `${sesionAdmin} perform public.asignar_entrega_documento('${repo.id}', (select id from usuarios where auth_id = '${repReal2}'), 'normal');`;
+      await caso('Delivery 19v: el admin asigna una reposición a consignación (se entrega en el cliente del almacén)', (r) => r?.estado === 'asignada' && r?.cliente_ok === true,
+        como({ empresa: guds.id, previo: asignarRepo },
+          `select row_to_json(t)::text from (select estado, cliente_id = '${repo.cliente_id}' cliente_ok from entregas where transferencia_id = '${repo.id}' and estado = 'asignada') t`));
+      await caso('Delivery 19v: el repartidor ve la reposición con su tipo, el almacén de consignación y la dirección del cliente', (r) => r?.tipo === 'reposicion' && !!r?.contacto && !!r?.direccion,
+        como({ uid: repReal2, empresa: guds.id, previo: asignarRepo },
+          `select row_to_json(t)::text from (select x->>'tipo' tipo, x->>'contacto' contacto, x->>'direccion' direccion from jsonb_array_elements(public.mis_entregas_reparto()) x
+            where x->>'numero' = '${repo.numero}') t`));
+    }
+    if (entrePropios) {
+      await caso('Delivery 19v: un traslado entre almacenes propios no se asigna', 'Solo se asignan órdenes de entrega de Odoo o reposiciones',
+        como({ empresa: guds.id }, `select public.asignar_entrega_documento('${entrePropios.id}', (select id from usuarios where role = 'delivery' limit 1), 'normal')::text`));
+    }
+  }
+  await caso('Delivery 19v: sin sesión no se consultan entregas del repartidor', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select public.mis_entregas_reparto()::text`));
+}
+
+// ── Teléfonos y direcciones del cliente → Odoo (19w): solo personal de administración, datos validados, a la cola ──
+{
+  const qaVend = (await sql(`select a.id from auth.users a join usuarios u on u.auth_id = a.id where a.email = 'qa.vendedor@guds.test' and u.role = 'vendedor'`))[0]?.id || vendGuds;
+  const contacto = (datos, cli = cliGuds) => `select public.actualizar_contacto_cliente('${cli}', ${lit(JSON.stringify(datos))}::jsonb)::text`;
+  const direccion = (dir, datos, cli = cliGuds) => `select public.guardar_direccion_cliente('${cli}', ${dir ? `'${dir}'` : 'null'}, ${lit(JSON.stringify(datos))}::jsonb)::text`;
+  if (qaVend) {
+    await caso('Clientes→Odoo: un vendedor no puede editar teléfonos ni dirección de un cliente', 'No tienes permiso para editar',
+      como({ uid: qaVend, empresa: guds.id }, contacto({ telefono: '0414-1234567' })));
+    await caso('Clientes→Odoo: un vendedor no puede crear direcciones de entrega', 'No tienes permiso para editar',
+      como({ uid: qaVend, empresa: guds.id }, direccion(null, { nombre: 'Prueba', calle: 'Av. Principal 1', ciudad: 'Caracas', estado: 'Miranda' })));
+    await caso('Clientes→Odoo: un vendedor no ve el historial de envíos a Odoo', 'No tienes permiso para ver el historial',
+      como({ uid: qaVend, empresa: guds.id }, `select count(*)::text from public.historial_escrituras_cliente('${cliGuds}')`));
+  }
+  await caso('Clientes→Odoo: sin sesión no se puede editar', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, contacto({ telefono: '0414-1234567' })));
+  // El admin encola (la escritura se deshace con el bloque: no llega a Odoo)
+  const previoEncolar = `create function public.p19w_encolar(p_cli uuid) returns text language plpgsql as $f$
+    declare v uuid; r text;
+    begin
+      v := public.actualizar_contacto_cliente(p_cli, '{"telefono":"0414-1234567","calle":"Av. Principal de Prueba","ciudad":"Caracas","estado":"Distrito Capital (VE)"}'::jsonb);
+      select row_to_json(t)::text into r from (select tipo, estado, referencia_id = p_cli ref, solicitado_por is not null quien,
+        datos -> 'campos' ->> 'telefono' tel, datos -> 'campos' ->> 'estado' est, datos -> 'antes' ? 'direccion' antes from public.odoo_escrituras where id = v) t;
+      return r;
+    end $f$;`;
+  await caso('Clientes→Odoo: el admin encola el cambio (pendiente, con quién lo pidió y los datos validados)',
+    (r) => r?.tipo === 'cliente_contacto' && r?.estado === 'pendiente' && r?.ref && r?.quien && r?.tel === '0414-1234567' && r?.est === 'Distrito Capital' && r?.antes,
+    como({ empresa: guds.id, previo: previoEncolar }, `select public.p19w_encolar('${cliGuds}')`));
+  await caso('Clientes→Odoo: teléfono inválido se rechaza', 'no es un número venezolano válido',
+    como({ empresa: guds.id }, contacto({ telefono: '123' })));
+  await caso('Clientes→Odoo: un fijo no vale como celular', 'debe ser un móvil venezolano',
+    como({ empresa: guds.id }, contacto({ celular: '0212-5551234' })));
+  await caso('Clientes→Odoo: estado que no es de Venezuela se rechaza', 'Elige un estado de Venezuela válido',
+    como({ empresa: guds.id }, contacto({ calle: 'Av. Principal 1', ciudad: 'Caracas', estado: 'Narnia' })));
+  await caso('Clientes→Odoo: dirección incompleta se rechaza (ciudad obligatoria)', 'La ciudad es obligatoria',
+    como({ empresa: guds.id }, contacto({ calle: 'Av. Principal 1', estado: 'Miranda' })));
+  await caso('Clientes→Odoo: campos fuera de teléfonos/dirección se rechazan', 'Campos no permitidos: email',
+    como({ empresa: guds.id }, contacto({ email: 'otro@correo.com' })));
+  await caso('Clientes→Odoo: una dirección nueva necesita nombre', 'necesita un nombre',
+    como({ empresa: guds.id }, direccion(null, { calle: 'Av. Principal 1', ciudad: 'Caracas', estado: 'Miranda' })));
+  const dirAjena = (await sql(`select id from cliente_direcciones where cliente_id <> '${cliGuds}' and odoo_id is not null limit 1`))[0]?.id;
+  if (dirAjena) {
+    await caso('Clientes→Odoo: no se edita la dirección de otro cliente', 'no pertenece a este cliente',
+      como({ empresa: guds.id }, direccion(dirAjena, { telefono: '0414-1234567' })));
+  }
+  await caso('Clientes→Odoo: solo se reintentan envíos de clientes existentes', 'Escritura no encontrada',
+    como({ empresa: guds.id }, `select public.reintentar_escritura_cliente('00000000-0000-0000-0000-000000000000')::text`));
+  await caso('Clientes→Odoo: anon no ejecuta las funciones y nadie ejecuta los validadores internos', (r) => r?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace and (
+      (p.proname in ('actualizar_contacto_cliente', 'guardar_direccion_cliente', 'reintentar_escritura_cliente', 'historial_escrituras_cliente', 'puede_editar_cliente_odoo')
+        and has_function_privilege('anon', p.oid, 'execute'))
+      or (p.proname in ('validar_telefono_ve', 'estado_ve', 'validar_direccion_odoo', 'encolar_escritura_odoo')
+        and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))))) t`));
 }
 
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──

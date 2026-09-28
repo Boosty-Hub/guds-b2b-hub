@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   ArrowLeft, Loader2, Building2, User, Phone, MapPin,
-  CreditCard, FileText, Calendar, Edit, Users, IdCard, ShoppingCart, Boxes,
+  CreditCard, FileText, Calendar, Edit, Users, IdCard, ShoppingCart, Boxes, Pencil, Plus, History,
 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { usePagination } from "@/hooks/use-pagination";
@@ -17,6 +17,11 @@ import { OdooBadge } from "@/components/OdooBadge";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { FichaCampos, Panel } from "@/components/datos/FichaCampos";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAuth } from "@/contexts/AuthContext";
+import { usePermissions } from "@/contexts/PermissionsContext";
+import { EditarContactoClienteDialog } from "@/components/clientes/EditarContactoClienteDialog";
+import { DireccionClienteDialog, type DireccionEntrega } from "@/components/clientes/DireccionClienteDialog";
+import { HistorialOdooCliente } from "@/components/clientes/HistorialOdooCliente";
 
 interface ClienteFull extends Cliente {
   lista_precios?: ListaPrecios | null;
@@ -50,6 +55,12 @@ const ESTADO: Record<string, { label: string; variant: "default" | "secondary" |
   cancelado: { label: "Cancelado", variant: "destructive" },
 };
 
+const consultaCliente = (id?: string) => supabase.from("clientes").select("*, lista_precios:listas_precios(*)").eq("id", id).maybeSingle();
+const consultaDirecciones = (id?: string) => supabase.from("cliente_direcciones")
+  .select("id, odoo_id, nombre, direccion, calle, complemento, ciudad, estado, telefono, activo")
+  .eq("cliente_id", id)
+  .order("nombre");
+
 const ClienteDetalle = () => {
   const { clienteId } = useParams();
   const navigate = useNavigate();
@@ -57,20 +68,35 @@ const ClienteDetalle = () => {
   const [cliente, setCliente] = useState<ClienteFull | null>(null);
   const [ordenes, setOrdenes] = useState<OrdenResumen[]>([]);
   const [consignacion, setConsignacion] = useState<ConsigRow[]>([]);
-  const [direcciones, setDirecciones] = useState<{ id: string; nombre: string | null; direccion: string | null; ciudad: string | null; estado: string | null; telefono: string | null; activo: boolean }[]>([]);
+  const [direcciones, setDirecciones] = useState<(DireccionEntrega & { activo: boolean })[]>([]);
   const [contactos, setContactos] = useState<ContactoResumen[]>([]);
   const [accesos, setAccesos] = useState<{ contacto_id: string | null; activo: boolean }[]>([]);
   const [credito, setCredito] = useState<{ modo: string; disponible: number; en_pedidos: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const ordenesPag = usePagination(ordenes, 10);
   const consigPag = usePagination(consignacion, 10);
+  // Teléfonos y direcciones se editan aquí y se escriben en Odoo (19w): solo personal de administración
+  const { user } = useAuth();
+  const { can } = usePermissions();
+  const puedeEditarOdoo = user?.role === "admin" && can("clientes", "editar");
+  const [contactoAbierto, setContactoAbierto] = useState(false);
+  const [dirDialogo, setDirDialogo] = useState<{ abierto: boolean; direccion: DireccionEntrega | null }>({ abierto: false, direccion: null });
+  const [versionOdoo, setVersionOdoo] = useState(0);
+
+  // Después de un envío a Odoo: la ficha y las direcciones ya quedaron con lo que aceptó Odoo
+  const recargarOdoo = async () => {
+    const [{ data }, { data: dirs }] = await Promise.all([consultaCliente(clienteId), consultaDirecciones(clienteId)]);
+    if (data) setCliente(data as ClienteFull);
+    setDirecciones(dirs ?? []);
+    setVersionOdoo((v) => v + 1);
+  };
 
   useEffect(() => {
     let activo = true;
     (async () => {
       setLoading(true);
       const [{ data }, { data: ords }, { data: alms }, { data: dirs }, { data: kts }, { data: accs }, { data: cred }] = await Promise.all([
-        supabase.from("clientes").select("*, lista_precios:listas_precios(*)").eq("id", clienteId).maybeSingle(),
+        consultaCliente(clienteId),
         supabase.from("ordenes")
           .select("id, numero, estado, total, created_at, fecha_pedido, items:orden_items(count)")
           .eq("cliente_id", clienteId)
@@ -79,10 +105,7 @@ const ClienteDetalle = () => {
           .select("nombre, inventario_almacen(cantidad, producto:productos(nombre, sku))")
           .eq("cliente_id", clienteId)
           .eq("tipo", "consignacion"),
-        supabase.from("cliente_direcciones")
-          .select("id, nombre, direccion, ciudad, estado, telefono, activo")
-          .eq("cliente_id", clienteId)
-          .order("nombre"),
+        consultaDirecciones(clienteId),
         supabase.from("cliente_contactos").select("id, nombre, cargo, email, es_principal").eq("cliente_id", clienteId).order("es_principal", { ascending: false }).order("nombre"),
         supabase.from("usuarios").select("contacto_id, activo").eq("cliente_id", clienteId).eq("role", "cliente"),
         supabase.rpc("credito_disponible", { p_cliente_id: clienteId }),
@@ -182,7 +205,11 @@ const ClienteDetalle = () => {
         { label: "Contactos", valor: contactos.length, detalle: `${accesos.filter((a) => a.activo).length} con acceso` },
       ]} />
 
-      <Panel titulo="Datos del cliente">
+      <Panel titulo="Datos del cliente" acciones={puedeEditarOdoo && odoo ? (
+        <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2 text-xs" onClick={() => setContactoAbierto(true)}>
+          <Pencil className="h-3.5 w-3.5" /> Teléfonos y dirección
+        </Button>
+      ) : undefined}>
         <FichaCampos campos={[
           { label: "RIF", valor: cliente.rif, odoo, mono: true },
           { label: "Cédula", valor: cliente.cedula, odoo, mono: true },
@@ -215,6 +242,7 @@ const ClienteDetalle = () => {
           <TabsTrigger value="contactos"><Users className="mr-1.5 h-3.5 w-3.5" />Contactos ({contactos.length})</TabsTrigger>
           <TabsTrigger value="direcciones"><MapPin className="mr-1.5 h-3.5 w-3.5" />Direcciones ({direcciones.length})</TabsTrigger>
           <TabsTrigger value="consignacion"><Boxes className="mr-1.5 h-3.5 w-3.5" />Consignación ({consignacion.length})</TabsTrigger>
+          {puedeEditarOdoo && <TabsTrigger value="odoo"><History className="mr-1.5 h-3.5 w-3.5" />Cambios a Odoo</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="ordenes">
@@ -239,7 +267,7 @@ const ClienteDetalle = () => {
                     ))}
                   </TableBody>
                 </Table>
-                <DataTablePagination pagination={ordenesPag} />
+                <DataTablePagination pagination={ordenesPag} pageSizeOptions={[10, 25, 50]} />
               </>
             )}
           </div>
@@ -272,19 +300,37 @@ const ClienteDetalle = () => {
 
         <TabsContent value="direcciones">
           <div className="rounded-lg border border-border bg-card">
+            {puedeEditarOdoo && odoo && (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-1.5">
+                <p className="text-xs text-muted-foreground">Las direcciones de entrega se guardan en Odoo.</p>
+                <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2 text-xs" onClick={() => setDirDialogo({ abierto: true, direccion: null })}>
+                  <Plus className="h-3.5 w-3.5" /> Nueva dirección
+                </Button>
+              </div>
+            )}
             {direcciones.length === 0 ? (
               <p className="p-6 text-center text-sm text-muted-foreground">Sin direcciones de entrega adicionales.</p>
             ) : (
               <Table>
-                <TableHeader><TableRow><TableHead>Nombre</TableHead><TableHead>Dirección</TableHead><TableHead>Ciudad</TableHead><TableHead>Teléfono</TableHead><TableHead>Estado</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Nombre</TableHead><TableHead>Dirección</TableHead><TableHead>Ciudad</TableHead><TableHead>Teléfono</TableHead><TableHead>Estado</TableHead>{puedeEditarOdoo && <TableHead className="w-10"><span className="sr-only">Editar</span></TableHead>}</TableRow></TableHeader>
                 <TableBody>
                   {direcciones.map((d) => (
                     <TableRow key={d.id}>
-                      <TableCell className="whitespace-nowrap font-medium">{d.nombre || "Dirección"} <OdooBadge /></TableCell>
+                      <TableCell className="whitespace-nowrap font-medium">{d.nombre || "Dirección"} {d.odoo_id && <OdooBadge />}</TableCell>
                       <TableCell className="max-w-[360px] truncate text-muted-foreground" title={d.direccion ?? ""}>{d.direccion || "—"}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{[d.ciudad, d.estado].filter(Boolean).join(", ") || "—"}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{d.telefono || "—"}</TableCell>
                       <TableCell>{d.activo ? <Badge variant="outline">Activa</Badge> : <Badge variant="secondary">Archivada</Badge>}</TableCell>
+                      {puedeEditarOdoo && (
+                        <TableCell className="py-1 text-right">
+                          {d.odoo_id && (
+                            <Button size="icon" variant="ghost" className="h-7 w-7" aria-label={`Editar la dirección ${d.nombre ?? ""}`} title="Editar (se guarda en Odoo)"
+                              onClick={() => setDirDialogo({ abierto: true, direccion: d })}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -312,12 +358,30 @@ const ClienteDetalle = () => {
                     ))}
                   </TableBody>
                 </Table>
-                <DataTablePagination pagination={consigPag} />
+                <DataTablePagination pagination={consigPag} pageSizeOptions={[10, 25, 50]} />
               </>
             )}
           </div>
         </TabsContent>
+
+        {puedeEditarOdoo && (
+          <TabsContent value="odoo">
+            <div className="rounded-lg border border-border bg-card">
+              <HistorialOdooCliente clienteId={cliente.id} version={versionOdoo} />
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
+
+      {puedeEditarOdoo && odoo && (
+        <>
+          <EditarContactoClienteDialog open={contactoAbierto} onOpenChange={setContactoAbierto} cliente={cliente} onGuardado={recargarOdoo} />
+          <DireccionClienteDialog open={dirDialogo.abierto} onOpenChange={(v) => setDirDialogo((d) => ({ ...d, abierto: v }))}
+            clienteId={cliente.id} clienteNombre={cliente.nombre_negocio} direccion={dirDialogo.direccion}
+            porDefecto={{ ciudad: cliente.ciudad, estado: cliente.estado ?? null }}
+            nombresUsados={direcciones.map((d) => d.nombre ?? "").filter(Boolean)} onGuardado={recargarOdoo} />
+        </>
+      )}
     </MainLayout>
   );
 };

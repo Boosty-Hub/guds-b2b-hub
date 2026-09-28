@@ -1,273 +1,423 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Eye, Loader2, UserPlus } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AlertTriangle, Eye, Loader2, UserPlus } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
-import { DetalleEntregaDialog, type EntregaDetalle } from "@/components/delivery/DetalleEntregaDialog";
-import { fechaCorta } from "@/components/delivery/fechas";
+import { OdooBadge } from "@/components/OdooBadge";
+import { EmpresaDistintivo } from "@/components/EmpresaSelector";
+import { useEmpresa } from "@/contexts/EmpresaContext";
+import { EstadoTransferencia } from "@/components/inventario/EstadoTransferencia";
+import {
+  DetalleEntregaDialog, EscrituraBadge, EstadoEntregaBadge, InsigniaOdooCierre, TipoDocBadge, clienteFila, esReposicion, nombreRepartidor, numeroFila,
+  type DocEntrega, type EntregaAdmin, type EscrituraOdoo, type FilaDoc, type Situacion,
+} from "@/components/delivery/DetalleEntregaDialog";
+import { fechaCorta, fechaHora, diaCaracas } from "@/components/delivery/fechas";
+import { ABIERTAS, etiquetaMotivo, fmtCantidad, fmtDia, telefonos } from "@/components/delivery/entregas";
 
-interface Repartidor { id: string; nombre: string; apellido: string | null; }
-interface Orden {
-  id: string; numero: string; total: number; estado: string; direccion_entrega: string | null;
-  cliente?: { nombre_negocio: string; direccion: string; ciudad: string } | null;
-}
-interface Entrega extends EntregaDetalle {
-  orden_id: string | null;
-  orden?: { numero: string; total: number; cliente?: { nombre_negocio: string; direccion: string } | null } | null;
+// Delivery (fase 19v): la cola son los DOCUMENTOS DE ENTREGA DE ODOO tal cual (stock.picking de salida, por empresa) y las
+// reposiciones a consignación (traslado interno hacia un almacén de consignación: se entrega en el cliente del almacén).
+// Se asignan a un repartidor; nada del documento se edita en GUDS. Lo que el repartidor cierra como entregado completo
+// o incompleto se valida en Odoo por la cola de escrituras (modo simular / activo en configuración).
+interface Repartidor { id: string; nombre: string; apellido: string | null; empresas: string[] }
+
+const DESTINO = "almacen_destino:almacenes!transferencias_almacen_destino_id_fkey(nombre, tipo, cliente:clientes(nombre_negocio))";
+const SEL_DOC = `id, empresa_id, odoo_id, numero, tipo, origen, estado, contacto, fecha_programada, fecha_realizada, direccion_entrega, ciudad_entrega,
+  region_entrega, telefono_entrega, notas, odoo_sync_at, almacen:almacenes!transferencias_almacen_origen_id_fkey(nombre, tipo), ${DESTINO},
+  cliente:clientes(nombre_negocio), items:transferencia_items(id, odoo_id, nombre_producto, cantidad_demandada, cantidad_hecha, estado, unidad)`;
+const SEL_ENT = `id, transferencia_id, transferencia_odoo_id, orden_id, doc_numero, empresa_id, estado, prioridad, repartidor_id, created_at,
+  fecha_asignacion, fecha_inicio_entrega, fecha_entrega, fecha_cierre, receptor_nombre, notas, motivo_fallo, motivo_codigo, motivo_detalle,
+  reprogramada_para, deja_pendiente, lineas, origen_cierre, firma_url, foto_entrega_url, doc_direccion,
+  repartidor:usuarios!entregas_repartidor_id_fkey(nombre, apellido), orden:ordenes(numero, direccion_entrega, cliente:clientes(nombre_negocio)),
+  cliente:clientes!entregas_cliente_id_fkey(nombre_negocio), documento:transferencias!entregas_transferencia_id_fkey(${SEL_DOC})`;
+const DIAS_HISTORIAL = 90;
+
+const PESTANAS: { v: Situacion; label: string }[] = [
+  { v: "por_asignar", label: "Por asignar" }, { v: "asignada", label: "Asignadas" }, { v: "en_camino", label: "En camino" }, { v: "cerrada", label: "Cerradas" },
+];
+
+// Una fila por documento de entrega (o por entrega vieja ligada a un pedido): el documento de Odoo + su entrega activa o la última
+function armarFilas(docs: DocEntrega[], entregas: EntregaAdmin[], escrituras: EscrituraOdoo[]): FilaDoc[] {
+  const escPor = new Map<string, EscrituraOdoo>();
+  for (const w of escrituras) if (!escPor.has(w.referencia_id)) escPor.set(w.referencia_id, w);   // vienen de la más nueva a la más vieja
+  const porDoc = new Map<string, EntregaAdmin[]>();
+  for (const e of entregas) {
+    const k = e.transferencia_odoo_id != null ? `d${e.transferencia_odoo_id}` : `e${e.id}`;
+    (porDoc.get(k) ?? porDoc.set(k, []).get(k)!).push(e);
+  }
+  const fila = (k: string, doc: DocEntrega | null, ents: EntregaAdmin[]): FilaDoc => {
+    const activa = ents.find((x) => ABIERTAS.includes(x.estado)) ?? null;
+    const ultima = activa ?? ents[0] ?? null;
+    let situacion: Situacion;
+    if (activa) situacion = activa.estado as Situacion;
+    else if (ultima && ["entregada", "incompleta", "fallida"].includes(ultima.estado)) situacion = "cerrada";
+    else if (doc && !["hecha", "cancelada"].includes(doc.estado)) situacion = "por_asignar";   // sin entrega, rechazada, reprogramada o anulada
+    else situacion = "cerrada";
+    return { clave: k, doc: doc ?? ultima?.documento ?? null, entrega: ultima, intentos: ents, situacion, escritura: ultima ? escPor.get(ultima.id) ?? null : null };
+  };
+  const filas: FilaDoc[] = [];
+  const vistos = new Set<string>();
+  for (const d of docs) {
+    const k = `d${d.odoo_id}`;
+    vistos.add(k);
+    filas.push(fila(k, d, porDoc.get(k) ?? []));
+  }
+  for (const [k, ents] of porDoc) if (!vistos.has(k)) filas.push(fila(k, null, ents));
+  return filas;
 }
 
-const estadoConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  asignada: { label: "Asignada", variant: "outline" },
-  en_camino: { label: "En Camino", variant: "default" },
-  entregada: { label: "Entregada", variant: "secondary" },
-  fallida: { label: "Fallida", variant: "destructive" },
+// venta (orden de entrega desde almacén propio) · corte (orden de entrega desde consignación) · reposicion (propio → consignación)
+const tipoDe = (f: FilaDoc) => (esReposicion(f.doc) ? "reposicion" : f.doc?.almacen?.tipo === "consignacion" ? "corte" : "venta");
+
+const fechaCola = (f: FilaDoc) => {
+  const e = f.entrega;
+  if (f.situacion === "por_asignar") return e?.estado === "reprogramada" && e.reprogramada_para ? `${e.reprogramada_para}T12:00:00Z` : f.doc?.fecha_programada ?? "";
+  if (f.situacion === "cerrada") return e?.fecha_cierre || e?.fecha_entrega || f.doc?.fecha_realizada || "";
+  return e?.fecha_asignacion ?? "";
 };
 
 const Delivery = () => {
-  const { formatPrice } = useCurrency();
   const { toast } = useToast();
+  const { soloLectura, empresas } = useEmpresa();
   const [repartidores, setRepartidores] = useState<Repartidor[]>([]);
-  const [ordenes, setOrdenes] = useState<Orden[]>([]);
-  // Estado del despacho en Odoo (transferencia de entrega de cada orden)
-  const [despacho, setDespacho] = useState<Record<string, { estado: string; numero: string }>>({});
-  const [soloListas, setSoloListas] = useState(false);
-  const [entregas, setEntregas] = useState<Entrega[]>([]);
+  const [filas, setFilas] = useState<FilaDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [asignarOrden, setAsignarOrden] = useState<Orden | null>(null);
+  const [tab, setTab] = useState<Situacion>("por_asignar");
+  const [q, setQ] = useState("");
+  const [estadoOdoo, setEstadoOdoo] = useState("todos");
+  const [tipoDoc, setTipoDoc] = useState("todos");
+  const [detalle, setDetalle] = useState<FilaDoc | null>(null);
+  const [asignar, setAsignar] = useState<FilaDoc | null>(null);
   const [repSel, setRepSel] = useState("");
   const [prioridad, setPrioridad] = useState("normal");
+  const [anular, setAnular] = useState<EntregaAdmin | null>(null);
+  const [motivoAnular, setMotivoAnular] = useState("");
   const [saving, setSaving] = useState(false);
-  const [detalle, setDetalle] = useState<Entrega | null>(null);
 
-  useEffect(() => { fetchAll(); }, []);
-
-  const fetchAll = async () => {
+  const cargar = useCallback(async () => {
     setLoading(true);
-    const [rRes, oRes, eRes] = await Promise.all([
-      supabase.from("usuarios").select("id, nombre, apellido").eq("role", "delivery").eq("activo", true),
-      supabase.from("ordenes").select("id, numero, total, estado, direccion_entrega, cliente:clientes(nombre_negocio, direccion, ciudad)").in("estado", ["confirmado", "procesando", "enviado"]).order("created_at", { ascending: false }),
-      supabase.from("entregas").select("id, orden_id, estado, prioridad, fecha_asignacion, fecha_inicio_entrega, fecha_entrega, receptor_nombre, notas, motivo_fallo, firma_url, foto_entrega_url, orden:ordenes(numero, total, cliente:clientes(nombre_negocio, direccion)), repartidor:usuarios!entregas_repartidor_id_fkey(nombre, apellido)").order("fecha_asignacion", { ascending: false }),
+    const desde = new Date(Date.now() - DIAS_HISTORIAL * 86400000).toISOString();
+    const [rRes, dRes, iRes, eRes, wRes] = await Promise.all([
+      supabase.from("usuarios").select("id, nombre, apellido, empresas:usuario_empresas(empresa_id)").eq("role", "delivery").eq("activo", true).order("nombre"),
+      supabase.from("transferencias").select(SEL_DOC).eq("tipo", "entrega").not("estado", "in", "(hecha,cancelada)").order("fecha_programada", { ascending: true }),
+      // Reposiciones: traslados internos cuyo almacén destino es de consignación (los traslados entre almacenes propios no entran)
+      supabase.from("transferencias").select(SEL_DOC.replace(DESTINO, DESTINO.replace("_fkey(", "_fkey!inner(")))
+        .eq("tipo", "interna").eq("almacen_destino.tipo", "consignacion").not("estado", "in", "(hecha,cancelada)").order("fecha_programada", { ascending: true }),
+      supabase.from("entregas").select(SEL_ENT).or(`estado.in.(asignada,en_camino),created_at.gte.${desde}`).order("created_at", { ascending: false }),
+      supabase.from("odoo_escrituras").select("id, referencia_id, estado, error, resultado, intentos, created_at, procesado_at")
+        .eq("tipo", "entrega_estado").gte("created_at", desde).order("created_at", { ascending: false }),
     ]);
-    if (rRes.data) setRepartidores(rRes.data as Repartidor[]);
-    if (eRes.data) setEntregas(eRes.data as unknown as Entrega[]);
-    // Órdenes que ya tienen una entrega activa (no fallida) — se excluyen de "por asignar". Por id y no por número:
-    // los números se repiten entre empresas (S00360 existe en GUDS y en Quirutec).
-    const ordenesConEntrega = new Set(
-      ((eRes.data || []) as unknown as { estado: string; orden_id: string | null }[]).filter((e) => e.estado !== "fallida" && e.orden_id).map((e) => e.orden_id)
-    );
-    const pendientes = ((oRes.data as unknown as Orden[]) ?? []).filter((o) => !ordenesConEntrega.has(o.id));
-    setOrdenes(pendientes);
-    if (pendientes.length) {
-      const { data: tr } = await supabase.from("transferencias").select("orden_id, estado, numero").eq("tipo", "entrega")
-        .in("orden_id", pendientes.map((o) => o.id)).neq("estado", "cancelada");
-      // Por orden, la transferencia más relevante: lista > en espera/parcial > hecha
-      const peso: Record<string, number> = { lista: 3, parcial: 2, en_espera: 2, borrador: 1, hecha: 0 };
-      const m: Record<string, { estado: string; numero: string }> = {};
-      for (const t of (tr as { orden_id: string; estado: string; numero: string }[] | null) ?? []) {
-        if (!m[t.orden_id] || (peso[t.estado] ?? 0) > (peso[m[t.orden_id].estado] ?? 0)) m[t.orden_id] = { estado: t.estado, numero: t.numero };
-      }
-      setDespacho(m);
-    }
+    const err = dRes.error || iRes.error || eRes.error;
+    if (err) toast({ title: "No se pudo cargar delivery", description: err.message, variant: "destructive" });
+    setRepartidores(((rRes.data as unknown as { id: string; nombre: string; apellido: string | null; empresas: { empresa_id: string }[] | null }[] | null) ?? [])
+      .map((r) => ({ id: r.id, nombre: r.nombre, apellido: r.apellido, empresas: (r.empresas ?? []).map((x) => x.empresa_id) })));
+    setFilas(armarFilas([...((dRes.data as unknown as DocEntrega[] | null) ?? []), ...((iRes.data as unknown as DocEntrega[] | null) ?? [])],
+      (eRes.data as unknown as EntregaAdmin[] | null) ?? [],
+      (wRes.data as unknown as EscrituraOdoo[] | null) ?? []));
     setLoading(false);
-  };
+  }, [toast]);
+  useEffect(() => { cargar(); }, [cargar]);
 
-  const asignar = async () => {
-    if (!asignarOrden || !repSel) return;
+  // Si el detalle está abierto, se refresca con los datos nuevos
+  useEffect(() => { setDetalle((d) => (d ? filas.find((f) => f.clave === d.clave) ?? null : d)); }, [filas]);
+
+  const conteo = useMemo(() => {
+    const c: Record<Situacion, number> = { por_asignar: 0, asignada: 0, en_camino: 0, cerrada: 0 };
+    for (const f of filas) c[f.situacion]++;
+    return c;
+  }, [filas]);
+  const listas = filas.filter((f) => f.situacion === "por_asignar" && f.doc?.estado === "lista").length;
+  const hoy = diaCaracas();
+  const cerradasHoy = filas.filter((f) => f.situacion === "cerrada" && f.entrega?.fecha_cierre && diaCaracas(f.entrega.fecha_cierre) === hoy).length;
+  const conError = filas.filter((f) => f.escritura?.estado === "error").length;
+
+  const vista = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return filas.filter((f) => f.situacion === tab
+      && (estadoOdoo === "todos" || f.doc?.estado === estadoOdoo)
+      && (tipoDoc === "todos" || tipoDe(f) === tipoDoc)
+      && (!t || [numeroFila(f), clienteFila(f), f.doc?.contacto, f.doc?.origen, f.doc?.direccion_entrega, f.doc?.ciudad_entrega, nombreRepartidor(f.entrega)]
+        .some((v) => (v || "").toLowerCase().includes(t))))
+      .sort((a, b) => {
+        if (tab === "por_asignar") {
+          const la = a.doc?.estado === "lista" ? 0 : 1, lb = b.doc?.estado === "lista" ? 0 : 1;
+          return la - lb || fechaCola(a).localeCompare(fechaCola(b));
+        }
+        return fechaCola(b).localeCompare(fechaCola(a));
+      });
+  }, [filas, tab, q, estadoOdoo, tipoDoc]);
+  const pagination = usePagination(vista, 50);
+  const empresaDe = (id: string) => empresas.find((x) => x.id === id) ?? null;
+
+  const abrirAsignar = (f: FilaDoc) => {
+    setAsignar(f);
+    const actual = f.entrega && ABIERTAS.includes(f.entrega.estado) ? f.entrega : null;
+    setRepSel(actual?.repartidor_id ?? "");
+    setPrioridad(actual?.prioridad ?? "normal");
+  };
+  const repartidoresDoc = asignar?.doc
+    ? repartidores.filter((r) => !r.empresas.length || r.empresas.includes(asignar.doc!.empresa_id))
+    : repartidores;
+
+  const guardarAsignacion = async () => {
+    if (!asignar?.doc || !repSel) return;
     setSaving(true);
-    const { error } = await supabase.rpc("asignar_entrega", {
-      p_orden_id: asignarOrden.id, p_repartidor_id: repSel, p_prioridad: prioridad,
-    });
+    const { error } = await supabase.rpc("asignar_entrega_documento", { p_transferencia_id: asignar.doc.id, p_repartidor_id: repSel, p_prioridad: prioridad });
     setSaving(false);
     if (error) { toast({ title: "No se pudo asignar", description: error.message, variant: "destructive" }); return; }
-    toast({ title: "Entrega asignada", description: `${asignarOrden.numero} asignada al repartidor` });
-    setAsignarOrden(null); setRepSel(""); setPrioridad("normal");
-    fetchAll();
+    const r = repartidores.find((x) => x.id === repSel);
+    toast({ title: "Entrega asignada", description: `${asignar.doc.numero} → ${r ? `${r.nombre} ${r.apellido || ""}` : "repartidor"}` });
+    setAsignar(null);
+    cargar();
+  };
+  const guardarAnulacion = async () => {
+    if (!anular) return;
+    setSaving(true);
+    const { error } = await supabase.rpc("anular_entrega", { p_entrega_id: anular.id, p_motivo: motivoAnular.trim() || null });
+    setSaving(false);
+    if (error) { toast({ title: "No se pudo quitar la asignación", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Asignación quitada", description: "El documento vuelve a la cola por asignar" });
+    setAnular(null); setMotivoAnular("");
+    cargar();
+  };
+  const reintentar = async (esc: EscrituraOdoo) => {
+    const { error } = await supabase.rpc("reintentar_escritura_entrega", { p_escritura_id: esc.id });
+    if (error) { toast({ title: "No se pudo reintentar", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Enviado a Odoo", description: "Se está procesando; actualiza en unos segundos." });
+    setTimeout(cargar, 4000);
   };
 
-  const total = entregas.length;
-  const asignadas = entregas.filter((e) => e.estado === "asignada").length;
-  const enCamino = entregas.filter((e) => e.estado === "en_camino").length;
-  const entregadas = entregas.filter((e) => e.estado === "entregada").length;
-  const fmt = fechaCorta;
-
-  const ordenesVista = soloListas ? ordenes.filter((o) => despacho[o.id]?.estado === "lista") : ordenes;
-  const pagination = usePagination(ordenesVista, 50);
-  const DESPACHO: Record<string, { label: string; cls: string }> = {
-    lista: { label: "Lista para despachar", cls: "border-primary/40 bg-primary/10 text-primary" },
-    en_espera: { label: "Esperando stock", cls: "border-warning/60 bg-warning/15" },
-    parcial: { label: "Parcialmente disponible", cls: "border-warning/60 bg-warning/15" },
-    borrador: { label: "Borrador en Odoo", cls: "text-muted-foreground" },
-    hecha: { label: "Despachada en Odoo", cls: "border-success/40 bg-success/10 text-success" },
+  // Situación de la fila: último intento (por asignar), repartidor (abiertas) o resultado + Odoo (cerradas)
+  const situacion = (f: FilaDoc) => {
+    const e = f.entrega;
+    if (f.situacion === "por_asignar") {
+      if (!e) return <span className="text-muted-foreground">—</span>;
+      return (
+        <span className="flex flex-col items-start gap-0.5">
+          <EstadoEntregaBadge estado={e.estado} />
+          <span className="text-[11px] text-muted-foreground">
+            {e.estado === "reprogramada" && e.reprogramada_para ? `para el ${fmtDia(e.reprogramada_para)} · ` : ""}{e.motivo_codigo ? etiquetaMotivo(e.motivo_codigo) : e.motivo_detalle || ""}
+          </span>
+        </span>
+      );
+    }
+    if (f.situacion === "cerrada") {
+      return (
+        <span className="flex flex-wrap items-center gap-1">
+          {e ? <EstadoEntregaBadge estado={e.estado} /> : f.doc && <EstadoTransferencia estado={f.doc.estado} />}
+          {e?.origen_cierre === "odoo" && <InsigniaOdooCierre />}
+          <EscrituraBadge esc={f.escritura} />
+        </span>
+      );
+    }
+    return (
+      <span className="flex flex-col items-start gap-0.5">
+        <span className="whitespace-nowrap font-medium">{nombreRepartidor(e)}</span>
+        <span className="text-[11px] text-muted-foreground">{fechaHora(e?.fecha_asignacion ?? null)}{e?.prioridad === "alta" ? " · alta" : ""}</span>
+      </span>
+    );
   };
-  const pagination2 = usePagination(entregas, 50);
 
-  const [tab, setTab] = useState<string>("por-asignar");
   const pestanas = (
-    <TabsList>
-      <TabsTrigger value="por-asignar">Por asignar ({ordenes.length})</TabsTrigger>
-      <TabsTrigger value="entregas">Envíos ({entregas.length})</TabsTrigger>
+    <TabsList className="h-auto flex-wrap justify-start">
+      {PESTANAS.map((p) => <TabsTrigger key={p.v} value={p.v}>{p.label} ({conteo[p.v]})</TabsTrigger>)}
     </TabsList>
   );
 
   return (
-    <MainLayout title="Gestión de Envíos">
+    <MainLayout title="Delivery">
       <KpiStrip
         items={[
-          { label: "Total Envíos", valor: total, tono: "primario" },
-          { label: "Asignados", valor: asignadas },
-          { label: "En Ruta", valor: enCamino, tono: "alerta" },
-          { label: "Entregados", valor: entregadas, tono: "positivo" },
+          { label: "Por asignar", valor: conteo.por_asignar, detalle: `${listas} listas en Odoo`, tono: "primario", onClick: () => setTab("por_asignar"), activo: tab === "por_asignar" },
+          { label: "Asignadas", valor: conteo.asignada, onClick: () => setTab("asignada"), activo: tab === "asignada" },
+          { label: "En camino", valor: conteo.en_camino, tono: "alerta", onClick: () => setTab("en_camino"), activo: tab === "en_camino" },
+          { label: "Cerradas hoy", valor: cerradasHoy, detalle: `${conteo.cerrada} en ${DIAS_HISTORIAL} días`, tono: "positivo", onClick: () => setTab("cerrada"), activo: tab === "cerrada" },
+          { label: "Error en Odoo", valor: conError, tono: conError ? "negativo" : "tenue", titulo: "Entregas cerradas cuya validación en Odoo falló" },
         ]}
       />
 
-      <Tabs value={tab} onValueChange={setTab}>
-        {/* Pestañas, búsqueda, filtros y acciones de la pestaña activa en una sola fila */}
-        {tab === "por-asignar" ? (
-          <BarraLista
-            pestanas={pestanas}
-            filtros={
-              <label className="flex cursor-pointer items-center gap-2 text-[13px]">
-                <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={soloListas} onChange={(e) => setSoloListas(e.target.checked)} />
-                Solo las listas para despachar en Odoo ({ordenes.filter((o) => despacho[o.id]?.estado === "lista").length})
-              </label>
-            }
-            contador={loading ? undefined : `${ordenesVista.length} registros`}
-          />
-        ) : (
-          <BarraLista pestanas={pestanas} contador={loading ? undefined : `${entregas.length} registros`} />
-        )}
-
-        <TabsContent value="por-asignar">
-          <div className="overflow-hidden rounded-lg border border-border bg-card">
-            {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
-            : ordenes.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No hay órdenes listas para asignar a delivery</div>
-            : (
-              <Table>
-                <TableHeader><TableRow>
-                  <TableHead>Orden</TableHead><TableHead>Cliente</TableHead><TableHead>Dirección</TableHead>
-                  <TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead><TableHead>Despacho (Odoo)</TableHead><TableHead className="text-right">Acción</TableHead>
-                </TableRow></TableHeader>
-                <TableBody>
-                  {pagination.pageItems.map((o) => (
-                    <TableRow key={o.id}>
-                      <TableCell className="whitespace-nowrap font-medium text-primary">{o.numero}</TableCell>
-                      <TableCell>
-                        <span className="block max-w-[260px] truncate" title={o.cliente?.nombre_negocio || undefined}>{o.cliente?.nombre_negocio || "—"}</span>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        <span className="block max-w-[240px] truncate" title={o.cliente?.direccion || o.direccion_entrega || undefined}>{o.cliente?.direccion || o.direccion_entrega || "—"}</span>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(Number(o.total))}</TableCell>
-                      <TableCell className="whitespace-nowrap"><Badge variant="secondary" className="capitalize">{o.estado}</Badge></TableCell>
-                      <TableCell>
-                        {despacho[o.id] ? (
-                          <span className="flex items-center gap-1.5 whitespace-nowrap">
-                            <Badge variant="outline" className={`whitespace-nowrap font-normal ${DESPACHO[despacho[o.id].estado]?.cls ?? ""}`}>{DESPACHO[despacho[o.id].estado]?.label ?? despacho[o.id].estado}</Badge>
-                            <span className="font-mono text-xs text-muted-foreground">{despacho[o.id].numero}</span>
-                          </span>
-                        ) : <span className="whitespace-nowrap text-xs text-muted-foreground">Sin transferencia</span>}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-right">
-                        <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => { setAsignarOrden(o); setRepSel(""); setPrioridad("normal"); }}>
-                          <UserPlus className="h-3.5 w-3.5" />Asignar
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-            {!loading && <DataTablePagination pagination={pagination} />}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="entregas">
-          <div className="overflow-hidden rounded-lg border border-border bg-card">
-            {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
-            : entregas.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay envíos</div>
-            : (
-              <Table>
-                <TableHeader><TableRow>
-                  <TableHead>Orden</TableHead><TableHead>Cliente</TableHead><TableHead>Repartidor</TableHead>
-                  <TableHead>Asignada</TableHead><TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead><TableHead className="text-right">Detalle</TableHead>
-                </TableRow></TableHeader>
-                <TableBody>
-                  {pagination2.pageItems.map((e) => (
-                    <TableRow key={e.id}>
-                      <TableCell className="whitespace-nowrap font-medium text-primary">{e.orden?.numero || "—"}</TableCell>
-                      <TableCell>
-                        <span className="block max-w-[260px] truncate" title={e.orden?.cliente?.nombre_negocio || undefined}>{e.orden?.cliente?.nombre_negocio || "—"}</span>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">{e.repartidor ? `${e.repartidor.nombre} ${e.repartidor.apellido || ""}` : "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{fmt(e.fecha_asignacion)}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(Number(e.orden?.total || 0))}</TableCell>
-                      <TableCell className="whitespace-nowrap"><Badge variant={estadoConfig[e.estado]?.variant || "outline"}>{estadoConfig[e.estado]?.label || e.estado}</Badge></TableCell>
-                      <TableCell className="whitespace-nowrap text-right">
-                        <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => setDetalle(e)}
-                          title={e.estado === "entregada" ? "Ver firma y foto de la entrega" : "Ver detalle del envío"}>
-                          <Eye className="h-3.5 w-3.5" />{e.estado === "entregada" ? "Evidencia" : "Ver"}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-            {!loading && <DataTablePagination pagination={pagination2} />}
-          </div>
-        </TabsContent>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Situacion)}>
+        <BarraLista
+          pestanas={pestanas}
+          busqueda={q}
+          onBusqueda={setQ}
+          placeholder="Buscar documento, cliente, dirección…"
+          filtros={
+            <>
+              <Select value={estadoOdoo} onValueChange={setEstadoOdoo}>
+                <SelectTrigger className="h-8 w-full text-[13px] sm:w-40" aria-label="Estado en Odoo"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Estado Odoo: todos</SelectItem>
+                  <SelectItem value="lista">Listo</SelectItem>
+                  <SelectItem value="en_espera">En espera</SelectItem>
+                  <SelectItem value="borrador">Borrador</SelectItem>
+                  <SelectItem value="hecha">Hecho</SelectItem>
+                  <SelectItem value="cancelada">Cancelado</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={tipoDoc} onValueChange={setTipoDoc}>
+                <SelectTrigger className="h-8 w-full text-[13px] sm:w-52" aria-label="Tipo de documento"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Tipo: todos</SelectItem>
+                  <SelectItem value="venta">Ventas (almacén propio)</SelectItem>
+                  <SelectItem value="reposicion">Reposiciones a consignación</SelectItem>
+                  <SelectItem value="corte">Cortes de consignación</SelectItem>
+                </SelectContent>
+              </Select>
+            </>
+          }
+          contador={loading ? undefined : `${vista.length} documentos`}
+          acciones={<span className="hidden items-center gap-1.5 text-xs text-muted-foreground xl:flex"><OdooBadge titulo="Documentos de entrega de Odoo: se muestran tal cual y se editan en Odoo" /> Documentos de Odoo</span>}
+        />
       </Tabs>
 
-      <DetalleEntregaDialog entrega={detalle} onClose={() => setDetalle(null)} />
+      {soloLectura && tab !== "cerrada" && (
+        <p className="mb-2 rounded-md bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground">Modo consulta («Ambas empresas»): para asignar, elige GUDS o Quirutec en el menú superior.</p>
+      )}
 
-      {/* Asignar repartidor */}
-      <Dialog open={!!asignarOrden} onOpenChange={(o) => { if (!o) setAsignarOrden(null); }}>
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
+        {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+        : vista.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">
+            {tab === "por_asignar" ? "No hay documentos de entrega pendientes en Odoo con este filtro" : "No hay entregas con este filtro"}
+          </div>
+        : (
+          <Table data-tabla="delivery">
+            <TableHeader><TableRow>
+              <TableHead>Documento</TableHead><TableHead>Cliente</TableHead><TableHead>Dirección de entrega</TableHead>
+              <TableHead>{tab === "cerrada" ? "Cerrada" : "Programada"}</TableHead>
+              <TableHead>Odoo</TableHead><TableHead>Productos</TableHead>
+              <TableHead>{tab === "por_asignar" ? "Último intento" : tab === "cerrada" ? "Resultado" : "Repartidor"}</TableHead>
+              <TableHead className="text-right">Acción</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {pagination.pageItems.map((f) => {
+                const d = f.doc;
+                const items = (d?.items ?? []).filter((i) => i.estado !== "cancelada");
+                const reservadas = items.reduce((s, i) => s + Number(i.cantidad_hecha ?? 0), 0);
+                const pedidas = items.reduce((s, i) => s + Number(i.cantidad_demandada ?? 0), 0);
+                const corto = d && d.estado !== "hecha" && reservadas < pedidas;
+                const tel = telefonos(d?.telefono_entrega)[0];
+                const abierta = f.situacion === "asignada" || f.situacion === "en_camino";
+                return (
+                  <TableRow key={f.clave} className="cursor-pointer hover:bg-muted/50" onClick={() => setDetalle(f)}>
+                    <TableCell className="whitespace-nowrap">
+                      <span className="flex items-center gap-1.5">
+                        {soloLectura && <EmpresaDistintivo empresa={empresaDe(d?.empresa_id ?? f.entrega?.empresa_id ?? "")} className="h-4 w-4 text-[8px]" />}
+                        <span className="font-mono text-xs text-primary">{numeroFila(f)}</span>
+                      </span>
+                      <span className="block text-[11px] text-muted-foreground">{d?.origen || f.entrega?.orden?.numero || ""}</span>
+                      <TipoDocBadge doc={d} />
+                    </TableCell>
+                    <TableCell>
+                      <span className="block max-w-[220px] truncate font-medium" title={clienteFila(f)}>{clienteFila(f)}</span>
+                      {esReposicion(d)
+                        ? <span className="block max-w-[220px] truncate text-[11px] text-muted-foreground" title={d?.almacen_destino?.nombre}>{d?.almacen_destino?.nombre}</span>
+                        : d?.contacto && d.contacto !== clienteFila(f) && <span className="block max-w-[220px] truncate text-[11px] text-muted-foreground" title={d.contacto}>{d.contacto}</span>}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <span className="block max-w-[260px] truncate" title={d?.direccion_entrega || f.entrega?.doc_direccion || undefined}>{d?.direccion_entrega || f.entrega?.doc_direccion || "—"}</span>
+                      <span className="block max-w-[260px] truncate text-[11px]">{[d?.ciudad_entrega, tel].filter(Boolean).join(" · ")}</span>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {tab === "cerrada" ? fechaCorta(f.entrega?.fecha_cierre || f.entrega?.fecha_entrega || d?.fecha_realizada || null) : fechaCorta(d?.fecha_programada ?? null)}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{d ? <EstadoTransferencia estado={d.estado} /> : <span className="text-xs text-muted-foreground">Pedido GUDS</span>}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {items.length ? (
+                        <span className="flex items-center gap-1" title={corto ? "Odoo no tiene todo reservado: lo que falta no sale en el camión" : undefined}>
+                          {corto && <AlertTriangle className="h-3.5 w-3.5 text-warning" />}
+                          {items.length} · {fmtCantidad(reservadas)}{corto ? <span className="text-muted-foreground">/{fmtCantidad(pedidas)}</span> : null} u.
+                        </span>
+                      ) : "—"}
+                    </TableCell>
+                    <TableCell>{situacion(f)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right" onClick={(ev) => ev.stopPropagation()}>
+                      {(f.situacion === "por_asignar" || abierta) && d ? (
+                        <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => abrirAsignar(f)}
+                          disabled={soloLectura || d.estado !== "lista"}
+                          title={soloLectura ? "Elige una empresa para asignar" : d.estado !== "lista" ? "Se asigna cuando Odoo tenga el documento «Listo»" : undefined}>
+                          <UserPlus className="h-3.5 w-3.5" />{abierta ? "Reasignar" : "Asignar"}
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => setDetalle(f)}><Eye className="h-3.5 w-3.5" />Ver</Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+        {!loading && vista.length > 0 && <DataTablePagination pagination={pagination} />}
+      </div>
+
+      <DetalleEntregaDialog fila={detalle} onClose={() => setDetalle(null)} puedeEditar={!soloLectura}
+        onAsignar={(f) => abrirAsignar(f)} onAnular={(e) => { setAnular(e); setMotivoAnular(""); }} onReintentar={reintentar} />
+
+      {/* Asignar / reasignar repartidor */}
+      <Dialog open={!!asignar} onOpenChange={(o) => { if (!o) setAsignar(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Asignar envío — {asignarOrden?.numero}</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-2">
-            <p className="text-sm text-muted-foreground">{asignarOrden?.cliente?.nombre_negocio} · {asignarOrden?.cliente?.direccion || asignarOrden?.direccion_entrega}</p>
+          <DialogHeader>
+            <DialogTitle>{asignar?.entrega && ABIERTAS.includes(asignar.entrega.estado) ? "Reasignar" : "Asignar"} entrega — <span className="font-mono">{asignar?.doc?.numero}</span></DialogTitle>
+            <DialogDescription>{asignar ? clienteFila(asignar) : ""}{asignar?.doc?.direccion_entrega ? ` · ${asignar.doc.direccion_entrega}` : ""}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            {asignar?.entrega && ABIERTAS.includes(asignar.entrega.estado) && (
+              <p className="text-sm text-muted-foreground">Ahora: <span className="text-foreground">{nombreRepartidor(asignar.entrega)}</span>{asignar.entrega.estado === "en_camino" ? " (ya salió)" : ""}</p>
+            )}
             <div>
-              <Label>Repartidor</Label>
+              <Label htmlFor="rep">Repartidor</Label>
               <Select value={repSel} onValueChange={setRepSel}>
-                <SelectTrigger><SelectValue placeholder="Selecciona un repartidor" /></SelectTrigger>
+                <SelectTrigger id="rep"><SelectValue placeholder="Selecciona un repartidor" /></SelectTrigger>
                 <SelectContent>
-                  {repartidores.length === 0 && <div className="px-2 py-1.5 text-sm text-muted-foreground">No hay repartidores activos</div>}
-                  {repartidores.map((r) => <SelectItem key={r.id} value={r.id}>{r.nombre} {r.apellido || ""}</SelectItem>)}
+                  {repartidoresDoc.length === 0 && <div className="px-2 py-1.5 text-sm text-muted-foreground">No hay repartidores activos con acceso a esta empresa</div>}
+                  {repartidoresDoc.map((r) => <SelectItem key={r.id} value={r.id}>{r.nombre} {r.apellido || ""}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>Prioridad</Label>
+              <Label htmlFor="prio">Prioridad</Label>
               <Select value={prioridad} onValueChange={setPrioridad}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger id="prio"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="normal">Normal</SelectItem>
                   <SelectItem value="alta">Alta</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            <p className="text-xs text-muted-foreground">El documento no se modifica en Odoo al asignarlo. Solo cuando el repartidor lo cierre como entregado (completo o incompleto) se valida en Odoo.</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAsignarOrden(null)} disabled={saving}>Cancelar</Button>
-            <Button onClick={asignar} disabled={saving || !repSel}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Asignar envío"}</Button>
+            <Button variant="outline" onClick={() => setAsignar(null)} disabled={saving}>Cancelar</Button>
+            <Button onClick={guardarAsignacion} disabled={saving || !repSel}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Asignar"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quitar asignación */}
+      <Dialog open={!!anular} onOpenChange={(o) => { if (!o) setAnular(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Quitar asignación — <span className="font-mono">{anular?.doc_numero}</span></DialogTitle>
+            <DialogDescription>La entrega se anula en GUDS y el documento vuelve a «Por asignar». En Odoo no cambia nada.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label htmlFor="motivo-anular">Motivo (opcional)</Label>
+            <Textarea id="motivo-anular" value={motivoAnular} onChange={(e) => setMotivoAnular(e.target.value)} placeholder="Ej. se asignó por error" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAnular(null)} disabled={saving}>Cancelar</Button>
+            <Button variant="destructive" onClick={guardarAnulacion} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Quitar asignación"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
