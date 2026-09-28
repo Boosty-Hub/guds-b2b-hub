@@ -40,9 +40,11 @@ piloto), R8a (reversos), edición de pedidos pendientes con recálculo de cupón
 cuentas de pago desde Odoo, edición de dirección y teléfonos del cliente escrita en Odoo (activa), facturas sin borrado con
 historial, correo por Resend, dominio propio y limpieza de Lovable, y la **etapa 2** (IVA de cada producto desde Odoo, cotización
 en el servidor, listas de precios sincronizadas), **F1** (portal del cliente responsive), **F4/V1** (línea de tiempo y
-detalle del pedido), los **avisos desde Odoo**, **D2–D3** (ubicaciones, mapa y rutas) y **R1** (histórico de Profit en
-reportes). Siguiente: R3–R5 (costo y margen, vistas por niveles del Excel), F2 (catálogo paginado y ficha de producto), F5–F6,
-V2–V5, D5–D6 y el piloto de entregas en Odoo.
+detalle del pedido), los **avisos desde Odoo**, **D2–D3** (ubicaciones, mapa y rutas), **R1** (histórico de Profit en
+reportes) y **R3–R6** (costo promedio de Odoo visible solo para administración, motor de reporte tipo cubo con subtotales y
+filtros cruzados, pestaña **Análisis** con las vistas del Excel y exportación del análisis y del detalle de líneas con las
+columnas de "Base datos"; migraciones 20j) y **F2** (catálogo paginado y ficha de producto). Siguiente: F5–F6, V2–V5, D5–D6, el
+piloto de entregas en Odoo, R2 (clasificación comercial en Odoo) y R7 (comparativos y metas).
 
 ## 2. Principios comunes (los tres portales)
 

@@ -10,6 +10,23 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-28 · Catálogo paginado con ficha de producto (F2) y Análisis de ventas con costo y margen (R3–R6)
+
+- **Catálogo del portal (F2)** (agente, `…20k_catalogo_portal.sql`): el catálogo se pagina en el servidor (24 por página; la primera
+  baja 16 KB en vez de 129 KB), búsqueda sin acentos y con tolerancia a errores de tipeo, filtros en la URL, posición conservada;
+  ficha `/portal/producto/:id` con galería, empaques con precio por empaque y por unidad, IVA, "Comprado antes" y relacionados.
+  `precio_efectivo` (20l): el precio de una lista negociada se multiplica por las unidades del empaque.
+- **Costo y margen (R3)** (agente, `…20j_costo_productos.sql`, importador): el costo promedio de Odoo (`standard_price`, por
+  empresa) se guarda en `producto_costos`, que solo lee el personal de administración (GUDS 66,8 % y Quirutec 67,6 % de los
+  productos tienen costo en Odoo; 99,8 % de las líneas facturadas desde junio). En Productos el costo se muestra de solo lectura.
+- **Análisis (R4–R6)** (agente, `…20j_cubo_ventas.sql`): motor de hasta 4 niveles con subtotales (año, mes, empresa, vendedor,
+  cliente, categoría, línea, sub-línea, marca, producto, tipo de cliente, canal, segmento), medidas de venta, unidades, precio
+  promedio ponderado, costo y margen (solo administración) y filtros cruzados; pestaña "Análisis" con las vistas del Excel
+  (Categoría › Línea › Sub-línea › Artículo, Vendedor › Cliente, Cliente › Categoría › Artículo, Año × Mes, top con margen) y
+  exportación del análisis y del detalle con las columnas de "Base datos". Margen de control abril 2026 (Profit): igual al Excel.
+- Nota: el Excel de Profit no tiene facturas antes de julio de 2021 (solo notas), por eso esos meses salen en 0.
+- Verificado: pruebas de base (225 casos) y Playwright.
+
 ## 2026-09-28 · Delivery con mapa y rutas, histórico de Profit en reportes y cierres de seguridad
 
 - **Delivery D2/D3** (agente, `…20f_ubicaciones_rutas.sql`): ubicaciones propias de GUDS por cliente y sucursal (la sincronización

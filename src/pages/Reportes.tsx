@@ -14,6 +14,8 @@ import { BarraLista } from "@/components/datos/BarraLista";
 import { Panel } from "@/components/datos/FichaCampos";
 import { TablaReporte } from "@/components/reportes/TablaReporte";
 import { HistoricoProfit } from "@/components/reportes/HistoricoProfit";
+import { AnalisisVentas } from "@/components/reportes/AnalisisVentas";
+import { InsigniaProfit, colorFuente } from "@/components/reportes/comun";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { usePagination } from "@/hooks/use-pagination";
@@ -40,22 +42,6 @@ type Fuente = "ambas" | "odoo" | "profit";
 const FUENTES: Record<Fuente, string> = { ambas: "Odoo + Profit", odoo: "Solo Odoo", profit: "Solo Profit" };
 const HISTORIAL_DESDE = "2020-12-01";
 const textoFuente = (f: FuenteFila) => (f === "ambas" ? "Odoo + Profit" : f === "profit" ? "Profit" : "Odoo");
-// Colores por fuente (paleta validada para daltonismo en claro y oscuro): Odoo rojo, Profit azul
-const COLOR_FUENTE = { odoo: ["#e34948", "#e66767"], profit: ["#2a78d6", "#3987e5"] } as const;
-const colorFuente = (f: "odoo" | "profit") => {
-  const oscuro = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
-  return COLOR_FUENTE[f][oscuro ? 1 : 0];
-};
-
-/** Insignia de los números que incluyen el histórico de Profit */
-function InsigniaProfit({ className }: { className?: string }) {
-  return (
-    <span title="Incluye el histórico de Profit (solo lectura)"
-      className={`inline-flex h-4 shrink-0 items-center gap-1 rounded border border-border px-1 text-[10px] font-medium leading-none text-muted-foreground ${className ?? ""}`}>
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: colorFuente("profit") }} aria-hidden />Profit
-    </span>
-  );
-}
 
 type Periodo = "mes" | "mes_anterior" | "trimestre" | "anio" | "12m" | "24m" | "todo" | "personalizado" | `a${number}`;
 const ANIO_ACTUAL = new Date().getFullYear();
@@ -196,6 +182,7 @@ const Reportes = () => {
   // Carga según la pestaña (cada consulta agrega en el servidor)
   useEffect(() => {
     if (tab === "profit") { setCargando(false); return; }   // la pestaña del histórico carga lo suyo
+    if (tab === "analisis") return;                           // el análisis también (e informa si está cargando)
     let cancelado = false;
     (async () => {
       setCargando(true);
@@ -330,6 +317,7 @@ const Reportes = () => {
   const pestanas = (
     <TabsList>
       <TabsTrigger value="ventas">Ventas</TabsTrigger>
+      <TabsTrigger value="analisis">Análisis</TabsTrigger>
       <TabsTrigger value="cobranza">Cobranza</TabsTrigger>
       <TabsTrigger value="inventario"><span className="sm:hidden">Inventario</span><span className="hidden sm:inline">Inventario y rotación</span></TabsTrigger>
       <TabsTrigger value="profit"><span className="sm:hidden">Profit</span><span className="hidden sm:inline">Histórico Profit</span></TabsTrigger>
@@ -341,7 +329,7 @@ const Reportes = () => {
         <SelectTrigger className="h-8 w-44 text-[13px]" aria-label="Período"><SelectValue /></SelectTrigger>
         <SelectContent>{PERIODOS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
       </Select>
-      {tab === "ventas" && (
+      {(tab === "ventas" || tab === "analisis") && (
         <Select value={fuente} onValueChange={(v) => setFuente(v as Fuente)}>
           <SelectTrigger className="h-8 w-36 text-[13px]" aria-label="Fuente de las ventas"><SelectValue /></SelectTrigger>
           <SelectContent>{(Object.keys(FUENTES) as Fuente[]).map((k) => <SelectItem key={k} value={k}>{FUENTES[k]}</SelectItem>)}</SelectContent>
@@ -369,7 +357,7 @@ const Reportes = () => {
             </Select>
           ) : tab === "profit" ? null : selectorPeriodo}
           acciones={cargando ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            : <span className="text-[11px] text-muted-foreground">USD · neto de IVA · fuente {tab === "ventas" ? FUENTES[fuente].replace("Solo ", "") : tab === "profit" ? "Profit (solo lectura)" : "Odoo"}</span>} />
+            : <span className="text-[11px] text-muted-foreground">USD · neto de IVA · fuente {tab === "ventas" || tab === "analisis" ? FUENTES[fuente].replace("Solo ", "") : tab === "profit" ? "Profit (solo lectura)" : "Odoo"}</span>} />
 
         <TabsContent value="ventas" className="mt-0">
           <KpiStrip items={[
@@ -463,6 +451,10 @@ const Reportes = () => {
               ]} />
             </DialogContent>
           </Dialog>
+        </TabsContent>
+
+        <TabsContent value="analisis" className="mt-0">
+          {tab === "analisis" && <AnalisisVentas desde={desde} hasta={hasta} fuente={fuente} onCargando={setCargando} />}
         </TabsContent>
 
         <TabsContent value="cobranza" className="mt-0">

@@ -966,6 +966,176 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
   }
 }
 
+// ── Catálogo del portal (20k): paginado en el servidor, ligado al cliente y a su empresa, sin costo ──
+{
+  // Cliente del portal: uno real con ficha en su empresa o, si no hay, un perfil temporal dentro del bloque (se deshace con él)
+  const real = (await sql(`select u.auth_id, c.empresa_id from usuarios u join clientes c on c.id = u.cliente_id
+    join usuario_empresas ue on ue.usuario_id = u.id and ue.empresa_id = c.empresa_id
+    where u.role = 'cliente' and u.activo and u.auth_id is not null limit 1`))[0];
+  const libre = real ? null : (await sql(`select a.id from auth.users a where not exists (select 1 from usuarios u where u.auth_id = a.id) limit 1`))[0]?.id;
+  const uid20k = real?.auth_id ?? libre;
+  const emp20k = real?.empresa_id ?? guds.id;
+  const otra20k = emp20k === guds.id ? qrt.id : guds.id;
+  const previo20k = libre ? `insert into public.usuarios (auth_id, email, nombre, role, cliente_id, activo)
+    values ('${libre}', 'prueba-20k@guds.test', 'Prueba 20k', 'cliente', '${cliGuds}', true);` : '';
+  const resuelto20k = (obj) => Promise.resolve(obj.error ? obj : { ok: JSON.stringify(obj) });
+  if (uid20k) {
+    const Cli = { uid: uid20k, empresa: emp20k, previo: previo20k };
+    const esperados = (await sql(`select id from productos where activo and coalesce(vendible, true) and not coalesce(oculto_tienda, false)
+      and (empresa_id = '${emp20k}' or empresa_id is null)`)).map((x) => x.id);
+    const r = await como(Cli, `select row_to_json(t)::text from (select (j->>'total')::int total,
+        (select array_agg(x->>'id') from jsonb_array_elements(j->'productos') x) ids, position('"costo"' in j::text) > 0 con_costo
+      from (select public.catalogo_portal(null, null, 'nombre', 100, 0) j) s) t`);
+    const v = r.ok ? JSON.parse(r.ok) : null;
+    await caso('Catálogo 20k: un cliente recibe solo los productos a la venta de su empresa, sin costo', (x) => x.total === x.esperados
+      && x.ajenos === 0 && x.total > 0 && x.con_costo === false,
+      resuelto20k(r.error ? r : { total: v.total, esperados: esperados.length, ajenos: (v.ids ?? []).filter((id) => !esperados.includes(id)).length, con_costo: v.con_costo }));
+    await caso('Catálogo 20k: pedir la otra empresa (no habilitada) no devuelve su catálogo', 'Selecciona una empresa',
+      como({ ...Cli, empresa: otra20k }, `select public.catalogo_portal()::text`));
+    const ajeno = (await sql(`select id from productos where activo and empresa_id = '${otra20k}' limit 1`))[0]?.id;
+    if (ajeno) {
+      await caso('Catálogo 20k: la ficha de un producto de otra empresa no se ve', (x) => x === null,
+        como(Cli, `select public.producto_portal('${ajeno}')::text`));
+    }
+    // Búsqueda sin acentos: un nombre con tilde o ñ se encuentra escrito sin ella (y en mayúsculas)
+    const conTilde = (await sql(`select id, nombre from productos where activo and coalesce(vendible, true) and not coalesce(oculto_tienda, false)
+      and empresa_id = '${emp20k}' and nombre ~ '[ÁÉÍÓÚÑáéíóúñ]' limit 1`))[0];
+    if (conTilde) {
+      const palabra = conTilde.nombre.split(/\s+/).find((w) => /[ÁÉÍÓÚÑáéíóúñ]/.test(w));
+      const sinTilde = palabra.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      await caso(`Catálogo 20k: buscar "${sinTilde}" (sin acento) encuentra «${palabra}»`, (x) => x?.ok === true,
+        como(Cli, `select row_to_json(t)::text from (select exists (select 1 from jsonb_array_elements(public.catalogo_portal(${lit(sinTilde)}, null, 'relevancia', 100, 0)->'productos') x
+          where x->>'id' = '${conTilde.id}') ok) t`));
+    }
+    const conSku = (await sql(`select id, sku from productos where activo and coalesce(vendible, true) and not coalesce(oculto_tienda, false)
+      and empresa_id = '${emp20k}' and sku is not null and sku <> '' limit 1`))[0];
+    if (conSku) {
+      await caso('Catálogo 20k: buscar por código (SKU) lo pone primero', (x) => x?.primero === conSku.id,
+        como(Cli, `select row_to_json(t)::text from (select public.catalogo_portal(${lit(conSku.sku)})->'productos'->0->>'id' primero) t`));
+    }
+    await caso('Catálogo 20k: el precio de la página es precio_efectivo del cliente', (x) => x?.distintos === 0 && x?.n > 0,
+      como(Cli, `select row_to_json(t)::text from (select count(*) n, count(*) filter (where (x->>'precio')::numeric
+          is distinct from public.precio_efectivo((x->>'id')::uuid, nullif(x->'producto_empaques'->0->>'tipo_empaque_id', '')::uuid, public.mi_cliente_id())) distintos
+        from jsonb_array_elements(public.catalogo_portal(null, null, 'relevancia', 100, 0)->'productos') x) t`));
+    await caso('Catálogo 20k: un orden no válido se rechaza', 'Orden no válido',
+      como(Cli, `select public.catalogo_portal(null, null, 'costo')::text`));
+  }
+  await caso('Catálogo 20k: un anónimo no ejecuta catalogo_portal', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select public.catalogo_portal()::text`));
+  await caso('Catálogo 20k: un anónimo no ejecuta la ficha ni las categorías', (x) => x?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace
+      and p.proname in ('producto_portal', 'categorias_portal', 'catalogo_portal') and has_function_privilege('anon', p.oid, 'execute')) t`));
+  await caso('Catálogo 20k: las funciones internas no se ejecutan por la API', (x) => x?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace
+      and p.proname in ('portal_contexto', 'portal_producto_item')
+      and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))) t`));
+  await caso('Catálogo 20k: el personal (no cliente) no usa el catálogo del portal', 'solo para clientes',
+    como(E, `select public.catalogo_portal()::text`));
+}
+
+// ── Costo de Odoo y motor de reportes tipo cubo (20j): permiso de reportes, costo solo para administración, totales ──
+{
+  const P = `'2025-01-01', '2026-09-28'`;
+  const valor = async (q, empresa = guds.id, extra = {}) => { const r = await como({ empresa, ...extra }, q); return r.ok ? JSON.parse(r.ok) : { error: r.error }; };
+  const resuelto = (obj) => Promise.resolve(obj.error ? obj : { ok: JSON.stringify(obj) });
+  const [cob] = await sql(`select count(*) filter (where costo > 0 and empresa_id = '${guds.id}') guds, count(*) filter (where costo > 0 and empresa_id = '${qrt.id}') qrt from producto_costos`);
+  casos.push({ ok: cob.guds > 0 && cob.qrt > 0 ? '✓' : '✗', caso: 'Costo: el importador trae el costo de Odoo de cada empresa', resultado: JSON.stringify(cob) });
+  await caso('Costo: sin sesión no se lee el costo de los productos', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select count(*)::text from public.producto_costos`));
+  await caso('Costo: productos.costo queda vacío aunque se escriba (el catálogo es público)', (r) => r && r.costo === null,
+    como(E, upd('productos', `costo = 5`, prodOdoo, 'costo')));
+  await caso('Costo: el costo del resumen de Profit no se lee por la API', 'permission denied',
+    como(E, `select sum(costo_usd)::text from public.profit_documentos`));
+  if (vendGuds) {
+    await caso('Cubo: un vendedor sin el permiso "reportes" no ejecuta el motor', 'permiso para ver reportes',
+      como({ uid: vendGuds, empresa: guds.id }, `select count(*)::text from public.reporte_ventas_cubo(${P}, array['vendedor'])`));
+    await caso('Cubo: un vendedor sin el permiso "reportes" no ejecuta la versión compacta (pantalla)', 'permiso para ver reportes',
+      como({ uid: vendGuds, empresa: guds.id }, `select public.reporte_ventas_cubo_json(${P}, array['vendedor'])::text`));
+    await caso('Cubo: un vendedor sin el permiso "reportes" no descarga el detalle de líneas', 'permiso para ver reportes',
+      como({ uid: vendGuds, empresa: guds.id }, `select count(*)::text from public.reporte_ventas_lineas('2026-04-01', '2026-04-30')`));
+    await caso('Costo: un vendedor no lee producto_costos', (r) => r?.n === 0,
+      como({ uid: vendGuds, empresa: guds.id }, `select row_to_json(t)::text from (select count(*) n from public.producto_costos) t`));
+    // Usuario con permiso de reportes pero sin rol de administración: el rol del vendedor recibe "reportes: ver" dentro del
+    // bloque (se deshace al terminar)
+    const previoRep = `insert into public.permisos (rol_id, modulo_id, puede_ver) select u.rol_id, m.id, true from public.usuarios u, public.modulos m
+      where u.auth_id = '${vendGuds}' and m.codigo = 'reportes' on conflict (rol_id, modulo_id) do update set puede_ver = true;`;
+    await caso('Cubo: un usuario de reportes sin rol de administración no ve el costo ni el margen', (r) => r?.filas > 1 && r.venta > 0
+      && r.con_costo === 0 && r.ve_costo === false && r.detalle > 0 && r.detalle_costo === 0 && r.tabla === 0
+      && r.json_ve_costo === false && r.json_filas > 1 && r.json_costo === 0,
+      como({ uid: vendGuds, empresa: guds.id, previo: previoRep }, `select row_to_json(t)::text from (select count(*) filas,
+        max(venta_usd) filter (where nivel = 0) venta,
+        count(*) filter (where costo_usd is not null or venta_con_costo_usd is not null or margen_usd is not null or margen_pct is not null or cobertura_costo_pct is not null) con_costo,
+        bool_or(ve_costo) ve_costo,
+        (select count(*) from public.reporte_ventas_lineas('2026-04-01', '2026-04-30')) detalle,
+        (select count(*) from public.reporte_ventas_lineas('2026-04-01', '2026-04-30') where ultimo_costo_usd is not null or costo_usd is not null or rentabilidad_usd is not null) detalle_costo,
+        (select count(*) from public.producto_costos) tabla,
+        (select (j ->> 've_costo')::boolean from (select public.reporte_ventas_cubo_json(${P}, array['categoria', 'producto']) j) x) json_ve_costo,
+        (select json_array_length(j -> 'filas') from (select public.reporte_ventas_cubo_json(${P}, array['categoria', 'producto']) j) x) json_filas,
+        (select count(*) from (select public.reporte_ventas_cubo_json(${P}, array['categoria', 'producto']) j) x, json_array_elements(x.j -> 'filas') e
+          where coalesce(e ->> 17, e ->> 18, e ->> 19, e ->> 20, e ->> 21) is not null) json_costo
+        from public.reporte_ventas_cubo(${P}, array['categoria', 'producto'])) t`));
+  }
+  await caso('Cubo: administración sí ve costo y margen (sin costo no hay margen)', (r) => r?.ve_costo === true && r.con_margen > 0 && r.margen_sin_costo === 0,
+    como(E, `select row_to_json(t)::text from (select bool_or(ve_costo) ve_costo, count(*) filter (where margen_pct is not null) con_margen,
+      count(*) filter (where margen_pct is not null and coalesce(venta_con_costo_usd, 0) <= 0) margen_sin_costo
+      from public.reporte_ventas_cubo(${P}, array['producto'])) t`));
+
+  // El total del motor = reporte_ventas en el mismo período y fuente (por documento: exacto; por línea: redondeo por grupo)
+  const totales = async (fuente) => valor(`select row_to_json(t)::text from (select
+      (select round(sum(neto_usd), 2) from public.reporte_ventas(${P}, 'empresa', '${fuente}')) rv,
+      (select round(sum(financieras_usd), 2) from public.reporte_ventas(${P}, 'empresa', '${fuente}')) rv_fin,
+      (select round(sum(neto_usd), 2) from public.reporte_ventas(${P}, 'producto', '${fuente}', false)) rv_lineas,
+      (select round(venta_usd, 2) from public.reporte_ventas_cubo(${P}, array['vendedor', 'cliente'], '${fuente}') where nivel = 0) cubo,
+      (select round(financieras_usd, 2) from public.reporte_ventas_cubo(${P}, array['vendedor', 'cliente'], '${fuente}') where nivel = 0) cubo_fin,
+      (select round(venta_usd, 2) from public.reporte_ventas_cubo(${P}, array['categoria', 'producto'], '${fuente}', '{}', null, false) where nivel = 0) cubo_lineas) t`);
+  const tt = { ambas: await totales('ambas'), odoo: await totales('odoo'), profit: await totales('profit') };
+  await caso('Cubo: el total del motor es igual a reporte_ventas (mismo período y fuente)', (r) => Object.values(r).every((x) =>
+    x.rv !== null && Number(x.cubo) === Number(x.rv) && Number(x.cubo_fin) === Number(x.rv_fin) && Math.abs(Number(x.cubo_lineas) - Number(x.rv_lineas)) < 0.5)
+    && Number(r.ambas.cubo) > 0 && Math.abs(Number(r.ambas.cubo) - Number(r.odoo.cubo) - Number(r.profit.cubo)) < 0.02, resuelto(tt));
+
+  // La suma de los subtotales de cada nivel es igual al total (unidades y costo también), y en la matriz la suma de las columnas
+  await caso('Cubo: la suma de los subtotales es igual al total', (r) => r && [r.n1, r.n2, r.n3, r.u1, r.u3, r.c3, r.m].every((d) => d !== null && Math.abs(Number(d)) < 0.005) && r.filas > 10,
+    como(E, `select row_to_json(t)::text from (select count(*) filas,
+      sum(venta_usd) filter (where nivel = 1) - max(venta_usd) filter (where nivel = 0) n1,
+      sum(venta_usd) filter (where nivel = 2) - max(venta_usd) filter (where nivel = 0) n2,
+      sum(venta_usd) filter (where nivel = 3) - max(venta_usd) filter (where nivel = 0) n3,
+      sum(unidades) filter (where nivel = 1) - max(unidades) filter (where nivel = 0) u1,
+      sum(unidades) filter (where nivel = 3) - max(unidades) filter (where nivel = 0) u3,
+      sum(costo_usd) filter (where nivel = 3) - max(costo_usd) filter (where nivel = 0) c3,
+      (select sum(venta_usd) filter (where nivel = 0 and col is not null) - max(venta_usd) filter (where nivel = 0 and col is null)
+       from public.reporte_ventas_cubo(${P}, array['anio'], 'ambas', '{}', 'mes')) m
+      from public.reporte_ventas_cubo(${P}, array['categoria', 'linea', 'producto'])) t`));
+  // Los caminos rápidos (resumen mensual de Profit, sin conteos) dan lo mismo que recorrer las líneas (con conteos)
+  await caso('Cubo: el resumen mensual de Profit cuadra con las líneas (venta, unidades y costo)', (r) => r?.filas_m > 10 && r.filas_m === r.filas_l
+    && Number(r.venta_m) === Number(r.venta_l) && Number(r.und_m) === Number(r.und_l) && Number(r.costo_m) === Number(r.costo_l),
+    como({ empresa: 'todas' }, `select row_to_json(t)::text from (select
+      (select count(*) from public.reporte_ventas_cubo(${P}, array['categoria', 'producto'], 'ambas', '{}', null, false)) filas_m,
+      (select count(*) from public.reporte_ventas_cubo(${P}, array['categoria', 'producto'], 'ambas', '{}', null, true)) filas_l,
+      (select round(venta_usd, 4) from public.reporte_ventas_cubo(${P}, array['categoria', 'producto'], 'ambas', '{}', null, false) where nivel = 0) venta_m,
+      (select round(venta_usd, 4) from public.reporte_ventas_cubo(${P}, array['categoria', 'producto'], 'ambas', '{}', null, true) where nivel = 0) venta_l,
+      (select unidades from public.reporte_ventas_cubo(${P}, array['categoria', 'producto'], 'ambas', '{}', null, false) where nivel = 0) und_m,
+      (select unidades from public.reporte_ventas_cubo(${P}, array['categoria', 'producto'], 'ambas', '{}', null, true) where nivel = 0) und_l,
+      (select round(costo_usd, 4) from public.reporte_ventas_cubo(${P}, array['categoria', 'producto'], 'ambas', '{}', null, false) where nivel = 0) costo_m,
+      (select round(costo_usd, 4) from public.reporte_ventas_cubo(${P}, array['categoria', 'producto'], 'ambas', '{}', null, true) where nivel = 0) costo_l) t`));
+  await caso('Cubo: los filtros cruzados dan la misma cifra que la celda del cubo', (r) => r?.celda !== undefined && Number(r.filtrado) === Number(r.celda) && Number(r.celda) !== 0,
+    como(E, `with c as (select k1, k2, venta_usd from public.reporte_ventas_cubo(${P}, array['vendedor', 'categoria']) where nivel = 2 and k1 <> '' and k2 <> '' order by venta_usd desc limit 1)
+      select row_to_json(t)::text from (select (select round(venta_usd, 6) from c) celda,
+        (select round(venta_usd, 6) from public.reporte_ventas_cubo(${P}, array[]::text[], 'ambas',
+          jsonb_build_object('vendedor', jsonb_build_array((select k1 from c)), 'categoria', jsonb_build_array((select k2 from c))))) filtrado) t`));
+  await caso('Cubo: un nivel no válido se rechaza (no se arma SQL con él)', 'Nivel no válido',
+    como(E, `select count(*)::text from public.reporte_ventas_cubo(${P}, array['categoria; select 1'])`));
+  await caso('Cubo: un filtro no válido se rechaza', 'Filtro no válido',
+    como(E, `select count(*)::text from public.reporte_ventas_cubo(${P}, array['categoria'], 'ambas', '{"costo": ["1"]}')`));
+  await caso('Cubo: las funciones auxiliares no se ejecutan desde la API', (r) => r?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace
+      and p.proname in ('cubo_dimension_sql', 'cubo_dimensiones_documento', 'cubo_etiqueta_sql', 'cubo_busqueda_sql', 'cubo_base_sql',
+        'cubo_base_docs_sql', 'cubo_base_mensual_sql', 'cubo_filtros_sql', 'trg_producto_sin_costo', 'profit_publicar_carga', 'profit_emparejar',
+        'profit_resumir_articulos_mes')
+      and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))) t`));
+  await caso('Cubo: sin sesión no se ejecuta', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select count(*)::text from public.reporte_ventas_cubo(${P}, array['vendedor'])`));
+}
+
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {
   const pol = await sql(String.raw`select tablename || '.' || policyname p, coalesce(qual,'') || ' ' || coalesce(with_check,'') t from pg_policies where schemaname = 'public'`);

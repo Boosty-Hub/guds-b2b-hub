@@ -139,7 +139,11 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       d.clientes = await odoo.leerTodo('res.partner', [['customer_rank', '>', 0], ...deEmpresa], CAMPOS_CLIENTE, { empresa: cid });
       d.proveedores = await odoo.leerTodo('res.partner', [['supplier_rank', '>', 0], ...deEmpresa], CAMPOS_PROVEEDOR, { empresa: cid });
       d.productos = await odoo.leerTodo('product.template', deEmpresa,
-        ['name', 'default_code', 'description_sale', 'categ_id', 'uom_id', 'type', 'is_storable', 'sale_ok', 'active', 'company_id', 'taxes_id', 'write_date'], { empresa: cid });
+        ['name', 'default_code', 'description_sale', 'categ_id', 'uom_id', 'type', 'is_storable', 'sale_ok', 'active', 'company_id', 'taxes_id', 'write_date',
+          'standard_price'], { empresa: cid });
+      // Costo promedio (standard_price depende de la empresa, fase 20j): los productos compartidos se leen con la primera
+      // empresa; en las demás se lee aparte su costo con el contexto de cada una
+      d.costosCompartidos = i > 0 ? await odoo.leerTodo('product.template', [['company_id', '=', false]], ['standard_price'], { empresa: cid }) : [];
       // Impuestos de venta de la empresa (el IVA de cada producto) y listas de precios con sus reglas (fase 20a)
       d.impuestos = await odoo.leerTodo('account.tax', [['type_tax_use', '=', 'sale'], ['company_id', '=', cid]],
         ['name', 'amount', 'amount_type', 'price_include'], { empresa: cid });
@@ -721,6 +725,25 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
               and not productos.oculto_tienda,
             excluded.tipo_odoo, excluded.vendible, excluded.controla_stock, excluded.impuesto_pct, excluded.impuesto_nombre)`);
       }
+
+      // Costo promedio de Odoo por empresa (fase 20j): solo las filas que cambian; cada valor nuevo queda en el historial.
+      // No va en productos.costo: esa columna la lee el catálogo público y queda siempre vacía.
+      const costos = [...d.productos, ...d.costosCompartidos].map((p) => ({ odoo_id: p.id, costo: Number(p.standard_price) || 0 }));
+      for (const lote of lotes(costos, 1000)) {
+        await escribir(`
+          with x as (
+            select p.id producto_id, x.costo
+            from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, costo numeric) join productos p on p.odoo_id = x.odoo_id
+          ), cambios as (
+            insert into producto_costos (producto_id, empresa_id, costo, costo_actualizado_at)
+            select x.producto_id, '${E}', x.costo, '${ts}' from x
+            on conflict (producto_id, empresa_id) do update set costo = excluded.costo, costo_actualizado_at = excluded.costo_actualizado_at
+            where producto_costos.costo is distinct from excluded.costo
+            returning producto_id, empresa_id, costo, costo_actualizado_at
+          )
+          insert into producto_costos_historial (producto_id, empresa_id, costo, desde) select * from cambios`);
+      }
+      log(`    costo de Odoo: ${costos.filter((c) => c.costo > 0).length} de ${costos.length} productos con costo`);
 
       // Reglas de las listas de precios (precio fijo o descuento por producto, categoría o global)
       const reglas = d.reglas.map((g) => ({

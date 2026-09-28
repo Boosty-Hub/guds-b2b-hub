@@ -93,6 +93,25 @@ interface ImportRow {
   errors: string[];
 }
 
+// Costo del producto: viene de Odoo (costo promedio) y solo lo ve administración (tabla producto_costos, fase 20j)
+const CostoOdoo = ({ productoId }: { productoId?: string }) => {
+  const [c, setC] = useState<{ costo: number | null; costo_actualizado_at: string | null } | null | undefined>(undefined);
+  useEffect(() => {
+    if (!productoId) { setC(null); return; }
+    let activo = true;
+    supabase.from("producto_costos").select("costo, costo_actualizado_at").eq("producto_id", productoId).maybeSingle()
+      .then(({ data }) => { if (activo) setC((data as { costo: number | null; costo_actualizado_at: string | null } | null) ?? null); });
+    return () => { activo = false; };
+  }, [productoId]);
+  return (
+    <p className="flex h-10 items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 text-sm" title="El costo lo mantiene Odoo">
+      {c === undefined ? <span className="text-muted-foreground">…</span>
+        : c?.costo != null && Number(c.costo) > 0 ? <><span className="tabular-nums font-medium">${Number(c.costo).toFixed(2)}</span><span className="text-xs text-muted-foreground">Odoo{c.costo_actualizado_at ? ` · ${new Date(c.costo_actualizado_at).toLocaleDateString("es-VE")}` : ""}</span></>
+        : <span className="text-xs text-muted-foreground">Sin costo en Odoo</span>}
+    </p>
+  );
+};
+
 const Productos = () => {
   const [productos, setProductos] = useState<ProductoConRelaciones[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -1258,13 +1277,7 @@ const Productos = () => {
               </div>
               <div className="space-y-2">
                 <Label>Costo</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.costo}
-                  onChange={(e) => setFormData({ ...formData, costo: parseFloat(e.target.value) || 0 })}
-                />
+                <p className="flex h-10 items-center rounded-md border border-dashed border-border px-3 text-xs text-muted-foreground">Viene de Odoo (costo promedio)</p>
               </div>
             </div>
 
@@ -1423,13 +1436,7 @@ const Productos = () => {
               </div>
               <div className="space-y-2">
                 <Label>Costo</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.costo}
-                  onChange={(e) => setFormData({ ...formData, costo: parseFloat(e.target.value) || 0 })}
-                />
+                <CostoOdoo productoId={selectedProducto?.id} />
               </div>
             </div>
 
