@@ -1,238 +1,198 @@
-import { useState, useEffect } from "react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
-import { useCurrency } from "@/contexts/CurrencyContext";
-import { useAuth } from "@/contexts/AuthContext";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { 
-  User,
-  MapPin,
-  CreditCard,
-  Bell,
-  HelpCircle,
-  FileText,
-  LogOut,
-  ChevronRight,
-  Settings,
-  Heart,
-  Gift,
-  Shield,
-  Star,
-  Loader2,
-  Trash2,
-  Boxes,
-  Receipt
-} from "lucide-react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { supabase, Cliente } from "@/lib/supabase";
+import {
+  Bell,
+  Boxes,
+  ChevronRight,
+  CreditCard,
+  FileText,
+  Heart,
+  HelpCircle,
+  Landmark,
+  LogOut,
+  MapPin,
+  Receipt,
+  Settings,
+  Shield,
+  TicketPercent,
+  User,
+  type LucideIcon,
+} from "lucide-react";
+import { supabase, type Cliente } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+import { useCurrency } from "@/contexts/CurrencyContext";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
+import { PortalPagina } from "@/components/portal/PortalPagina";
+import { Panel } from "@/components/portal/sistema";
 
-const menuItems = [
+// Mi cuenta: la empresa y el usuario, el crédito (misma función que el checkout) y los accesos a datos, finanzas y ayuda.
+
+const SECCIONES: { titulo: string; items: { icono: LucideIcon; etiqueta: string; ruta: string; detalle?: string }[] }[] = [
   {
-    title: "Mi Cuenta",
+    titulo: "Mi cuenta",
     items: [
-      { icon: User, label: "Datos personales", path: "/portal/cuenta/perfil", badge: null },
-      { icon: MapPin, label: "Direcciones de entrega", path: "/portal/cuenta/direcciones", badge: null },
-      { icon: CreditCard, label: "Cuentas para pagar", path: "/portal/cuenta/pagos", badge: null },
-    ]
+      { icono: User, etiqueta: "Datos personales", ruta: "/portal/cuenta/perfil" },
+      { icono: MapPin, etiqueta: "Direcciones de entrega", ruta: "/portal/cuenta/direcciones" },
+      { icono: Shield, etiqueta: "Seguridad", ruta: "/portal/cuenta/seguridad" },
+    ],
   },
   {
-    title: "Mis Compras",
+    titulo: "Compras",
     items: [
-      { icon: Heart, label: "Favoritos", path: "/portal/favoritos", badge: null },
-      { icon: Gift, label: "Cupones disponibles", path: "/portal/cuenta/cupones", badge: null },
-      { icon: Boxes, label: "Consignación", path: "/portal/consignacion", badge: null },
-      { icon: Receipt, label: "Retenciones", path: "/portal/retenciones", badge: null },
-    ]
+      { icono: Heart, etiqueta: "Favoritos", ruta: "/portal/favoritos" },
+      { icono: TicketPercent, etiqueta: "Cupones disponibles", ruta: "/portal/cuenta/cupones" },
+      { icono: Boxes, etiqueta: "Consignación", ruta: "/portal/consignacion" },
+    ],
   },
   {
-    title: "Configuración",
+    titulo: "Finanzas",
     items: [
-      { icon: Bell, label: "Notificaciones", path: "/portal/cuenta/notificaciones", badge: null },
-      { icon: Shield, label: "Seguridad", path: "/portal/cuenta/seguridad", badge: null },
-      { icon: Settings, label: "Preferencias", path: "/portal/cuenta/preferencias", badge: null },
-    ]
+      { icono: Landmark, etiqueta: "Cuentas para pagar", ruta: "/portal/cuenta/pagos" },
+      { icono: CreditCard, etiqueta: "Pagos y facturas", ruta: "/portal/pagos" },
+      { icono: Receipt, etiqueta: "Retenciones", ruta: "/portal/retenciones" },
+    ],
   },
   {
-    title: "Ayuda",
+    titulo: "Preferencias y ayuda",
     items: [
-      { icon: HelpCircle, label: "Centro de ayuda", path: "/portal/ayuda", badge: null },
-      { icon: FileText, label: "Términos y condiciones", path: "/terminos", badge: null },
-      { icon: Trash2, label: "Eliminar cuenta", path: "/portal/cuenta/eliminar", badge: null },
-    ]
+      { icono: Bell, etiqueta: "Notificaciones", ruta: "/portal/cuenta/notificaciones" },
+      { icono: Settings, etiqueta: "Preferencias", ruta: "/portal/cuenta/preferencias" },
+      { icono: HelpCircle, etiqueta: "Centro de ayuda", ruta: "/portal/ayuda" },
+      { icono: FileText, etiqueta: "Términos y condiciones", ruta: "/terminos" },
+    ],
   },
 ];
+
+interface Credito { modo: string; disponible: number; limite: number }
 
 const PortalCuenta = () => {
   const { formatPrice } = useCurrency();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [cliente, setCliente] = useState<Cliente | null>(null);
+  const [credito, setCredito] = useState<Credito | null>(null);
   const [stats, setStats] = useState({ pedidos: 0, favoritos: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user?.cliente_id) {
-      fetchData();
-    } else {
+    const cid = user?.cliente_id;
+    if (!cid) { setLoading(false); return; }
+    let activo = true;
+    Promise.all([
+      supabase.from("clientes").select("*").eq("id", cid).maybeSingle(),
+      supabase.from("ordenes").select("id", { count: "exact", head: true }).eq("cliente_id", cid),
+      supabase.from("favoritos").select("id", { count: "exact", head: true }).eq("usuario_id", user?.id),
+      supabase.rpc("credito_disponible", { p_cliente_id: cid }),
+    ]).then(([c, o, f, cr]) => {
+      if (!activo) return;
+      setCliente((c.data as Cliente | null) ?? null);
+      setStats({ pedidos: o.count ?? 0, favoritos: f.count ?? 0 });
+      setCredito(((cr.data as Credito[] | null) ?? [])[0] ?? null);
       setLoading(false);
-    }
-  }, [user]);
-
-  const fetchData = async () => {
-    setLoading(true);
-    
-    // Fetch cliente
-    const { data: clienteData } = await supabase
-      .from('clientes')
-      .select('*')
-      .eq('id', user?.cliente_id)
-      .single();
-    
-    if (clienteData) setCliente(clienteData);
-
-    // Fetch stats
-    const { count: pedidosCount } = await supabase
-      .from('ordenes')
-      .select('*', { count: 'exact', head: true })
-      .eq('cliente_id', user?.cliente_id);
-
-    const { count: favoritosCount } = await supabase
-      .from('favoritos')
-      .select('*', { count: 'exact', head: true })
-      .eq('usuario_id', user?.id);
-
-    setStats({
-      pedidos: pedidosCount || 0,
-      favoritos: favoritosCount || 0,
     });
+    return () => { activo = false; };
+  }, [user?.cliente_id, user?.id]);
 
-    setLoading(false);
-  };
-
-  const handleLogout = async () => {
+  const cerrarSesion = async () => {
     await supabase.auth.signOut();
     navigate("/login");
   };
 
-  const creditoDisponible = cliente ? cliente.limite_credito - cliente.credito_utilizado : 0;
-  const porcentajeCredito = cliente && cliente.limite_credito > 0 
-    ? (cliente.credito_utilizado / cliente.limite_credito) * 100 
-    : 0;
-
-  const initials = user ? `${user.nombre?.charAt(0) || ''}${user.apellido?.charAt(0) || ''}`.toUpperCase() : 'U';
+  const iniciales = user ? `${user.nombre?.charAt(0) || ""}${user.apellido?.charAt(0) || ""}`.toUpperCase() || "U" : "U";
+  const limite = Number(credito?.limite ?? 0);
+  const uso = limite > 0 ? Math.min(100, Math.max(0, (1 - Number(credito?.disponible ?? 0) / limite) * 100)) : 0;
 
   return (
-    <PortalMobileLayout title="Mi Cuenta">
-      {/* Profile Header */}
-      <div className="px-4 pt-4 pb-6">
-        <div className="bg-gradient-to-r from-primary to-primary/80 rounded-2xl p-4 text-white">
-          {loading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-white" />
-            </div>
-          ) : (
-            <>
+    <PortalPagina titulo="Mi cuenta" descripcion="Tu empresa, tus datos y tus preferencias.">
+      <div className="lg:grid lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-6">
+        <div className="space-y-4 lg:sticky lg:top-[5.5rem]">
+          {/* Perfil */}
+          <section className="rounded-xl border border-border bg-card p-5">
+            {loading ? (
               <div className="flex items-center gap-4">
-                <Avatar className="h-16 w-16 border-2 border-white/30">
-                  <AvatarImage src={user?.avatar} alt={user?.nombre || "Usuario"} />
-                  <AvatarFallback className="bg-white/20 text-white text-2xl font-bold">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1">
-                  <h2 className="text-lg font-semibold">{user?.nombre} {user?.apellido}</h2>
-                  <p className="text-sm opacity-90">{user?.email}</p>
-                  {cliente && (
-                    <div className="flex items-center gap-2 mt-1">
-                      <Badge className="bg-white/20 text-white text-xs">{cliente.tipo_negocio}</Badge>
-                    </div>
-                  )}
-                </div>
+                <Skeleton className="h-14 w-14 rounded-full" />
+                <div className="flex-1 space-y-2"><Skeleton className="h-4 w-32" /><Skeleton className="h-3 w-44" /></div>
               </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-14 w-14">
+                    <AvatarImage src={user?.avatar} alt="" />
+                    <AvatarFallback className="bg-muted text-lg font-semibold text-foreground">{iniciales}</AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <h2 className="truncate font-semibold">{[user?.nombre, user?.apellido].filter(Boolean).join(" ")}</h2>
+                    <p className="truncate text-sm text-muted-foreground">{user?.email}</p>
+                  </div>
+                </div>
+                {cliente && (
+                  <div className="mt-4 rounded-lg bg-muted/50 px-3 py-2.5">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Empresa</p>
+                    <p className="mt-0.5 text-sm font-medium leading-snug">{cliente.nombre_negocio}</p>
+                    <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">{[cliente.rif, cliente.codigo].filter(Boolean).join(" · ")}</p>
+                  </div>
+                )}
+                <dl className="mt-4 grid grid-cols-2 divide-x divide-border rounded-lg border border-border text-center">
+                  <div className="py-2.5"><dt className="text-xs text-muted-foreground">Pedidos</dt><dd className="text-lg font-semibold tabular-nums">{stats.pedidos}</dd></div>
+                  <div className="py-2.5"><dt className="text-xs text-muted-foreground">Favoritos</dt><dd className="text-lg font-semibold tabular-nums">{stats.favoritos}</dd></div>
+                </dl>
+              </>
+            )}
+          </section>
 
-              {/* Stats */}
-              <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-white/20">
-                <div className="text-center">
-                  <p className="text-2xl font-bold">{stats.pedidos}</p>
-                  <p className="text-xs opacity-80">Pedidos</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-2xl font-bold">{stats.favoritos}</p>
-                  <p className="text-xs opacity-80">Favoritos</p>
-                </div>
-              </div>
-            </>
+          {/* Crédito */}
+          {credito && (credito.modo === "abierto" || limite > 0) && (
+            <Panel titulo="Línea de crédito">
+              {credito.modo === "abierto" ? (
+                <p className="text-sm text-muted-foreground">Tienes crédito abierto (sin tope).</p>
+              ) : (
+                <>
+                  <p className="text-2xl font-semibold tabular-nums">{formatPrice(Number(credito.disponible))}</p>
+                  <p className="text-xs text-muted-foreground">disponible de {formatPrice(limite)}</p>
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+                    <div className="h-full rounded-full bg-foreground/70" style={{ width: `${uso}%` }} />
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground tabular-nums">{uso.toFixed(0)} % utilizado</p>
+                </>
+              )}
+            </Panel>
           )}
         </div>
-      </div>
 
-      {/* Credit Line Card */}
-      {cliente && cliente.limite_credito > 0 && (
-        <div className="px-4 mb-4">
-          <div className="bg-card rounded-xl border border-border p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-medium">Línea de Crédito</span>
-              <Badge variant="outline" className="text-green-500 border-green-500">Activa</Badge>
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-primary">{formatPrice(creditoDisponible)}</span>
-              <span className="text-sm text-muted-foreground">disponible</span>
-            </div>
-            <div className="h-2 bg-muted rounded-full mt-2 overflow-hidden">
-              <div className="h-full bg-primary rounded-full" style={{ width: `${porcentajeCredito}%` }} />
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {formatPrice(cliente.credito_utilizado)} utilizado de {formatPrice(cliente.limite_credito)}
-            </p>
+        {/* Menú */}
+        <div className="mt-6 space-y-6 lg:mt-0">
+          <div className="grid gap-6 md:grid-cols-2">
+            {SECCIONES.map((s) => (
+              <section key={s.titulo}>
+                <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{s.titulo}</h3>
+                <ul className="overflow-hidden rounded-xl border border-border bg-card">
+                  {s.items.map((it) => (
+                    <li key={it.ruta} className="border-b border-border last:border-0">
+                      <Link to={it.ruta} className="flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/50">
+                        <it.icono className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                        <span className="flex-1 text-sm font-medium">{it.etiqueta}</span>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
           </div>
+
+          <button type="button" onClick={cerrarSesion}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium text-foreground hover:bg-muted/50">
+            <LogOut className="h-4 w-4" />Cerrar sesión
+          </button>
+
+          {/* En B2B cerrar el acceso no es una opción del día a día: queda al fondo y discreto */}
+          <p className="text-center text-xs text-muted-foreground">
+            ¿Ya no usarás el portal? <Link to="/portal/cuenta/eliminar" className="underline underline-offset-2 hover:text-foreground">Cerrar mi acceso</Link>
+          </p>
         </div>
-      )}
-
-      {/* Menu Sections */}
-      <div className="px-4 space-y-6 pb-6">
-        {menuItems.map((section, sectionIndex) => (
-          <div key={sectionIndex}>
-            <h3 className="text-sm font-medium text-muted-foreground mb-2 px-1">
-              {section.title}
-            </h3>
-            <div className="bg-card rounded-xl border border-border overflow-hidden">
-              {section.items.map((item, itemIndex) => (
-                <Link
-                  key={itemIndex}
-                  to={item.path}
-                  className="flex items-center gap-3 p-4 hover:bg-muted/50 transition-colors border-b border-border last:border-0"
-                >
-                  <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
-                    <item.icon className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <span className="flex-1 font-medium">{item.label}</span>
-                  {item.badge && (
-                    <Badge variant="secondary" className="mr-2">{item.badge}</Badge>
-                  )}
-                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                </Link>
-              ))}
-            </div>
-          </div>
-        ))}
-
-        {/* Logout Button */}
-        <button 
-          onClick={handleLogout}
-          className="w-full bg-card rounded-xl border border-border p-4 flex items-center gap-3 text-red-500"
-        >
-          <div className="h-10 w-10 rounded-full bg-red-500/10 flex items-center justify-center">
-            <LogOut className="h-5 w-5" />
-          </div>
-          <span className="font-medium">Cerrar Sesión</span>
-        </button>
-
-        {/* App Version */}
-        <p className="text-center text-xs text-muted-foreground">
-          GUDS App v1.0.0
-        </p>
       </div>
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

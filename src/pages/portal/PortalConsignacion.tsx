@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
-import { Badge } from "@/components/ui/badge";
+import { PortalPagina } from "@/components/portal/PortalPagina";
+import { EstadoVacio, Panel, PillTono, SkeletonFilas, type Tono } from "@/components/portal/sistema";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Boxes } from "lucide-react";
+import { Boxes } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -14,10 +14,10 @@ interface Declaracion {
   factura_id: string | null; factura?: { numero: string } | null;
 }
 
-const ESTADO: Record<string, { label: string; variant: "default" | "secondary" | "destructive" }> = {
-  pendiente: { label: "Pendiente", variant: "secondary" },
-  aprobado: { label: "Aprobado", variant: "default" },
-  rechazado: { label: "Rechazado", variant: "destructive" },
+const ESTADO: Record<string, { label: string; tono: Tono }> = {
+  pendiente: { label: "Pendiente", tono: "pendiente" },
+  aprobado: { label: "Aprobado", tono: "ok" },
+  rechazado: { label: "Rechazado", tono: "riesgo" },
 };
 
 const PortalConsignacion = () => {
@@ -52,25 +52,22 @@ const PortalConsignacion = () => {
   useEffect(() => { cargar(); }, [user?.cliente_id]);
 
   return (
-    <PortalMobileLayout title="Consignación">
+    <PortalPagina titulo="Consignación" descripcion="Declara lo que vendiste del inventario que tienes en consignación.">
       {loading ? (
-        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        <SkeletonFilas n={2} alto="h-48" />
       ) : !almacen ? (
-        <div className="flex flex-col items-center px-4 py-16 text-center text-muted-foreground">
-          <Boxes className="mb-3 h-10 w-10 opacity-50" />
-          <p>No tenés inventario en consignación asignado.</p>
+        <div className="rounded-xl border border-border bg-card">
+          <EstadoVacio icono={Boxes} titulo="No tienes inventario en consignación" descripcion="Si trabajas con consignación, tu ejecutivo de cuenta puede asignarte un almacén." />
         </div>
       ) : (
-        <div className="space-y-6 px-4 pt-4">
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="mb-3 font-semibold">Declarar venta — {almacen.nombre}</h2>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] lg:items-start">
+          <Panel titulo="Declarar venta" descripcion={almacen.nombre}>
             <DeclararVentaForm almacenId={almacen.id} stock={stock} onDeclarado={cargar} />
-          </div>
+          </Panel>
 
-          <div className="rounded-xl border border-border bg-card shadow-sm">
-            <div className="border-b border-border p-5"><h2 className="font-semibold">Mis declaraciones ({declaraciones.length})</h2></div>
+          <Panel titulo={`Mis declaraciones (${declaraciones.length})`} cuerpoClassName="p-0 sm:p-0">
             {declaraciones.length === 0 ? (
-              <p className="p-8 text-center text-muted-foreground">Todavía no declaraste ninguna venta.</p>
+              <p className="p-8 text-center text-sm text-muted-foreground">Todavía no has declarado ninguna venta.</p>
             ) : (
               <Table>
                 <TableHeader>
@@ -83,20 +80,20 @@ const PortalConsignacion = () => {
                 <TableBody>
                   {declaraciones.map((d) => (
                     <TableRow key={d.id}>
-                      <TableCell className="font-mono text-sm text-primary">{d.numero}</TableCell>
+                      <TableCell className="font-mono text-sm">{d.numero}</TableCell>
                       <TableCell className="text-muted-foreground">{new Date(d.fecha).toLocaleDateString("es-VE")}</TableCell>
-                      <TableCell className="text-right font-semibold">{formatPrice(d.total)}</TableCell>
-                      <TableCell><Badge variant={ESTADO[d.estado]?.variant ?? "secondary"}>{ESTADO[d.estado]?.label ?? d.estado}</Badge></TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{formatPrice(d.total)}</TableCell>
+                      <TableCell><PillTono tono={ESTADO[d.estado]?.tono ?? "neutro"}>{ESTADO[d.estado]?.label ?? d.estado}</PillTono></TableCell>
                       <TableCell className="font-mono text-sm text-muted-foreground">{d.factura?.numero || "—"}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             )}
-          </div>
+          </Panel>
         </div>
       )}
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

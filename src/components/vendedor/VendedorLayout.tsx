@@ -71,20 +71,22 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
         <VendedorSidebar />
       </div>
 
-      {/* Mobile Header */}
+      {/* Mobile Header: en una sola fila los controles dejaban el título en 5 px. Fila 1: menú, título de la pantalla y
+          campana; fila 2: buscador (ocupa lo que sobra), empresa, moneda y soporte. */}
       <header className="md:hidden sticky top-0 z-50 bg-emerald-500 text-white">
-        <div className="flex h-14 items-center justify-between gap-1 px-2">
+        <div className="flex h-12 items-center gap-1 px-2">
           <button onClick={() => setIsMobileMenuOpen(true)} className="shrink-0 p-1.5" aria-label="Abrir menú">
             <Menu className="h-6 w-6" />
           </button>
-          <h1 className="min-w-0 flex-1 truncate font-semibold">{title}</h1>
-          <div className="flex shrink-0 items-center gap-1">
-            <BuscadorGlobal compacto atajo={false} contexto="vendedor" modulos={modulosVendedor} className="border-white/30 bg-white/15 text-white hover:bg-white/25" />
-            <EmpresaSelector variant="header" compacto />
-            <CurrencySwitch variant="header" />
-            <BoostySupportSlot media="(max-width: 767.98px)" />
-            <NotificationsDropdown variant="header" />
-          </div>
+          <h1 className="min-w-0 flex-1 truncate text-base font-semibold" data-testid="titulo-movil">{title}</h1>
+          <NotificationsDropdown variant="header" />
+        </div>
+        <div className="flex items-center gap-1.5 px-2 pb-2">
+          <BuscadorGlobal atajo={false} contexto="vendedor" modulos={modulosVendedor}
+            className="w-auto min-w-0 flex-1 border-white/30 bg-white/15 text-white/90 hover:bg-white/25 [&_kbd]:hidden" />
+          <EmpresaSelector variant="header" compacto />
+          <CurrencySwitch variant="header" />
+          <BoostySupportSlot media="(max-width: 767.98px)" />
         </div>
       </header>
       <div className="md:hidden">
@@ -146,7 +148,7 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
 
       {/* Mobile Menu Sheet */}
       <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-        <SheetContent side="left" className="w-80 p-0">
+        <SheetContent side="left" className="flex w-80 flex-col gap-0 p-0">
           <SheetHeader className="p-4 border-b border-border">
             <SheetTitle className="flex items-center gap-3">
               <Logo className="h-8 text-primary" />
@@ -170,8 +172,8 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
             </div>
           </div>
 
-          {/* Navigation */}
-          <nav className="p-4 space-y-1">
+          {/* Navigation: todas las secciones de navegacion.ts; se desplaza si la pantalla es baja */}
+          <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-4">
             {sheetNavItems.map((item) => (
               <NavLink
                 key={item.path}
@@ -193,7 +195,7 @@ export const VendedorLayout = ({ children, title }: VendedorLayoutProps) => {
           </nav>
 
           {/* Logout */}
-          <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border">
+          <div className="shrink-0 border-t border-border p-4">
             <button 
               onClick={handleLogout}
               className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-destructive hover:bg-destructive/10"

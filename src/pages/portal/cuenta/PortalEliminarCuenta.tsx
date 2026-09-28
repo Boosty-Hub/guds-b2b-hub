@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
+import { PortalPagina } from "@/components/portal/PortalPagina";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { 
-  ChevronLeft,
+import {
   AlertTriangle,
   Trash2,
   Loader2,
@@ -63,7 +62,7 @@ const PortalEliminarCuenta = () => {
 
   if (deleted) {
     return (
-      <PortalMobileLayout showHeader={false} showNav={false}>
+      <PortalPagina titulo="Cerrar mi acceso" volver="/portal/cuenta" etiquetaVolver="Mi cuenta" ancho="estrecho">
         <div className="flex flex-col items-center justify-center min-h-screen px-4">
           <div className="h-16 w-16 rounded-full bg-green-500/20 flex items-center justify-center mb-4">
             <CheckCircle className="h-8 w-8 text-green-500" />
@@ -73,23 +72,14 @@ const PortalEliminarCuenta = () => {
             Serás redirigido a la página principal...
           </p>
         </div>
-      </PortalMobileLayout>
+      </PortalPagina>
     );
   }
 
   return (
-    <PortalMobileLayout showHeader={false} showNav={false}>
-      {/* Header */}
-      <div className="bg-destructive text-destructive-foreground px-4 py-3 sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-1">
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-          <h1 className="text-lg font-semibold">Eliminar Cuenta</h1>
-        </div>
-      </div>
+    <PortalPagina titulo="Cerrar mi acceso" volver="/portal/cuenta" etiquetaVolver="Mi cuenta" ancho="estrecho">
 
-      <div className="px-4 py-4 space-y-6">
+      <div className="pb-6 space-y-6">
         {/* Warning */}
         <div className="bg-destructive/10 rounded-xl p-4 flex items-start gap-3">
           <div className="h-12 w-12 rounded-full bg-destructive/20 flex items-center justify-center flex-shrink-0">
@@ -207,7 +197,7 @@ const PortalEliminarCuenta = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

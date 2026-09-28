@@ -1,3 +1,5 @@
+import { lazy, Suspense } from "react";
+import { Loader2 } from "lucide-react";
 import { Toaster } from "@/components/ui/toaster";
 import { CambioClaveObligatorio } from "@/components/CambioClaveObligatorio";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -16,117 +18,126 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { BoostySupport } from "@/components/support/BoostySupport";
 
 // Public Pages
-import Landing from "./pages/Landing";
-import Login from "./pages/Login";
-import RestablecerClave from "./pages/RestablecerClave";
-import Registro from "./pages/Registro";
-import TerminosCondiciones from "./pages/TerminosCondiciones";
-import Soporte from "./pages/Soporte";
-import PoliticasPrivacidad from "./pages/PoliticasPrivacidad";
+const Landing = lazy(() => import("./pages/Landing"));
+const Login = lazy(() => import("./pages/Login"));
+const RestablecerClave = lazy(() => import("./pages/RestablecerClave"));
+const Registro = lazy(() => import("./pages/Registro"));
+const TerminosCondiciones = lazy(() => import("./pages/TerminosCondiciones"));
+const Soporte = lazy(() => import("./pages/Soporte"));
+const PoliticasPrivacidad = lazy(() => import("./pages/PoliticasPrivacidad"));
 
 // Admin Pages
-import Index from "./pages/Index";
-import Reportes from "./pages/Reportes";
-import Ordenes from "./pages/Ordenes";
-import Clientes from "./pages/Clientes";
-import Productos from "./pages/Productos";
-import Inventario from "./pages/Inventario";
-import Almacenes from "./pages/Almacenes";
-import AlmacenDetalle from "./pages/AlmacenDetalle";
-import Consignacion from "./pages/Consignacion";
-import Precios from "./pages/Precios";
-import Cuentas from "./pages/Cuentas";
-import CuentaDetalle from "./pages/CuentaDetalle";
-import Pagos from "./pages/Pagos";
-import CuentasPorCobrar from "./pages/CuentasPorCobrar";
-import Facturas from "./pages/Facturas";
-import FacturaDetalle from "./pages/FacturaDetalle";
-import NotasCredito from "./pages/NotasCredito";
-import Retenciones from "./pages/Retenciones";
-import Bancos from "./pages/Bancos";
-import Proveedores from "./pages/Proveedores";
-import ProveedorDetalle from "./pages/ProveedorDetalle";
-import CuentasPorPagar from "./pages/CuentasPorPagar";
-import FacturaProveedorDetalle from "./pages/FacturaProveedorDetalle";
-import Transferencias from "./pages/Transferencias";
-import TransferenciaDetalle from "./pages/TransferenciaDetalle";
-import LoteDetalle from "./pages/LoteDetalle";
-import BancoDetalle from "./pages/BancoDetalle";
-import Conciliacion from "./pages/Conciliacion";
-import Perfil from "./pages/Perfil";
-import NotFound from "./pages/NotFound";
+const Index = lazy(() => import("./pages/Index"));
+const Reportes = lazy(() => import("./pages/Reportes"));
+const Ordenes = lazy(() => import("./pages/Ordenes"));
+const Clientes = lazy(() => import("./pages/Clientes"));
+const Productos = lazy(() => import("./pages/Productos"));
+const Inventario = lazy(() => import("./pages/Inventario"));
+const Almacenes = lazy(() => import("./pages/Almacenes"));
+const AlmacenDetalle = lazy(() => import("./pages/AlmacenDetalle"));
+const Consignacion = lazy(() => import("./pages/Consignacion"));
+const Precios = lazy(() => import("./pages/Precios"));
+const Cuentas = lazy(() => import("./pages/Cuentas"));
+const CuentaDetalle = lazy(() => import("./pages/CuentaDetalle"));
+const Pagos = lazy(() => import("./pages/Pagos"));
+const CuentasPorCobrar = lazy(() => import("./pages/CuentasPorCobrar"));
+const Facturas = lazy(() => import("./pages/Facturas"));
+const FacturaDetalle = lazy(() => import("./pages/FacturaDetalle"));
+const NotasCredito = lazy(() => import("./pages/NotasCredito"));
+const Retenciones = lazy(() => import("./pages/Retenciones"));
+const Bancos = lazy(() => import("./pages/Bancos"));
+const Proveedores = lazy(() => import("./pages/Proveedores"));
+const ProveedorDetalle = lazy(() => import("./pages/ProveedorDetalle"));
+const CuentasPorPagar = lazy(() => import("./pages/CuentasPorPagar"));
+const FacturaProveedorDetalle = lazy(() => import("./pages/FacturaProveedorDetalle"));
+const Transferencias = lazy(() => import("./pages/Transferencias"));
+const TransferenciaDetalle = lazy(() => import("./pages/TransferenciaDetalle"));
+const LoteDetalle = lazy(() => import("./pages/LoteDetalle"));
+const BancoDetalle = lazy(() => import("./pages/BancoDetalle"));
+const Conciliacion = lazy(() => import("./pages/Conciliacion"));
+const Perfil = lazy(() => import("./pages/Perfil"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 // Configuración Admin
-import ConfigUsuarios from "./pages/configuracion/ConfigUsuarios";
-import ConfigEmpresa from "./pages/configuracion/ConfigEmpresa";
-import ConfigMetodosPago from "./pages/configuracion/ConfigMetodosPago";
-import ConfigNotificaciones from "./pages/configuracion/ConfigNotificaciones";
-import ConfigSeguridad from "./pages/configuracion/ConfigSeguridad";
-import ConfigFacturacion from "./pages/configuracion/ConfigFacturacion";
-import ConfigEnvios from "./pages/configuracion/ConfigEnvios";
-import ConfigPlantillas from "./pages/configuracion/ConfigPlantillas";
-import ConfigMoneda from "./pages/configuracion/ConfigMoneda";
-import ConfigEmpaques from "./pages/configuracion/ConfigEmpaques";
-import ConfigIconos from "./pages/configuracion/ConfigIconos";
+const ConfigUsuarios = lazy(() => import("./pages/configuracion/ConfigUsuarios"));
+const ConfigEmpresa = lazy(() => import("./pages/configuracion/ConfigEmpresa"));
+const ConfigMetodosPago = lazy(() => import("./pages/configuracion/ConfigMetodosPago"));
+const ConfigNotificaciones = lazy(() => import("./pages/configuracion/ConfigNotificaciones"));
+const ConfigSeguridad = lazy(() => import("./pages/configuracion/ConfigSeguridad"));
+const ConfigFacturacion = lazy(() => import("./pages/configuracion/ConfigFacturacion"));
+const ConfigEnvios = lazy(() => import("./pages/configuracion/ConfigEnvios"));
+const ConfigPlantillas = lazy(() => import("./pages/configuracion/ConfigPlantillas"));
+const ConfigMoneda = lazy(() => import("./pages/configuracion/ConfigMoneda"));
+const ConfigEmpaques = lazy(() => import("./pages/configuracion/ConfigEmpaques"));
+const ConfigIconos = lazy(() => import("./pages/configuracion/ConfigIconos"));
 
-// Portal de Cliente (Mobile)
-import PortalDashboard from "./pages/portal/PortalDashboard";
-import PortalCatalogo from "./pages/portal/PortalCatalogo";
-import PortalCarrito from "./pages/portal/PortalCarrito";
-import PortalPedidos from "./pages/portal/PortalPedidos";
-import PortalPagos from "./pages/portal/PortalPagos";
-import PortalCuenta from "./pages/portal/PortalCuentaMobile";
-import PortalFavoritos from "./pages/portal/PortalFavoritos";
-import PortalConsignacion from "./pages/portal/PortalConsignacion";
-import PortalRetenciones from "./pages/portal/PortalRetenciones";
+// Portal de Cliente (shell responsive: ruta de diseño con barra lateral / navegación inferior)
+const PortalShell = lazy(() => import("./components/portal/PortalShell"));
+const PortalDashboard = lazy(() => import("./pages/portal/PortalDashboard"));
+const PortalCatalogo = lazy(() => import("./pages/portal/PortalCatalogo"));
+const PortalCarrito = lazy(() => import("./pages/portal/PortalCarrito"));
+const PortalPedidos = lazy(() => import("./pages/portal/PortalPedidos"));
+const PortalPagos = lazy(() => import("./pages/portal/PortalPagos"));
+const PortalCuenta = lazy(() => import("./pages/portal/PortalCuentaMobile"));
+const PortalFavoritos = lazy(() => import("./pages/portal/PortalFavoritos"));
+const PortalConsignacion = lazy(() => import("./pages/portal/PortalConsignacion"));
+const PortalRetenciones = lazy(() => import("./pages/portal/PortalRetenciones"));
 
 // Portal de Cliente - Cuenta
-import PortalPerfil from "./pages/portal/cuenta/PortalPerfil";
-import PortalDirecciones from "./pages/portal/cuenta/PortalDirecciones";
-import PortalMetodosPago from "./pages/portal/cuenta/PortalMetodosPago";
-import PortalCupones from "./pages/portal/cuenta/PortalCupones";
-import PortalNotificaciones from "./pages/portal/cuenta/PortalNotificaciones";
-import PortalSeguridad from "./pages/portal/cuenta/PortalSeguridad";
-import PortalPreferencias from "./pages/portal/cuenta/PortalPreferencias";
-import PortalAyuda from "./pages/portal/cuenta/PortalAyuda";
-import PortalEliminarCuenta from "./pages/portal/cuenta/PortalEliminarCuenta";
+const PortalPerfil = lazy(() => import("./pages/portal/cuenta/PortalPerfil"));
+const PortalDirecciones = lazy(() => import("./pages/portal/cuenta/PortalDirecciones"));
+const PortalMetodosPago = lazy(() => import("./pages/portal/cuenta/PortalMetodosPago"));
+const PortalCupones = lazy(() => import("./pages/portal/cuenta/PortalCupones"));
+const PortalNotificaciones = lazy(() => import("./pages/portal/cuenta/PortalNotificaciones"));
+const PortalSeguridad = lazy(() => import("./pages/portal/cuenta/PortalSeguridad"));
+const PortalPreferencias = lazy(() => import("./pages/portal/cuenta/PortalPreferencias"));
+const PortalAyuda = lazy(() => import("./pages/portal/cuenta/PortalAyuda"));
+const PortalEliminarCuenta = lazy(() => import("./pages/portal/cuenta/PortalEliminarCuenta"));
 
 // Portal de Vendedor
-import VendedorDashboard from "./pages/vendedor/VendedorDashboard";
-import VendedorClientes from "./pages/vendedor/VendedorClientes";
-import VendedorPedidos from "./pages/vendedor/VendedorPedidos";
-import VendedorPagos from "./pages/vendedor/VendedorPagos";
-import VendedorMetas from "./pages/vendedor/VendedorMetas";
-import VendedorInventario from "./pages/vendedor/VendedorInventario";
-import VendedorConsignacion from "./pages/vendedor/VendedorConsignacion";
-import VendedorRetenciones from "./pages/vendedor/VendedorRetenciones";
+const VendedorDashboard = lazy(() => import("./pages/vendedor/VendedorDashboard"));
+const VendedorClientes = lazy(() => import("./pages/vendedor/VendedorClientes"));
+const VendedorPedidos = lazy(() => import("./pages/vendedor/VendedorPedidos"));
+const VendedorPedidoDetalle = lazy(() => import("./pages/vendedor/VendedorPedidoDetalle"));
+const VendedorPagos = lazy(() => import("./pages/vendedor/VendedorPagos"));
+const VendedorMetas = lazy(() => import("./pages/vendedor/VendedorMetas"));
+const VendedorInventario = lazy(() => import("./pages/vendedor/VendedorInventario"));
+const VendedorConsignacion = lazy(() => import("./pages/vendedor/VendedorConsignacion"));
+const VendedorRetenciones = lazy(() => import("./pages/vendedor/VendedorRetenciones"));
 
 // Admin Delivery
-import Delivery from "./pages/Delivery";
+const Delivery = lazy(() => import("./pages/Delivery"));
 
 // Admin Cupones
-import Cupones from "./pages/Cupones";
+const Cupones = lazy(() => import("./pages/Cupones"));
 
 // Admin Banners y Categorías
-import Banners from "./pages/Banners";
-import Categorias from "./pages/Categorias";
+const Banners = lazy(() => import("./pages/Banners"));
+const Categorias = lazy(() => import("./pages/Categorias"));
 
 // Admin Registros
-import RegistrosClientes from "./pages/RegistrosClientes";
+const RegistrosClientes = lazy(() => import("./pages/RegistrosClientes"));
 
 // Admin Cliente Usuarios
-import ClienteUsuarios from "./pages/ClienteUsuarios";
-import ClienteDetalle from "./pages/ClienteDetalle";
-import Vendedores from "./pages/Vendedores";
-import VendedorDetalle from "./pages/VendedorDetalle";
+const ClienteUsuarios = lazy(() => import("./pages/ClienteUsuarios"));
+const ClienteDetalle = lazy(() => import("./pages/ClienteDetalle"));
+const Vendedores = lazy(() => import("./pages/Vendedores"));
+const VendedorDetalle = lazy(() => import("./pages/VendedorDetalle"));
 
 // Portal de Delivery
-import DeliveryDashboard from "./pages/delivery/DeliveryDashboard";
-import DeliveryEntregas from "./pages/delivery/DeliveryEntregas";
-import DeliveryRuta from "./pages/delivery/DeliveryRuta";
-import DeliveryHistorial from "./pages/delivery/DeliveryHistorial";
+const DeliveryDashboard = lazy(() => import("./pages/delivery/DeliveryDashboard"));
+const DeliveryEntregas = lazy(() => import("./pages/delivery/DeliveryEntregas"));
+const DeliveryRuta = lazy(() => import("./pages/delivery/DeliveryRuta"));
+const DeliveryHistorial = lazy(() => import("./pages/delivery/DeliveryHistorial"));
 
 const queryClient = new QueryClient();
+
+// Mientras llega el código de una ruta (cada área y cada página se cargan aparte)
+const CargandoRuta = () => (
+  <div className="flex min-h-screen items-center justify-center bg-background">
+    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-label="Cargando" />
+  </div>
+);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -145,6 +156,7 @@ const App = () => (
             <BrowserRouter>
               <ErrorBoundary>
               <RemontarPorEmpresa>
+              <Suspense fallback={<CargandoRuta />}>
               <Routes>
                 {/* Public Pages */}
                 <Route path="/" element={<Landing />} />
@@ -209,31 +221,34 @@ const App = () => (
                 <Route path="/admin/configuracion/empaques" element={<ProtectedRoute allowedRoles={["admin"]} modulo="productos"><ConfigEmpaques /></ProtectedRoute>} />
                 <Route path="/admin/configuracion/iconos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigIconos /></ProtectedRoute>} />
           
-                {/* Portal de Cliente - Solo cliente */}
-                <Route path="/portal" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalDashboard /></ProtectedRoute>} />
-                <Route path="/portal/catalogo" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalCatalogo /></ProtectedRoute>} />
-                <Route path="/portal/carrito" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalCarrito /></ProtectedRoute>} />
-                <Route path="/portal/pedidos" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalPedidos /></ProtectedRoute>} />
-                <Route path="/portal/pagos" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalPagos /></ProtectedRoute>} />
-                <Route path="/portal/favoritos" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalFavoritos /></ProtectedRoute>} />
-                <Route path="/portal/consignacion" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalConsignacion /></ProtectedRoute>} />
-                <Route path="/portal/retenciones" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalRetenciones /></ProtectedRoute>} />
-                <Route path="/portal/cuenta" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalCuenta /></ProtectedRoute>} />
-                <Route path="/portal/cuenta/perfil" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalPerfil /></ProtectedRoute>} />
-                <Route path="/portal/cuenta/direcciones" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalDirecciones /></ProtectedRoute>} />
-                <Route path="/portal/cuenta/pagos" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalMetodosPago /></ProtectedRoute>} />
-                <Route path="/portal/cuenta/cupones" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalCupones /></ProtectedRoute>} />
-                <Route path="/portal/cuenta/notificaciones" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalNotificaciones /></ProtectedRoute>} />
-                <Route path="/portal/cuenta/seguridad" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalSeguridad /></ProtectedRoute>} />
-                <Route path="/portal/cuenta/preferencias" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalPreferencias /></ProtectedRoute>} />
-                <Route path="/portal/ayuda" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalAyuda /></ProtectedRoute>} />
-                <Route path="/portal/cuenta/eliminar" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalEliminarCuenta /></ProtectedRoute>} />
+                {/* Portal de Cliente - Solo cliente: un shell responsive (ruta de diseño) y cada página carga aparte */}
+                <Route element={<ProtectedRoute allowedRoles={["cliente"]}><PortalShell /></ProtectedRoute>}>
+                  <Route path="/portal" element={<PortalDashboard />} />
+                  <Route path="/portal/catalogo" element={<PortalCatalogo />} />
+                  <Route path="/portal/carrito" element={<PortalCarrito />} />
+                  <Route path="/portal/pedidos" element={<PortalPedidos />} />
+                  <Route path="/portal/pagos" element={<PortalPagos />} />
+                  <Route path="/portal/favoritos" element={<PortalFavoritos />} />
+                  <Route path="/portal/consignacion" element={<PortalConsignacion />} />
+                  <Route path="/portal/retenciones" element={<PortalRetenciones />} />
+                  <Route path="/portal/cuenta" element={<PortalCuenta />} />
+                  <Route path="/portal/cuenta/perfil" element={<PortalPerfil />} />
+                  <Route path="/portal/cuenta/direcciones" element={<PortalDirecciones />} />
+                  <Route path="/portal/cuenta/pagos" element={<PortalMetodosPago />} />
+                  <Route path="/portal/cuenta/cupones" element={<PortalCupones />} />
+                  <Route path="/portal/cuenta/notificaciones" element={<PortalNotificaciones />} />
+                  <Route path="/portal/cuenta/seguridad" element={<PortalSeguridad />} />
+                  <Route path="/portal/cuenta/preferencias" element={<PortalPreferencias />} />
+                  <Route path="/portal/ayuda" element={<PortalAyuda />} />
+                  <Route path="/portal/cuenta/eliminar" element={<PortalEliminarCuenta />} />
+                </Route>
                 <Route path="/portal/terminos" element={<Navigate to="/terminos" replace />} />
           
                 {/* Portal de Vendedor - Solo vendedor */}
                 <Route path="/vendedor" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorDashboard /></ProtectedRoute>} />
                 <Route path="/vendedor/clientes" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorClientes /></ProtectedRoute>} />
                 <Route path="/vendedor/pedidos" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorPedidos /></ProtectedRoute>} />
+                <Route path="/vendedor/pedidos/:id" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorPedidoDetalle /></ProtectedRoute>} />
                 <Route path="/vendedor/pagos" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorPagos /></ProtectedRoute>} />
                 <Route path="/vendedor/metas" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorMetas /></ProtectedRoute>} />
                 <Route path="/vendedor/inventario" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorInventario /></ProtectedRoute>} />
@@ -248,6 +263,7 @@ const App = () => (
           
           <Route path="*" element={<NotFound />} />
               </Routes>
+              </Suspense>
               </RemontarPorEmpresa>
               </ErrorBoundary>
             </BrowserRouter>

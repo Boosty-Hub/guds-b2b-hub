@@ -10,6 +10,30 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-28 · Portal del cliente rediseñado (F1), línea de tiempo del pedido y avisos desde Odoo
+
+- **Línea de tiempo y avisos** (`…20d_eventos_pedido.sql`, `…20e_aviso_factura_pedido.sql`): `orden_eventos` registra cada hito
+  del pedido (creado, editado, aprobado, registrado en Odoo, confirmado, despachado, en camino, entregado / incompleto / rechazado /
+  reprogramado, facturado, pagado, cancelado) con fecha y origen, con los hitos históricos reconstruidos. Los triggers corren
+  también con la sincronización: **confirmar, despachar, facturar o cancelar en Odoo ahora avisa al cliente y a su vendedor**
+  (pedidos de los últimos 60 días), con enlace directo al pedido. `estadoVisible()` da el mismo estado en los tres portales.
+- **Portal del cliente F1** (agente): estructura responsive de verdad (barra lateral y barra superior en escritorio, barra
+  inferior en móvil, contenido hasta 1280 px), sistema visual sobrio con cifras tabulares e insignias por tono, inicio con KPIs
+  (por pagar con vencido, crédito, pedidos en curso, último pedido), catálogo en grilla con búsqueda por código y sin acentos y
+  orden que funciona, pagos y carrito en dos columnas. Todas las pantallas cargan bajo demanda: el portal pasó de bajar 709 kB a
+  244 kB (comprimido) al entrar.
+- **Mis pedidos F4**: lista y detalle lado a lado en escritorio, estado visible, línea de tiempo, número de Odoo y "antes
+  GUDS-ORD-…", facturas del pedido con su saldo, "Volver a pedir" y enlace directo `?pedido=`.
+- **Vendedor V1/V6** (agente): detalle del pedido `/vendedor/pedidos/:id` con estado, línea de tiempo, líneas con su IVA, facturas
+  y pago; "Duplicar y corregir"; tarjetas en móvil; título del encabezado móvil legible.
+- **Admin**: línea de tiempo en el detalle del pedido (con el origen Odoo/GUDS). **Riesgo corregido**: al abrir un pedido por
+  aprobar el foco caía en "Aprobar y enviar a Odoo" (un Enter lo aprobaba); ahora no hay foco automático y aprobar pide
+  confirmación.
+- El IVA de cada línea de los pedidos de Odoo se guarda (el que se aplicó al vender). Las tarjetas del catálogo muestran el
+  precio del empaque (lo que se cobra) y el de la unidad.
+- Verificado: pruebas de base (157 casos) y Playwright en las 19 rutas del portal (390, 768 y 1440 px), el portal del vendedor y
+  el admin.
+
 ## 2026-09-28 · Etapa 2: IVA de cada producto desde Odoo, cotización en el servidor y listas de precios
 
 - **IVA por producto** (`20260928_fase20a_impuestos_cotizacion_listas.sql`, `…20b_impuesto_por_grupo.sql`, importador): en Odoo

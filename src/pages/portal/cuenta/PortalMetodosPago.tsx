@@ -1,6 +1,6 @@
-import { Link, useNavigate } from "react-router-dom";
-import { ChevronLeft, Landmark, Loader2, Receipt } from "lucide-react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
+import { Link } from "react-router-dom";
+import { Landmark, Loader2, Receipt } from "lucide-react";
+import { PortalPagina } from "@/components/portal/PortalPagina";
 import { CuentaPagoDatos } from "@/components/portal/CuentaPagoDatos";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,6 @@ import { useCuentasPago, metodosDeCuenta, METODO_LABEL, type CuentaPago } from "
 // datos traídos de Odoo). Reemplaza la maqueta anterior, que mostraba un banco, una cuenta, un RIF y un pago móvil
 // inventados.
 const PortalMetodosPago = () => {
-  const navigate = useNavigate();
   const { empresaActiva } = useEmpresa();
   const { cuentas, loading, error } = useCuentasPago();
 
@@ -21,18 +20,9 @@ const PortalMetodosPago = () => {
   ].filter((g) => g.lista.length > 0);
 
   return (
-    <PortalMobileLayout showHeader={false} showNav={false}>
-      {/* Header */}
-      <div className="bg-primary text-primary-foreground px-4 py-3 sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-1" aria-label="Volver">
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-          <h1 className="text-lg font-semibold">Cuentas para pagar</h1>
-        </div>
-      </div>
+    <PortalPagina titulo="Cuentas para pagar" volver="/portal/pagos" etiquetaVolver="Pagos" ancho="normal">
 
-      <div className="px-4 py-4 space-y-4">
+      <div className="pb-6 space-y-4">
         <div className="rounded-xl bg-muted p-4">
           <p className="text-sm">
             Estas son las cuentas oficiales de <strong>{empresaActiva?.nombre || "la empresa"}</strong>
@@ -93,7 +83,7 @@ const PortalMetodosPago = () => {
           ))
         )}
       </div>
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

@@ -1,18 +1,16 @@
 import { useState, useEffect } from "react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
+import { PortalPagina } from "@/components/portal/PortalPagina";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { 
-  ChevronLeft,
+import {
   MapPin,
   Loader2,
   Home,
   Building2
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { supabase, Cliente } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -24,7 +22,6 @@ import {
 
 const PortalDirecciones = () => {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const { toast } = useToast();
   
   const [loading, setLoading] = useState(true);
@@ -50,23 +47,14 @@ const PortalDirecciones = () => {
   };
 
   return (
-    <PortalMobileLayout showHeader={false} showNav={false}>
-      {/* Header */}
-      <div className="bg-primary text-primary-foreground px-4 py-3 sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-1">
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-          <h1 className="text-lg font-semibold">Direcciones de Entrega</h1>
-        </div>
-      </div>
+    <PortalPagina titulo="Direcciones de entrega" volver="/portal/cuenta" etiquetaVolver="Mi cuenta" ancho="estrecho">
 
       {loading ? (
         <div className="flex justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : (
-        <div className="px-4 py-4 space-y-4">
+        <div className="pb-6 space-y-4">
           {/* Main Address */}
           {cliente && (
             <div className="bg-card rounded-xl border-2 border-primary p-4">
@@ -126,7 +114,7 @@ const PortalDirecciones = () => {
           )}
         </div>
       )}
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

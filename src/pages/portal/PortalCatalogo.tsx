@@ -1,410 +1,266 @@
-import { useState, useEffect, useRef } from "react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
-import { useCurrency } from "@/contexts/CurrencyContext";
-import { useStoreConfig } from "@/contexts/StoreConfigContext";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Search, SlidersHorizontal, X, PackageSearch, Check } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { 
-  Search, 
-  Plus, 
-  Minus, 
-  X, 
-  SlidersHorizontal,
-  Heart,
-  ChevronLeft,
-  Loader2
-} from "lucide-react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { supabase } from "@/lib/supabase";
-import { ProductImage } from "@/components/portal/ProductImage";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { PortalPagina } from "@/components/portal/PortalPagina";
+import { TarjetaProducto } from "@/components/portal/TarjetaProducto";
 import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
+import { EstadoVacio, SkeletonProductos, normalizar } from "@/components/portal/sistema";
 import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
 import { useCarritoPortal, type ProductoConEmpaques } from "@/hooks/useCarritoPortal";
-import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
+import { usePreciosListaCliente } from "@/hooks/usePreciosListaCliente";
+
+// Catálogo del portal. Móvil: buscador y categorías fijos bajo el encabezado, grilla de 2 columnas. Escritorio: columna de
+// categorías a la izquierda y grilla de 3–4 columnas con buscador y orden. La búsqueda encuentra por nombre, código (SKU)
+// o categoría, sin acentos.
+
+type Orden = "relevancia" | "precio_asc" | "precio_desc" | "disponibles";
+const ORDENES: { valor: Orden; etiqueta: string }[] = [
+  { valor: "relevancia", etiqueta: "Nombre (A–Z)" },
+  { valor: "precio_asc", etiqueta: "Menor precio" },
+  { valor: "precio_desc", etiqueta: "Mayor precio" },
+  { valor: "disponibles", etiqueta: "Disponibles primero" },
+];
+const TODOS = "Todos";
+const POR_PAGINA = 48;
 
 const PortalCatalogo = () => {
   const [searchParams] = useSearchParams();
-  const categoryFromUrl = searchParams.get('cat');
-  const shouldFocusSearch = searchParams.get('focus') === 'search';
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState(categoryFromUrl || "Todos");
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [favorites, setFavorites] = useState<string[]>([]);
-  const [productos, setProductos] = useState<ProductoConEmpaques[]>([]);
-  const [loading, setLoading] = useState(true);
-  // Precios negociados de la lista del cliente: { producto_id: precio }
-  const [precioLista, setPrecioLista] = useState<Record<string, number>>({});
+  const categoriaUrl = searchParams.get("cat");
+  const qUrl = searchParams.get("q");
+  const enfocar = searchParams.get("focus") === "search";
+  const inputMovil = useRef<HTMLInputElement>(null);
 
-  // Carrito compartido con favoritos (misma lógica de precio, stock y escritura en la tabla carrito)
-  const {
-    cart, agregar, agregarConEmpaque, cambiarCantidad, cantidadDe: getCartQuantity, disponibleDe,
-    empaqueProducto, empaquePrecios, cerrarEmpaque,
-  } = useCarritoPortal();
-  const { formatPrice } = useCurrency();
-  const { getActiveCategories } = useStoreConfig();
+  const [busqueda, setBusqueda] = useState(qUrl ?? "");
+  const [categoria, setCategoria] = useState(categoriaUrl || TODOS);
+  const [orden, setOrden] = useState<Orden>("relevancia");
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  const [favoritos, setFavoritos] = useState<string[]>([]);
+  const [productos, setProductos] = useState<ProductoConEmpaques[] | null>(null);
+  const [limite, setLimite] = useState(POR_PAGINA);
+
+  const { agregar, agregarConEmpaque, cambiarCantidad, cantidadDe, disponibleDe, empaqueProducto, empaquePrecios, cerrarEmpaque } = useCarritoPortal();
+  const { precioDe } = usePreciosListaCliente();
   const { user } = useAuth();
-  const navigate = useNavigate();
-  
-  const storeCategories = getActiveCategories();
-  // Dedupe TODO el arreglo (incluye el "Todos" fijo): tras el import puede existir una
-  // categoría llamada "Todos" u otros nombres repetidos → evita keys duplicadas.
-  const categories = Array.from(new Set(["Todos", ...storeCategories.map(c => c.nombre)]));
+
+
+  useEffect(() => { if (categoriaUrl) setCategoria(categoriaUrl); }, [categoriaUrl]);
+  useEffect(() => { if (qUrl != null) setBusqueda(qUrl); }, [qUrl]);
+  useEffect(() => {
+    if (enfocar) setTimeout(() => inputMovil.current?.focus(), 100);
+  }, [enfocar]);
+
+  // Refresco silencioso: tras la primera carga no se vuelve al esqueleto ni se pierde la posición
+  const cargarProductos = async () => {
+    const { data } = await supabase
+      .from("productos")
+      .select("*, categoria:categorias(*), producto_empaques(*, tipo_empaque:tipos_empaque(*))")
+      .eq("activo", true)
+      .order("nombre");
+    if (data) setProductos(data as ProductoConEmpaques[]);
+  };
+  useEffect(() => { cargarProductos(); }, []);
+  useRealtimeRefetch("productos", cargarProductos);
 
   useEffect(() => {
-    // Update category when URL param changes
-    if (categoryFromUrl && categories.includes(categoryFromUrl)) {
-      setSelectedCategory(categoryFromUrl);
-    }
-  }, [categoryFromUrl]);
-
-  useEffect(() => {
-    // Focus search input if coming from dashboard search bar
-    if (shouldFocusSearch && searchInputRef.current) {
-      setTimeout(() => {
-        searchInputRef.current?.focus();
-      }, 100);
-    }
-  }, [shouldFocusSearch]);
-
-  useEffect(() => {
-    fetchProductos();
-    if (user?.id) {
-      fetchFavorites();
-      fetchPrecioLista();
-    }
-  }, [user]);
-
-  // Carga los precios de la lista asignada al cliente (P7)
-  const fetchPrecioLista = async () => {
-    if (!user?.cliente_id) return;
-    const { data: cli } = await supabase
-      .from('clientes')
-      .select('lista_precios_id')
-      .eq('id', user.cliente_id)
-      .maybeSingle();
-    if (!cli?.lista_precios_id) return;
-    const { data } = await supabase
-      .from('precios_lista')
-      .select('producto_id, precio')
-      .eq('lista_precios_id', cli.lista_precios_id);
-    if (data) {
-      setPrecioLista(Object.fromEntries(data.map((r: { producto_id: string; precio: number }) => [r.producto_id, Number(r.precio)])));
-    }
-  };
-
-  const fetchProductos = async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from('productos')
-      .select('*, categoria:categorias(*), producto_empaques(*, tipo_empaque:tipos_empaque(*))')
-      .eq('activo', true)
-      .order('nombre');
-    
-    if (data) setProductos(data);
-    setLoading(false);
-  };
-
-  useRealtimeRefetch('productos', fetchProductos);
-
-  const fetchFavorites = async () => {
-    const { data } = await supabase
-      .from('favoritos')
-      .select('producto_id')
-      .eq('usuario_id', user?.id);
-    
-    if (data) setFavorites(data.map(f => f.producto_id));
-  };
-
-  const toggleFavorite = async (productId: string) => {
     if (!user?.id) return;
-    
-    if (favorites.includes(productId)) {
-      // Remove from favorites
-      setFavorites(prev => prev.filter(id => id !== productId));
-      await supabase.from('favoritos').delete()
-        .eq('usuario_id', user.id)
-        .eq('producto_id', productId);
+    supabase.from("favoritos").select("producto_id").eq("usuario_id", user.id)
+      .then(({ data }) => { if (data) setFavoritos(data.map((f) => f.producto_id)); });
+  }, [user?.id]);
+
+  const alternarFavorito = async (id: string) => {
+    if (!user?.id) return;
+    if (favoritos.includes(id)) {
+      setFavoritos((prev) => prev.filter((x) => x !== id));
+      await supabase.from("favoritos").delete().eq("usuario_id", user.id).eq("producto_id", id);
     } else {
-      // Add to favorites
-      setFavorites(prev => [...prev, productId]);
-      await supabase.from('favoritos').insert({
-        usuario_id: user.id,
-        producto_id: productId
-      });
+      setFavoritos((prev) => [...prev, id]);
+      await supabase.from("favoritos").insert({ usuario_id: user.id, producto_id: id });
     }
   };
 
-  const getProductPrice = (product: ProductoConEmpaques) => {
-    // Precedencia (display): lista del cliente > oferta > precio base
-    if (precioLista[product.id] != null) return precioLista[product.id];
-    return product.en_oferta && product.precio_oferta ? product.precio_oferta : product.precio_base;
-  };
+  const filtrados = useMemo(() => {
+    const q = normalizar(busqueda.trim());
+    const lista = (productos ?? []).filter((p) => {
+      const coincideCat = categoria === TODOS || p.categoria?.nombre === categoria;
+      if (!coincideCat) return false;
+      if (!q) return true;
+      return normalizar(p.nombre).includes(q) || normalizar(p.sku).includes(q) || normalizar(p.categoria?.nombre).includes(q);
+    });
+    const conDisp = (p: ProductoConEmpaques) => (disponibleDe(p) > 0 ? 0 : 1);
+    return lista.sort((a, b) => {
+      if (orden === "precio_asc") return precioDe(a) - precioDe(b);
+      if (orden === "precio_desc") return precioDe(b) - precioDe(a);
+      if (orden === "disponibles") return conDisp(a) - conDisp(b) || a.nombre.localeCompare(b.nombre, "es");
+      return a.nombre.localeCompare(b.nombre, "es");
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productos, busqueda, categoria, orden, precioDe]);
 
-  const cartTotal = cart.reduce((sum, item) => {
-    // Use stored precio_unitario if available
-    if (item.precio_unitario) {
-      return sum + item.precio_unitario * item.cantidad;
-    }
-    // Fallback to product base price
-    const product = productos.find(p => p.id === item.producto_id);
-    return sum + (product ? getProductPrice(product) * item.cantidad : 0);
-  }, 0);
-  const cartCount = cart.reduce((sum, item) => sum + item.cantidad, 0);
+  useEffect(() => { setLimite(POR_PAGINA); }, [busqueda, categoria, orden]);
+  const visibles = filtrados.slice(0, limite);
 
-  const filteredProducts = productos.filter((product) => {
-    const matchesSearch = product.nombre.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = selectedCategory === "Todos" || product.categoria?.nombre === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  // Categorías con productos a la venta en la empresa activa (las vacías o de uso interno, como gastos de importación, no se
+  // muestran). Se ordenan por nombre; el nombre guardado se usa como clave y se muestra sin espacios sobrantes.
+  const conteoPorCategoria = useMemo(() => {
+    const m = new Map<string, number>();
+    (productos ?? []).forEach((p) => { const n = p.categoria?.nombre; if (n) m.set(n, (m.get(n) ?? 0) + 1); });
+    return m;
+  }, [productos]);
+  const categorias = useMemo(
+    () => [TODOS, ...Array.from(conteoPorCategoria.keys()).sort((a, b) => a.trim().localeCompare(b.trim(), "es"))],
+    [conteoPorCategoria],
+  );
+
+  const buscador = (ref?: React.Ref<HTMLInputElement>, id = "buscar-catalogo") => (
+    <div className="relative flex-1">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        id={id}
+        ref={ref}
+        type="search"
+        placeholder="Buscar por nombre o código"
+        aria-label="Buscar productos"
+        className="h-10 bg-card pl-9 pr-9"
+        value={busqueda}
+        onChange={(e) => setBusqueda(e.target.value)}
+        autoFocus={enfocar}
+      />
+      {busqueda && (
+        <button type="button" onClick={() => setBusqueda("")} className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Borrar búsqueda">
+          <X className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
 
   return (
-    <PortalMobileLayout showHeader={false} cartCount={cartCount}>
-      {/* Custom Header with Search */}
-      <div className="bg-primary text-primary-foreground px-4 py-3 sticky top-0 z-50">
-        <div className="flex items-center gap-3 mb-3">
-          <button onClick={() => navigate(-1)} className="p-1">
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              ref={searchInputRef}
-              placeholder="Buscar productos..."
-              className="pl-9 bg-white text-foreground rounded-full h-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              autoFocus={shouldFocusSearch}
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2"
-              >
-                <X className="h-4 w-4 text-muted-foreground" />
+    <PortalPagina
+      titulo="Catálogo"
+      sinTituloEscritorio
+      subencabezadoMovil={
+        <div className="space-y-2.5">
+          <div className="flex gap-2">
+            {buscador(inputMovil, "buscar-catalogo-movil")}
+            <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" onClick={() => setFiltrosAbiertos(true)} aria-label="Filtros y orden">
+              <SlidersHorizontal className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] md:-mx-6 md:px-6 [&::-webkit-scrollbar]:hidden">
+            {categorias.map((c) => (
+              <button key={c} type="button" onClick={() => setCategoria(c)} aria-pressed={categoria === c}
+                className={cn("shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                  categoria === c ? "border-foreground bg-foreground text-background" : "border-border bg-card text-foreground")}>
+                {c.trim()}
               </button>
-            )}
+            ))}
           </div>
-          <button onClick={() => setIsFilterOpen(true)} className="p-2 bg-white/20 rounded-full">
-            <SlidersHorizontal className="h-5 w-5" />
-          </button>
         </div>
-
-        {/* Category Pills */}
-        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-4 px-4">
-          {categories.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                selectedCategory === cat
-                  ? "bg-white text-primary"
-                  : "bg-white/20 text-white"
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Results Count */}
-      <div className="px-4 py-3 flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {filteredProducts.length} productos encontrados
-        </p>
-      </div>
-
-      {/* Products Grid */}
-      <div className="px-4 pb-4">
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      }
+    >
+      <div className="lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
+        {/* Categorías (escritorio) */}
+        <aside className="hidden lg:block">
+          <div className="sticky top-[5.5rem]">
+            <h1 className="text-2xl font-semibold tracking-tight">Catálogo</h1>
+            <p className="mt-1 text-sm text-muted-foreground tabular-nums">{productos ? `${productos.length} productos` : "Cargando…"}</p>
+            <nav className="mt-6" aria-label="Categorías">
+              <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Categorías</p>
+              <ul className="max-h-[calc(100vh-14rem)] space-y-0.5 overflow-y-auto pr-1">
+                {categorias.map((c) => {
+                  const activa = categoria === c;
+                  const n = c === TODOS ? productos?.length : conteoPorCategoria.get(c);
+                  return (
+                    <li key={c}>
+                      <button type="button" onClick={() => setCategoria(c)} aria-pressed={activa}
+                        className={cn("flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                          activa ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground")}>
+                        <span className="truncate">{c.trim()}</span>
+                        {n != null && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{n}</span>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </nav>
           </div>
-        ) : filteredProducts.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-muted-foreground">No se encontraron productos</p>
+        </aside>
+
+        <div className="min-w-0">
+          {/* Barra de herramientas (escritorio) */}
+          <div className="mb-4 hidden items-center gap-3 lg:flex">
+            {buscador()}
+            <Select value={orden} onValueChange={(v) => setOrden(v as Orden)}>
+              <SelectTrigger className="h-10 w-52 bg-card" aria-label="Ordenar"><SelectValue /></SelectTrigger>
+              <SelectContent>{ORDENES.map((o) => <SelectItem key={o.valor} value={o.valor}>{o.etiqueta}</SelectItem>)}</SelectContent>
+            </Select>
           </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-3">
-            {filteredProducts.map((product) => {
-              const quantity = getCartQuantity(product.id);
-              const isFavorite = favorites.includes(product.id);
-              const precio = getProductPrice(product);
-              const disponible = disponibleDe(product);
-              const inStock = disponible > 0;
 
-              return (
-                <div
-                  key={product.id}
-                  className="bg-card rounded-xl border border-border overflow-hidden relative"
-                >
-                  {/* Favorite Button */}
-                  <button
-                    onClick={() => toggleFavorite(product.id)}
-                    className="absolute top-2 right-2 z-10 p-1.5 bg-white/80 rounded-full"
-                  >
-                    <Heart
-                      className={`h-4 w-4 ${isFavorite ? "fill-red-500 text-red-500" : "text-gray-400"}`}
-                    />
-                  </button>
+          <p className="mb-3 text-sm text-muted-foreground tabular-nums" aria-live="polite">
+            {productos === null ? "Cargando productos…" : `${filtrados.length} ${filtrados.length === 1 ? "producto" : "productos"}`}
+            {categoria !== TODOS && <> en <span className="font-medium text-foreground">{categoria.trim()}</span></>}
+            {busqueda.trim() && <> para «{busqueda.trim()}»</>}
+          </p>
 
-                  {/* Discount Badge */}
-                  {product.en_oferta && product.porcentaje_descuento && (
-                    <Badge className="absolute top-2 left-2 z-10 bg-red-500 text-white text-xs">
-                      -{product.porcentaje_descuento}%
-                    </Badge>
-                  )}
-
-                  {/* Out of Stock Overlay */}
-                  {!inStock && (
-                    <div className="absolute inset-0 bg-black/50 z-10 flex items-center justify-center">
-                      <Badge variant="secondary" className="text-sm">Agotado</Badge>
-                    </div>
-                  )}
-
-                  {/* Product Image */}
-                  <div className="aspect-square bg-muted flex items-center justify-center">
-                    <ProductImage 
-                      imageUrl={product.imagen_url}
-                      emoji={product.imagen_emoji}
-                      alt={product.nombre}
-                      size="xl"
-                      className="h-full w-full rounded-none"
-                    />
-                  </div>
-
-                  {/* Product Info */}
-                  <div className="p-3">
-                    <p className="text-sm font-medium text-foreground line-clamp-2 h-10 mb-1">
-                      {product.nombre}
-                    </p>
-                    <p className="text-xs text-muted-foreground mb-2">
-                      por {product.unidad}
-                      {Number.isFinite(disponible) && inStock && <span className={disponible < 20 ? "text-warning" : ""}> · {Math.floor(disponible).toLocaleString("es-VE")} disp.</span>}
-                    </p>
-                    
-                    <div className="flex items-end justify-between">
-                      <div>
-                        <p className="text-primary font-bold text-lg">{formatPrice(precio)}</p>
-                        {product.en_oferta && product.precio_oferta && (
-                          <p className="text-xs text-muted-foreground line-through">
-                            {formatPrice(product.precio_base)}
-                          </p>
-                        )}
-                        <EtiquetaIva pct={product.impuesto_pct} nombre={product.impuesto_nombre} className="block" />
-                      </div>
-
-                      {/* Add to Cart */}
-                      {inStock && (
-                        <div>
-                          {quantity === 0 ? (
-                            <Button
-                              size="sm"
-                              className="h-8 w-8 p-0 rounded-full"
-                              onClick={() => agregar(product)}
-                            >
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                          ) : (
-                            <div className="flex items-center gap-1 bg-primary rounded-full">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 rounded-full text-white hover:bg-white/20"
-                                onClick={() => cambiarCantidad(product, -1)}
-                              >
-                                <Minus className="h-4 w-4" />
-                              </Button>
-                              <span className="text-white font-medium w-6 text-center">{quantity}</span>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 rounded-full text-white hover:bg-white/20"
-                                onClick={() => cambiarCantidad(product, 1)}
-                              >
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Floating Cart Button */}
-      {cartCount > 0 && (
-        <Link to="/portal/carrito">
-          <div className="fixed bottom-24 left-4 right-4 max-w-md mx-auto">
-            <div className="bg-primary text-white rounded-xl py-4 pl-4 pr-20 flex items-center justify-between shadow-lg">
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 rounded-full h-10 w-10 flex items-center justify-center font-bold">
-                  {cartCount}
-                </div>
-                {/* Suma de precios sin IVA: el total con el IVA de cada producto está en el carrito */}
-                <span>
-                  <span className="block font-medium leading-tight">Ver carrito</span>
-                  <span className="block text-[11px] opacity-80">Subtotal sin IVA</span>
-                </span>
-              </div>
-              <span className="font-bold text-lg">{formatPrice(cartTotal)}</span>
+          {productos === null ? (
+            <SkeletonProductos n={8} className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:gap-4 xl:grid-cols-4" />
+          ) : filtrados.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card">
+              <EstadoVacio icono={PackageSearch} titulo="No encontramos productos" descripcion="Prueba con otro nombre o código, o cambia de categoría."
+                accion={(busqueda || categoria !== TODOS) ? <Button variant="outline" onClick={() => { setBusqueda(""); setCategoria(TODOS); }}>Ver todo el catálogo</Button> : undefined} />
             </div>
-          </div>
-        </Link>
-      )}
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:gap-4 xl:grid-cols-4">
+                {visibles.map((p) => (
+                  <TarjetaProducto key={p.id} producto={p} precio={precioDe(p)} disponible={disponibleDe(p)} cantidad={cantidadDe(p.id)}
+                    favorito={favoritos.includes(p.id)} onFavorito={() => alternarFavorito(p.id)}
+                    onAgregar={() => agregar(p)} onCambiar={(d) => cambiarCantidad(p, d)} />
+                ))}
+              </div>
+              {filtrados.length > visibles.length && (
+                <div className="mt-6 flex justify-center">
+                  <Button variant="outline" onClick={() => setLimite((l) => l + POR_PAGINA)}>Mostrar más ({filtrados.length - visibles.length})</Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
 
-      {/* Filter Sheet */}
-      <Sheet open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-        <SheetContent side="bottom" className="rounded-t-3xl">
-          <SheetHeader>
-            <SheetTitle>Filtros</SheetTitle>
+      {/* Filtros y orden (móvil) */}
+      <Sheet open={filtrosAbiertos} onOpenChange={setFiltrosAbiertos}>
+        <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto rounded-t-2xl pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <SheetHeader className="text-left">
+            <SheetTitle>Filtros y orden</SheetTitle>
+            <SheetDescription className="sr-only">Elige la categoría y el orden del catálogo.</SheetDescription>
           </SheetHeader>
-          <div className="py-4 space-y-4">
+          <div className="space-y-5 py-4">
             <div>
-              <p className="font-medium mb-3">Categoría</p>
-              <div className="flex flex-wrap gap-2">
-                {categories.map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => {
-                      setSelectedCategory(cat);
-                      setIsFilterOpen(false);
-                    }}
-                    className={`px-4 py-2 rounded-full text-sm font-medium border transition-colors ${
-                      selectedCategory === cat
-                        ? "bg-primary text-white border-primary"
-                        : "bg-background border-border"
-                    }`}
-                  >
-                    {cat}
+              <p className="mb-2 text-sm font-medium">Ordenar por</p>
+              <div className="grid grid-cols-2 gap-2">
+                {ORDENES.map((o) => (
+                  <button key={o.valor} type="button" onClick={() => setOrden(o.valor)} aria-pressed={orden === o.valor}
+                    className={cn("flex h-11 items-center justify-between rounded-lg border px-3 text-sm font-medium",
+                      orden === o.valor ? "border-foreground bg-muted" : "border-border")}>
+                    {o.etiqueta}{orden === o.valor && <Check className="h-4 w-4" />}
                   </button>
                 ))}
               </div>
             </div>
             <div>
-              <p className="font-medium mb-3">Ordenar por</p>
+              <p className="mb-2 text-sm font-medium">Categoría</p>
               <div className="flex flex-wrap gap-2">
-                {["Relevancia", "Menor precio", "Mayor precio", "Ofertas"].map((opt) => (
-                  <button
-                    key={opt}
-                    className="px-4 py-2 rounded-full text-sm font-medium border border-border bg-background"
-                  >
-                    {opt}
+                {categorias.map((c) => (
+                  <button key={c} type="button" onClick={() => { setCategoria(c); setFiltrosAbiertos(false); }} aria-pressed={categoria === c}
+                    className={cn("rounded-full border px-3 py-1.5 text-sm", categoria === c ? "border-foreground bg-foreground text-background" : "border-border")}>
+                    {c.trim()}
                   </button>
                 ))}
               </div>
@@ -415,7 +271,7 @@ const PortalCatalogo = () => {
 
       {/* Elegir empaque (productos con más de un empaque) */}
       <SelectorEmpaqueDialog producto={empaqueProducto} precios={empaquePrecios} onElegir={agregarConEmpaque} onCerrar={cerrarEmpaque} />
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

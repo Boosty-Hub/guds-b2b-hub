@@ -43,6 +43,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { ResumenPagoPedido } from "@/components/portal/ResumenPagoPedido";
+import { LineaTiempoPedido } from "@/components/pedidos/LineaTiempoPedido";
 import { OdooBadge } from "@/components/OdooBadge";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
@@ -450,6 +451,8 @@ const Ordenes = () => {
 
   const seguirEnvio = () => { [4000, 10000, 20000, 40000, 70000].forEach((ms) => setTimeout(() => fetchOrdenes(), ms)); };
 
+  // Aprobar crea la cotización en Odoo (no se puede borrar desde GUDS): se confirma antes
+  const [confirmarAprobacion, setConfirmarAprobacion] = useState<OrdenDB | null>(null);
   const aprobarPedido = async (orden: OrdenDB) => {
     setProcesandoAprobacion(true);
     const { data, error } = await supabase.rpc("aprobar_pedido", { p_orden_id: orden.id });
@@ -587,7 +590,8 @@ const Ordenes = () => {
 
       {/* Order Detail Sheet */}
       <Sheet open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <SheetContent className="w-full overflow-y-auto sm:w-[50vw] sm:max-w-none">
+        {/* Sin foco automático: el primer botón del panel puede ser "Aprobar y enviar a Odoo" y un Enter lo aprobaría */}
+        <SheetContent className="w-full overflow-y-auto sm:w-[50vw] sm:max-w-none" onOpenAutoFocus={(e) => e.preventDefault()}>
           <SheetHeader>
             <SheetTitle>Detalle de Orden</SheetTitle>
           </SheetHeader>
@@ -745,7 +749,7 @@ const Ordenes = () => {
                   <p className="mb-2 flex items-center gap-1.5 font-semibold"><Clock className="h-4 w-4" /> Pedido por aprobar</p>
                   <p className="mb-2.5 text-xs">Al aprobarlo se crea en Odoo como <strong>cotización en borrador</strong> (con el envío como línea de servicio) y sigue el flujo de Odoo. Si se rechaza, se cancela y se avisa al cliente y al vendedor.</p>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" className="gap-1.5" disabled={procesandoAprobacion} onClick={() => aprobarPedido(selectedOrder)}>
+                    <Button size="sm" className="gap-1.5" disabled={procesandoAprobacion} onClick={() => setConfirmarAprobacion(selectedOrder)}>
                       {procesandoAprobacion ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} Aprobar y enviar a Odoo
                     </Button>
                     <Button size="sm" variant="outline" className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10" disabled={procesandoAprobacion}
@@ -778,6 +782,14 @@ const Ordenes = () => {
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {selectedOrder.odoo_envio_aviso}
                 </p>
               )}
+
+              {/* Línea de tiempo (orden_eventos): se remonta al cambiar la aprobación o el estado para mostrar el hito nuevo */}
+              <div>
+                <h3 className="mb-1.5 text-[13px] font-semibold">Línea de tiempo</h3>
+                <div className="rounded-lg border border-border px-3 py-2.5" data-testid="linea-tiempo-admin">
+                  <LineaTiempoPedido key={`${selectedOrder.id}-${selectedOrder.aprobacion ?? ""}-${selectedOrder.estado}-${selectedOrder.odoo_id ?? ""}`} ordenId={selectedOrder.id} mostrarOrigen />
+                </div>
+              </div>
 
               {/* Cambiar estado (las órdenes de Odoo cambian de estado en Odoo; las de GUDS pasan por aprobación) */}
               {selectedOrder.aprobacion && !selectedOrder.odoo_id ? null : selectedOrder.odoo_id ? (
@@ -982,6 +994,20 @@ const Ordenes = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAsignarVend(null)} disabled={asignando}>Cancelar</Button>
             <Button onClick={confirmarVendedor} disabled={!vendElegido || asignando}>{asignando ? <Loader2 className="h-4 w-4 animate-spin" /> : "Asignar"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!confirmarAprobacion} onOpenChange={(o) => { if (!o) setConfirmarAprobacion(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>¿Aprobar el pedido {confirmarAprobacion?.numero}?</DialogTitle>
+            <DialogDescription>Se crea en Odoo como cotización en borrador y sigue el flujo de Odoo. Desde GUDS no se puede deshacer.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmarAprobacion(null)} autoFocus>Cancelar</Button>
+            <Button onClick={() => { const o = confirmarAprobacion; setConfirmarAprobacion(null); if (o) aprobarPedido(o); }} disabled={procesandoAprobacion}>
+              <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Aprobar y enviar a Odoo
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

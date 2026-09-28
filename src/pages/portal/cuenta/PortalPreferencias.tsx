@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
+import { PortalPagina } from "@/components/portal/PortalPagina";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { 
-  ChevronLeft,
+import {
   Settings,
   Moon,
   Sun,
@@ -10,33 +9,22 @@ import {
   DollarSign,
   Check
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
 const PortalPreferencias = () => {
-  const navigate = useNavigate();
   const { currency, setCurrency } = useCurrency();
   const [darkMode, setDarkMode] = useState(false);
 
   const currencies = [
     { id: "USD", name: "Dólar (USD)", symbol: "$" },
-    { id: "VES", name: "Bolívar (VES)", symbol: "Bs." },
+    { id: "BS", name: "Bolívar (Bs.)", symbol: "Bs." },
   ];
 
   return (
-    <PortalMobileLayout showHeader={false} showNav={false}>
-      {/* Header */}
-      <div className="bg-primary text-primary-foreground px-4 py-3 sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-1">
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-          <h1 className="text-lg font-semibold">Preferencias</h1>
-        </div>
-      </div>
+    <PortalPagina titulo="Preferencias" volver="/portal/cuenta" etiquetaVolver="Mi cuenta" ancho="estrecho">
 
-      <div className="px-4 py-4 space-y-4">
+      <div className="pb-6 space-y-4">
         {/* Appearance */}
         <div className="bg-card rounded-xl border border-border p-4">
           <h3 className="font-semibold mb-4 flex items-center gap-2">
@@ -72,7 +60,7 @@ const PortalPreferencias = () => {
             {currencies.map((curr) => (
               <button
                 key={curr.id}
-                onClick={() => setCurrency(curr.id as any)}
+                onClick={() => setCurrency(curr.id as "USD" | "BS")}
                 className={`w-full p-3 rounded-xl border flex items-center justify-between transition-colors ${
                   currency === curr.id 
                     ? "border-primary bg-primary/5" 
@@ -104,7 +92,7 @@ const PortalPreferencias = () => {
             className="w-full p-3 rounded-xl border border-primary bg-primary/5 flex items-center justify-between"
           >
             <div className="flex items-center gap-3">
-              <span className="text-lg">🇪🇸</span>
+              <span className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-[11px] font-semibold text-muted-foreground">ES</span>
               <span className="font-medium">Español</span>
             </div>
             <div className="h-6 w-6 rounded-full bg-primary flex items-center justify-center">
@@ -119,7 +107,7 @@ const PortalPreferencias = () => {
           <p className="text-xs text-muted-foreground mt-1">© 2024 GUDS Distribuidora</p>
         </div>
       </div>
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

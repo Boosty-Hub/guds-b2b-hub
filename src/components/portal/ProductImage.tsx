@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Package } from "lucide-react";
 import {
   Carousel,
   CarouselContent,
@@ -7,10 +6,13 @@ import {
   CarouselNext,
   CarouselPrevious,
 } from "@/components/ui/carousel";
+import { cn } from "@/lib/utils";
+import { iniciales } from "@/components/portal/sistema";
 
 interface ProductImageProps {
   imageUrl?: string | null;
   images?: string[] | null;
+  /** Obsoleto: el portal ya no muestra emojis (se conserva la prop por compatibilidad). */
   emoji?: string | null;
   alt?: string;
   className?: string;
@@ -18,38 +20,41 @@ interface ProductImageProps {
 }
 
 const sizeClasses = {
-  sm: "h-10 w-10 text-lg",
-  md: "h-16 w-16 text-3xl",
-  lg: "h-20 w-20 text-4xl",
-  xl: "h-24 w-24 text-5xl",
+  sm: "h-10 w-10",
+  md: "h-16 w-16",
+  lg: "h-20 w-20",
+  xl: "h-24 w-24",
 };
 
+const textoIniciales = {
+  sm: "text-xs",
+  md: "text-base",
+  lg: "text-lg",
+  xl: "text-xl",
+};
+
+// Foto del producto sobre blanco (object-contain, sin recortes). Sin foto: placeholder de marca con las iniciales del
+// producto sobre un fondo neutro, nunca una caja gris ni un emoji.
 export const ProductImage = ({
   imageUrl,
   images,
-  emoji,
   alt = "Producto",
   className = "",
-  size = "md"
+  size = "md",
 }: ProductImageProps) => {
   const [imageError, setImageError] = useState(false);
 
-  const baseClasses = `${sizeClasses[size]} rounded-lg bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden ${className}`;
+  const base = cn(sizeClasses[size], "flex shrink-0 items-center justify-center overflow-hidden rounded-lg", className);
   const galeria = (images || []).filter(Boolean);
 
-  // Varias imágenes: carrusel con flechas (usa embla, ya instalado y sin usar hasta ahora)
   if (galeria.length > 1 && !imageError) {
     return (
-      <Carousel className={baseClasses}>
+      <Carousel className={cn(base, "bg-white [&>div]:h-full [&>div]:w-full")}>
         <CarouselContent className="ml-0 h-full">
           {galeria.map((url, i) => (
-            <CarouselItem key={url + i} className="pl-0 h-full">
-              <img
-                src={url}
-                alt={`${alt} ${i + 1}`}
-                className="h-full w-full object-cover"
-                onError={() => setImageError(true)}
-              />
+            <CarouselItem key={url + i} className="h-full pl-0">
+              <img src={url} alt={`${alt} ${i + 1}`} loading="lazy" decoding="async" className="h-full w-full object-contain"
+                onError={() => setImageError(true)} />
             </CarouselItem>
           ))}
         </CarouselContent>
@@ -59,35 +64,25 @@ export const ProductImage = ({
     );
   }
 
-  const singleUrl = galeria[0] || imageUrl;
-
-  // Si hay imagen URL y no ha fallado, mostrar imagen
-  if (singleUrl && !imageError) {
+  const url = galeria[0] || imageUrl;
+  if (url && !imageError) {
     return (
-      <div className={baseClasses}>
-        <img
-          src={singleUrl}
-          alt={alt}
-          className="h-full w-full object-cover"
-          onError={() => setImageError(true)}
-        />
+      <div className={cn(base, "bg-white")}>
+        <img src={url} alt={alt} loading="lazy" decoding="async" className="h-full w-full object-contain" onError={() => setImageError(true)} />
       </div>
     );
   }
 
-  // Si hay emoji, mostrarlo
-  if (emoji) {
-    return (
-      <div className={baseClasses}>
-        {emoji}
-      </div>
-    );
-  }
-
-  // Fallback: icono de paquete
   return (
-    <div className={baseClasses}>
-      <Package className="h-1/2 w-1/2 text-muted-foreground" />
+    <div
+      className={cn(base, "border border-border/60 bg-gradient-to-br from-muted to-muted/40")}
+      role="img"
+      aria-label={alt}
+      data-placeholder-producto
+    >
+      <span className={cn("select-none font-semibold tracking-wider text-muted-foreground/80", textoIniciales[size])} aria-hidden>
+        {iniciales(alt)}
+      </span>
     </div>
   );
 };

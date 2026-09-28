@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
+import { PortalPagina } from "@/components/portal/PortalPagina";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { 
-  ChevronLeft,
+import {
   Shield,
   Lock,
   Eye,
@@ -14,14 +13,12 @@ import {
   Loader2,
   Check
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
 
 const PortalSeguridad = () => {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const { toast } = useToast();
   
   const [showPassword, setShowPassword] = useState(false);
@@ -60,18 +57,9 @@ const PortalSeguridad = () => {
   };
 
   return (
-    <PortalMobileLayout showHeader={false} showNav={false}>
-      {/* Header */}
-      <div className="bg-primary text-primary-foreground px-4 py-3 sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-1">
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-          <h1 className="text-lg font-semibold">Seguridad</h1>
-        </div>
-      </div>
+    <PortalPagina titulo="Seguridad" volver="/portal/cuenta" etiquetaVolver="Mi cuenta" ancho="estrecho">
 
-      <div className="px-4 py-4 space-y-6">
+      <div className="pb-6 space-y-6">
         {/* Security Status */}
         <div className="bg-green-500/10 rounded-xl p-4 flex items-center gap-3">
           <div className="h-12 w-12 rounded-full bg-green-500/20 flex items-center justify-center">
@@ -168,7 +156,7 @@ const PortalSeguridad = () => {
           </div>
         </div>
       </div>
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

@@ -154,7 +154,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           'currency_id', 'ref_currency_id', 'amount_total_ref', 'user_id', 'note', 'write_date'], { empresa: cid });
       d.lineas = await odoo.leerTodo('sale.order.line', [['company_id', '=', cid], ['display_type', '=', false]],
         ['order_id', 'product_id', 'name', 'product_uom_qty', 'discount', 'price_unit', 'price_subtotal',
-          'price_unit_ref', 'price_subtotal_ref', 'write_date'], { empresa: cid });
+          'price_unit_ref', 'price_subtotal_ref', 'tax_id', 'write_date'], { empresa: cid });
       d.facturas = await odoo.leerTodo('account.move',
         [['move_type', 'in', ['out_invoice', 'out_refund']], ['state', 'in', ['posted', 'cancel']], ['company_id', '=', cid]],
         ['name', 'move_type', 'state', 'invoice_date', 'invoice_date_due', 'commercial_partner_id', 'currency_id',
@@ -437,6 +437,9 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           nombre_producto: txt(l.name, 200) || m2oNombre(l.product_id), sku_producto: tmpl ? skuPorPlantilla.get(tmpl) ?? null : null,
           cantidad: Math.round(l.product_uom_qty || 0), precio_unitario: round2(aUsd(l.price_unit, l.price_unit_ref, cur, ref)),
           descuento: round2(l.discount), subtotal: round2(aUsd(l.price_subtotal, l.price_subtotal_ref, cur, ref)),
+          // IVA de la línea en Odoo (el que se aplicó al vender, aunque el producto cambie después)
+          impuesto_pct: round2((l.tax_id || []).map((id) => impuestoPorId.get(id)).filter((t) => t && t.amount_type === 'percent')
+            .reduce((a, t) => a + (Number(t.amount) || 0), 0)),
         };
       });
       marcas.push(marca('ordenes', E, d.ordenes));
@@ -833,19 +836,21 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       }
       for (const lote of lotes(lineas, 1000)) {
         await escribir(`
-          insert into orden_items (odoo_id, empresa_id, orden_id, producto_id, nombre_producto, sku_producto, cantidad, precio_unitario, descuento, subtotal)
+          insert into orden_items (odoo_id, empresa_id, orden_id, producto_id, nombre_producto, sku_producto, cantidad, precio_unitario, descuento, subtotal,
+            impuesto_pct, impuesto)
           select x.odoo_id, x.empresa_id, o.id, (select p.id from productos p where p.odoo_id = x.tmpl), x.nombre_producto, x.sku_producto,
-            x.cantidad, x.precio_unitario, x.descuento, x.subtotal
+            x.cantidad, x.precio_unitario, x.descuento, x.subtotal, x.impuesto_pct, round(x.subtotal * x.impuesto_pct / 100.0, 2)
           from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, empresa_id uuid, orden_odoo_id int, tmpl int, nombre_producto text,
-            sku_producto text, cantidad int, precio_unitario numeric, descuento numeric, subtotal numeric)
+            sku_producto text, cantidad int, precio_unitario numeric, descuento numeric, subtotal numeric, impuesto_pct numeric)
           join ordenes o on o.odoo_id = x.orden_odoo_id
           on conflict (odoo_id) do update set empresa_id = excluded.empresa_id, orden_id = excluded.orden_id, producto_id = excluded.producto_id,
             nombre_producto = excluded.nombre_producto, sku_producto = excluded.sku_producto, cantidad = excluded.cantidad,
-            precio_unitario = excluded.precio_unitario, descuento = excluded.descuento, subtotal = excluded.subtotal
+            precio_unitario = excluded.precio_unitario, descuento = excluded.descuento, subtotal = excluded.subtotal,
+            impuesto_pct = excluded.impuesto_pct, impuesto = excluded.impuesto
           where (orden_items.empresa_id, orden_items.orden_id, orden_items.producto_id, orden_items.nombre_producto, orden_items.sku_producto,
-            orden_items.cantidad, orden_items.precio_unitario, orden_items.descuento, orden_items.subtotal)
+            orden_items.cantidad, orden_items.precio_unitario, orden_items.descuento, orden_items.subtotal, orden_items.impuesto_pct, orden_items.impuesto)
           is distinct from (excluded.empresa_id, excluded.orden_id, excluded.producto_id, excluded.nombre_producto, excluded.sku_producto,
-            excluded.cantidad, excluded.precio_unitario, excluded.descuento, excluded.subtotal)`);
+            excluded.cantidad, excluded.precio_unitario, excluded.descuento, excluded.subtotal, excluded.impuesto_pct, excluded.impuesto)`);
       }
       await escribir(`
         delete from orden_items oi using ordenes o

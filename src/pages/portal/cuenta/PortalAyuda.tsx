@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
+import { PortalPagina } from "@/components/portal/PortalPagina";
+import { BoostySupportSlot } from "@/components/support/BoostySupportSlot";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  ChevronLeft,
   Search,
   MessageCircle,
   Phone,
@@ -15,7 +15,7 @@ import {
   Building2,
   UserRound
 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEmpresa } from "@/contexts/EmpresaContext";
@@ -76,7 +76,6 @@ interface Contacto { whatsapp: string | null; telefono: string | null; email: st
 const soloDigitos = (s: string) => s.replace(/[^\d]/g, "");
 
 const PortalAyuda = () => {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { empresaActiva } = useEmpresa();
   const [searchTerm, setSearchTerm] = useState("");
@@ -116,155 +115,130 @@ const PortalAyuda = () => {
   const hayCanales = !!(contacto.whatsapp || contacto.telefono || contacto.email);
 
   return (
-    <PortalMobileLayout showHeader={false} showNav={false}>
-      {/* Header */}
-      <div className="bg-primary text-primary-foreground px-4 py-3 sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-1" aria-label="Volver">
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-          <h1 className="text-lg font-semibold">Centro de Ayuda</h1>
-        </div>
-      </div>
-
-      <div className="px-4 py-4 space-y-4">
-        {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-          <Input
-            placeholder="Buscar en ayuda..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
-        </div>
-
-        {/* Canales de contacto (solo datos reales) */}
-        {hayCanales && (
-          <div className="grid grid-cols-2 gap-3">
-            {contacto.whatsapp && (
-              <a href={`https://wa.me/${soloDigitos(contacto.whatsapp)}`} target="_blank" rel="noopener noreferrer">
-                <div className="bg-green-600 rounded-xl p-4 text-white text-center">
-                  <MessageCircle className="h-8 w-8 mx-auto mb-2" />
-                  <p className="font-medium">WhatsApp</p>
-                  <p className="text-xs opacity-90">{contacto.whatsapp}</p>
-                </div>
-              </a>
-            )}
-            {contacto.telefono && (
-              <a href={`tel:${contacto.telefono.replace(/[^\d+]/g, "")}`}>
-                <div className="bg-blue-600 rounded-xl p-4 text-white text-center">
-                  <Phone className="h-8 w-8 mx-auto mb-2" />
-                  <p className="font-medium">Llamar</p>
-                  <p className="text-xs opacity-90">{contacto.telefono}</p>
-                </div>
-              </a>
-            )}
-            {contacto.email && (
-              <a href={`mailto:${contacto.email}`} className="col-span-2">
-                <Button variant="outline" className="w-full gap-2">
-                  <Mail className="h-4 w-4" />
-                  {contacto.email}
-                </Button>
-              </a>
-            )}
+    <PortalPagina titulo="Centro de ayuda" descripcion="Respuestas sobre pedidos, pagos y tu cuenta, y cómo contactarnos." volver="/portal/cuenta" etiquetaVolver="Mi cuenta">
+      <div className="grid gap-6 pb-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+        <div className="space-y-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="Buscar en la ayuda"
+              aria-label="Buscar en la ayuda"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="h-10 bg-card pl-9"
+            />
           </div>
-        )}
 
-        {/* Ejecutivo de cuenta y datos de la empresa (vienen de Odoo) */}
-        <div className="bg-card rounded-xl border border-border p-4 space-y-3">
-          {ejecutivo && (
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 shrink-0 rounded-full bg-muted flex items-center justify-center">
-                <UserRound className="h-5 w-5 text-muted-foreground" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Tu ejecutivo de cuenta</p>
-                <p className="font-medium">{ejecutivo}</p>
-              </div>
-            </div>
-          )}
-          {empresaActiva && (
-            <div className="flex items-start gap-3">
-              <div className="h-10 w-10 shrink-0 rounded-full bg-muted flex items-center justify-center">
-                <Building2 className="h-5 w-5 text-muted-foreground" />
-              </div>
-              <div className="min-w-0">
-                <p className="font-medium">{empresaActiva.nombre}</p>
-                {empresaActiva.rif && <p className="text-sm text-muted-foreground">RIF {empresaActiva.rif}</p>}
-                {empresaActiva.direccion && (
-                  <p className="text-sm text-muted-foreground">
-                    {empresaActiva.direccion}{empresaActiva.ciudad ? `, ${empresaActiva.ciudad}` : ""}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-          {!hayCanales && (
-            <p className="text-sm text-muted-foreground">
-              Para dudas sobre un pedido o un pago, comunícate con tu ejecutivo de cuenta.
-            </p>
-          )}
-        </div>
-
-        {/* FAQ Categories */}
-        <div className="space-y-3">
-          <h3 className="font-semibold">Preguntas frecuentes</h3>
-          {categorias.length === 0 && (
-            <p className="text-sm text-muted-foreground">No encontramos preguntas con «{searchTerm}».</p>
-          )}
-
-          {categorias.map((category) => {
-            const Icon = category.icon;
-            const isExpanded = !!termino || expandedCategory === category.title;
-
-            return (
-              <div key={category.title} className="bg-card rounded-xl border border-border overflow-hidden">
-                <button
-                  onClick={() => setExpandedCategory(expandedCategory === category.title ? null : category.title)}
-                  aria-expanded={isExpanded}
-                  className="w-full p-4 flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
-                      <Icon className="h-5 w-5 text-muted-foreground" />
+          <section className="space-y-3" aria-label="Preguntas frecuentes">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preguntas frecuentes</h2>
+            {categorias.length === 0 && (
+              <p className="text-sm text-muted-foreground">No encontramos preguntas con «{searchTerm}».</p>
+            )}
+            {categorias.map((category) => {
+              const Icon = category.icon;
+              const isExpanded = !!termino || expandedCategory === category.title || (!expandedCategory && category === categorias[0]);
+              return (
+                <div key={category.title} className="overflow-hidden rounded-xl border border-border bg-card">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedCategory(isExpanded ? "__ninguna" : category.title)}
+                    aria-expanded={isExpanded}
+                    className="flex w-full items-center justify-between px-4 py-3.5"
+                  >
+                    <span className="flex items-center gap-3">
+                      <Icon className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} />
+                      <span className="text-sm font-semibold">{category.title}</span>
+                    </span>
+                    <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                  </button>
+                  {isExpanded && (
+                    <div className="divide-y divide-border border-t border-border">
+                      {category.questions.map((item) => {
+                        const open = abierta === item.q || !!termino;
+                        return (
+                          <div key={item.q}>
+                            <button
+                              type="button"
+                              onClick={() => setAbierta(abierta === item.q ? null : item.q)}
+                              aria-expanded={open}
+                              className="w-full px-4 py-3 text-left text-sm font-medium hover:bg-muted/40"
+                            >
+                              {item.q}
+                            </button>
+                            {open && <p className="px-4 pb-3 text-sm leading-relaxed text-muted-foreground">{item.a}</p>}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <span className="font-medium">{category.title}</span>
-                  </div>
-                  <ChevronRight className={`h-5 w-5 text-muted-foreground transition-transform ${
-                    isExpanded ? "rotate-90" : ""
-                  }`} />
-                </button>
-
-                {isExpanded && (
-                  <div className="px-4 pb-4 space-y-2">
-                    {category.questions.map((item) => {
-                      const open = abierta === item.q || !!termino;
-                      return (
-                        <div key={item.q} className="rounded-lg bg-muted">
-                          <button
-                            onClick={() => setAbierta(abierta === item.q ? null : item.q)}
-                            aria-expanded={open}
-                            className="w-full text-left p-3 text-sm font-medium"
-                          >
-                            {item.q}
-                          </button>
-                          {open && <p className="px-3 pb-3 text-sm text-muted-foreground">{item.a}</p>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                  )}
+                </div>
+              );
+            })}
+          </section>
         </div>
 
-        <p className="text-center text-sm">
-          <Link to="/terminos" className="text-primary underline-offset-2 hover:underline">Términos y condiciones</Link>
-        </p>
+        <aside className="space-y-4 lg:sticky lg:top-[5.5rem]">
+          {/* Canales de contacto (solo datos reales) */}
+          <section className="space-y-3 rounded-xl border border-border bg-card p-4">
+            <h2 className="text-sm font-semibold">Contacto</h2>
+            {ejecutivo && (
+              <div className="flex items-center gap-3">
+                <UserRound className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                <div>
+                  <p className="text-xs text-muted-foreground">Tu ejecutivo de cuenta</p>
+                  <p className="text-sm font-medium">{ejecutivo}</p>
+                </div>
+              </div>
+            )}
+            {hayCanales ? (
+              <div className="grid gap-2">
+                {contacto.whatsapp && (
+                  <Button asChild variant="outline" className="justify-start gap-2">
+                    <a href={`https://wa.me/${soloDigitos(contacto.whatsapp)}`} target="_blank" rel="noopener noreferrer"><MessageCircle className="h-4 w-4" />WhatsApp · {contacto.whatsapp}</a>
+                  </Button>
+                )}
+                {contacto.telefono && (
+                  <Button asChild variant="outline" className="justify-start gap-2">
+                    <a href={`tel:${contacto.telefono.replace(/[^\d+]/g, "")}`}><Phone className="h-4 w-4" />{contacto.telefono}</a>
+                  </Button>
+                )}
+                {contacto.email && (
+                  <Button asChild variant="outline" className="justify-start gap-2">
+                    <a href={`mailto:${contacto.email}`}><Mail className="h-4 w-4" /><span className="truncate">{contacto.email}</span></a>
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Para dudas sobre un pedido o un pago, comunícate con tu ejecutivo de cuenta.</p>
+            )}
+            {empresaActiva && (
+              <div className="flex items-start gap-3 border-t border-border pt-3">
+                <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                <div className="min-w-0 text-sm">
+                  <p className="font-medium">{empresaActiva.nombre}</p>
+                  {empresaActiva.rif && <p className="text-muted-foreground">RIF {empresaActiva.rif}</p>}
+                  {empresaActiva.direccion && (
+                    <p className="text-muted-foreground">{empresaActiva.direccion}{empresaActiva.ciudad ? `, ${empresaActiva.ciudad}` : ""}</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* Soporte técnico del portal (widget de tickets): vive aquí y no en el encabezado */}
+          <section className="rounded-xl border border-border bg-card p-4">
+            <h2 className="text-sm font-semibold">¿Algo no funciona en el portal?</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Reporta un problema técnico y lo revisamos.</p>
+            <BoostySupportSlot className="mt-3" />
+          </section>
+
+          <p className="text-center text-sm">
+            <Link to="/terminos" className="text-primary underline-offset-2 hover:underline">Términos y condiciones</Link>
+          </p>
+        </aside>
       </div>
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
-import { Badge } from "@/components/ui/badge";
+import { PortalPagina } from "@/components/portal/PortalPagina";
+import { EstadoVacio, Panel, PillTono, SkeletonFilas, type Tono } from "@/components/portal/sistema";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Receipt, Eye } from "lucide-react";
+import { Receipt, Eye } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -16,10 +16,10 @@ interface Retencion {
   id: string; numero: string; tipo: string; estado: string; fecha: string; total: number; comprobante_url: string | null;
 }
 
-const ESTADO: Record<string, { label: string; variant: "default" | "secondary" | "destructive" }> = {
-  pendiente: { label: "Pendiente", variant: "secondary" },
-  aprobado: { label: "Aprobado", variant: "default" },
-  rechazado: { label: "Rechazado", variant: "destructive" },
+const ESTADO: Record<string, { label: string; tono: Tono }> = {
+  pendiente: { label: "Pendiente", tono: "pendiente" },
+  aprobado: { label: "Aprobado", tono: "ok" },
+  rechazado: { label: "Rechazado", tono: "riesgo" },
 };
 
 const PortalRetenciones = () => {
@@ -60,25 +60,23 @@ const PortalRetenciones = () => {
   const puedeRetener = flags?.retiene_iva || flags?.retiene_islr;
 
   return (
-    <PortalMobileLayout title="Retenciones">
+    <PortalPagina titulo="Retenciones" descripcion="Declara los comprobantes de retención de IVA o ISLR de tus facturas.">
       {loading ? (
-        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        <SkeletonFilas n={2} alto="h-48" />
       ) : !puedeRetener ? (
-        <div className="flex flex-col items-center px-4 py-16 text-center text-muted-foreground">
-          <Receipt className="mb-3 h-10 w-10 opacity-50" />
-          <p>No estás registrado como agente de retención.</p>
+        <div className="rounded-xl border border-border bg-card">
+          <EstadoVacio icono={Receipt} titulo="No estás registrado como agente de retención"
+            descripcion="Si tu empresa es agente de retención, pide a tu ejecutivo de cuenta que lo actualice en tu ficha." />
         </div>
       ) : (
-        <div className="space-y-6 px-4 pt-4">
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="mb-3 font-semibold">Declarar retención</h2>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] lg:items-start">
+          <Panel titulo="Declarar retención">
             <DeclararRetencionForm clienteId={user!.cliente_id!} facturas={facturas} onDeclarado={cargar} />
-          </div>
+          </Panel>
 
-          <div className="rounded-xl border border-border bg-card shadow-sm">
-            <div className="border-b border-border p-5"><h2 className="font-semibold">Mis retenciones ({retenciones.length})</h2></div>
+          <Panel titulo={`Mis retenciones (${retenciones.length})`} cuerpoClassName="p-0 sm:p-0">
             {retenciones.length === 0 ? (
-              <p className="p-8 text-center text-muted-foreground">Todavía no declaraste ninguna retención.</p>
+              <p className="p-8 text-center text-sm text-muted-foreground">Todavía no has declarado ninguna retención.</p>
             ) : (
               <Table>
                 <TableHeader>
@@ -90,14 +88,14 @@ const PortalRetenciones = () => {
                 <TableBody>
                   {retenciones.map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell className="font-mono text-sm text-primary">{r.numero}</TableCell>
+                      <TableCell className="font-mono text-sm">{r.numero}</TableCell>
                       <TableCell className="uppercase text-muted-foreground">{r.tipo}</TableCell>
                       <TableCell className="text-muted-foreground">{new Date(r.fecha).toLocaleDateString("es-VE")}</TableCell>
-                      <TableCell className="text-right font-semibold">{formatPrice(r.total)}</TableCell>
-                      <TableCell><Badge variant={ESTADO[r.estado]?.variant ?? "secondary"}>{ESTADO[r.estado]?.label ?? r.estado}</Badge></TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{formatPrice(r.total)}</TableCell>
+                      <TableCell><PillTono tono={ESTADO[r.estado]?.tono ?? "neutro"}>{ESTADO[r.estado]?.label ?? r.estado}</PillTono></TableCell>
                       <TableCell>
                         {r.comprobante_url && (
-                          <Button variant="ghost" size="icon" onClick={() => verComprobante(r.comprobante_url!)}><Eye className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" onClick={() => verComprobante(r.comprobante_url!)} aria-label={`Ver comprobante de ${r.numero}`}><Eye className="h-4 w-4" /></Button>
                         )}
                       </TableCell>
                     </TableRow>
@@ -105,10 +103,10 @@ const PortalRetenciones = () => {
                 </TableBody>
               </Table>
             )}
-          </div>
+          </Panel>
         </div>
       )}
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

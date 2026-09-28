@@ -43,8 +43,8 @@ export const estadoVisible = (p: PedidoParaEstado): EstadoVisible => {
 export const claseTono: Record<EstadoVisible["tono"], string> = {
   riesgo: "border-destructive/40 bg-destructive/10 text-destructive",
   neutro: "border-border bg-muted text-muted-foreground",
-  pendiente: "border-amber-300 bg-amber-100 text-amber-900",
-  aprobado: "border-sky-300 bg-sky-50 text-sky-900",
-  proceso: "border-indigo-300 bg-indigo-50 text-indigo-900",
+  pendiente: "border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200",
+  aprobado: "border-sky-300 bg-sky-50 text-sky-900 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-200",
+  proceso: "border-indigo-300 bg-indigo-50 text-indigo-900 dark:border-indigo-700 dark:bg-indigo-950 dark:text-indigo-200",
   ok: "border-success/40 bg-success/10 text-success",
 };

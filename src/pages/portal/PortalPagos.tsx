@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Link } from "react-router-dom";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
+import { Link, useSearchParams } from "react-router-dom";
+import { PortalPagina } from "@/components/portal/PortalPagina";
+import { EstadoVacio, Kpi, Panel, PillTono, Segmentado, SkeletonFilas, useEsEscritorio, type Tono } from "@/components/portal/sistema";
 import { CuentaPagoDatos } from "@/components/portal/CuentaPagoDatos";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,7 +13,6 @@ import { Label } from "@/components/ui/label";
 import {
   CreditCard,
   Upload,
-  Clock,
   CheckCircle,
   AlertCircle,
   Plus,
@@ -20,8 +20,7 @@ import {
   Receipt,
   FileText,
   Paperclip,
-  Landmark,
-  XCircle,
+  Landmark
 } from "lucide-react";
 import {
   Sheet,
@@ -92,12 +91,12 @@ interface Destino {
   ordenId: string | null;
 }
 
-const statusConfig: Record<string, { label: string; color: string; icon: typeof Clock }> = {
-  pendiente: { label: "Por verificar", color: "bg-yellow-500", icon: Clock },
-  verificando: { label: "Por verificar", color: "bg-yellow-500", icon: Clock },
-  verificado: { label: "Verificado", color: "bg-green-500", icon: CheckCircle },
-  aprobado: { label: "Verificado", color: "bg-green-500", icon: CheckCircle },
-  rechazado: { label: "Rechazado", color: "bg-red-500", icon: XCircle },
+const statusConfig: Record<string, { label: string; tono: Tono }> = {
+  pendiente: { label: "Por verificar", tono: "pendiente" },
+  verificando: { label: "Por verificar", tono: "pendiente" },
+  verificado: { label: "Verificado", tono: "ok" },
+  aprobado: { label: "Verificado", tono: "ok" },
+  rechazado: { label: "Rechazado", tono: "riesgo" },
 };
 
 const TOLERANCIA = 0.009; // misma tolerancia que CxC del admin
@@ -114,6 +113,8 @@ const PortalPagos = () => {
   const { empresaActiva } = useEmpresa();
   const { toast } = useToast();
   const { cuentas, loading: cargandoCuentas } = useCuentasPago();
+  const esEscritorio = useEsEscritorio();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [activeTab, setActiveTab] = useState<"pendientes" | "verificados" | "rechazados">("pendientes");
   const [pagos, setPagos] = useState<PagoDB[]>([]);
@@ -300,6 +301,17 @@ const PortalPagos = () => {
     }
   };
 
+  // Enlace directo desde el detalle del pedido: /portal/pagos?factura=<id> abre la declaración de esa factura
+  useEffect(() => {
+    const fid = searchParams.get("factura");
+    if (!fid || loading) return;
+    if (facturasPorPagar.some((f) => f.id === fid)) abrirDeclaracion(`f:${fid}`);
+    const n = new URLSearchParams(searchParams);
+    n.delete("factura");
+    setSearchParams(n, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, searchParams]);
+
   const handleComprobanteSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -422,182 +434,154 @@ const PortalPagos = () => {
     );
   };
 
+  const hayVencidas = facturasPorPagar.some(vencida);
+  const totalVencido = facturasPorPagar.filter(vencida).reduce((s, f) => s + f.saldo_usd, 0);
+
   return (
-    <PortalMobileLayout title="Pagos">
-      {/* Resumen */}
-      <div className="px-4 pt-4 space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-card rounded-xl border border-border p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 shrink-0 rounded-full bg-amber-500/10 flex items-center justify-center">
-                <AlertCircle className="h-5 w-5 text-amber-500" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-lg font-bold tabular-nums" data-testid="por-pagar">{loading ? "…" : formatPrice(totalPorPagar)}</p>
-                <p className="text-xs text-muted-foreground">
-                  Por pagar{!loading && facturasPorPagar.length > 0 ? ` · ${facturasPorPagar.length} ${facturasPorPagar.length === 1 ? "factura" : "facturas"}` : ""}
-                </p>
-              </div>
-            </div>
+    <PortalPagina
+      titulo="Pagos"
+      descripcion="Tus facturas por pagar y los pagos que has declarado."
+      acciones={
+        <>
+          <Button asChild variant="outline" className="gap-2"><Link to="/portal/cuenta/pagos"><Landmark className="h-4 w-4" />Cuentas para pagar</Link></Button>
+          <Button className="gap-2" onClick={() => abrirDeclaracion()} data-testid="declarar-pago"><Plus className="h-4 w-4" />Declarar un pago</Button>
+        </>
+      }
+    >
+      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
+        {/* Resumen y facturas pendientes (en móvil va primero; en escritorio, columna derecha) */}
+        <aside className="space-y-4 lg:sticky lg:top-[5.5rem] lg:order-2">
+          <div className="grid grid-cols-2 gap-3">
+            <Kpi etiqueta="Por pagar" icono={AlertCircle} cargando={loading} testId="por-pagar" alerta={hayVencidas}
+              valor={formatPrice(totalPorPagar)}
+              detalle={facturasPorPagar.length === 0 ? "Sin facturas pendientes" : hayVencidas ? `${formatPrice(totalVencido)} vencido` : `${facturasPorPagar.length} ${facturasPorPagar.length === 1 ? "factura" : "facturas"}`} />
+            <Kpi etiqueta="Verificado" icono={CheckCircle} cargando={loading} valor={formatPrice(totalVerificado)}
+              detalle={`${pagosVerificados.length} ${pagosVerificados.length === 1 ? "pago" : "pagos"}`} />
           </div>
-          <div className="bg-card rounded-xl border border-border p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 shrink-0 rounded-full bg-green-500/10 flex items-center justify-center">
-                <CheckCircle className="h-5 w-5 text-green-500" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-lg font-bold tabular-nums">{loading ? "…" : formatPrice(totalVerificado)}</p>
-                <p className="text-xs text-muted-foreground">Pagos verificados</p>
-              </div>
-            </div>
-          </div>
-        </div>
-        {!loading && totalAFavor > TOLERANCIA && (
-          <p className="rounded-lg bg-green-500/10 px-3 py-2 text-xs text-green-800">
-            Además tienes {formatPrice(totalAFavor)} a favor por notas de crédito aún no aplicadas.
-          </p>
-        )}
-
-        <Button className="w-full gap-2" size="lg" onClick={() => abrirDeclaracion()}>
-          <Plus className="h-5 w-5" />
-          Declarar un pago
-        </Button>
-        <Link to="/portal/cuenta/pagos" className="flex items-center justify-center gap-1.5 text-sm font-medium text-primary">
-          <Landmark className="h-4 w-4" />
-          Ver cuentas para pagar
-        </Link>
-      </div>
-
-      {/* Tabs */}
-      <div className="px-4 pt-4">
-        <div className="flex bg-muted rounded-xl p-1" role="tablist">
-          {tabs.map((t) => (
-            <button
-              key={t.k}
-              role="tab"
-              aria-selected={activeTab === t.k}
-              onClick={() => setActiveTab(t.k)}
-              className={`flex-1 py-2 px-2 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === t.k ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
-              }`}
-            >
-              {t.label} ({t.n})
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Payments List */}
-      <div className="px-4 py-4 space-y-3">
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        ) : displayPagos.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="h-16 w-16 rounded-full bg-muted mx-auto flex items-center justify-center mb-4">
-              <Receipt className="h-8 w-8 text-muted-foreground" />
-            </div>
-            <p className="text-muted-foreground">
-              {activeTab === "pendientes"
-                ? "No tienes pagos por verificar"
-                : activeTab === "verificados" ? "No hay pagos verificados" : "No tienes pagos rechazados"}
+          {!loading && totalAFavor > TOLERANCIA && (
+            <p className="rounded-lg border border-success/30 bg-success/5 px-3 py-2 text-xs text-foreground">
+              Además tienes <span className="font-semibold tabular-nums">{formatPrice(totalAFavor)}</span> a favor por notas de crédito aún no aplicadas.
             </p>
-          </div>
-        ) : (
-          displayPagos.map((pago) => {
-            const config = statusConfig[pago.estado] || statusConfig.pendiente;
-            const StatusIcon = config.icon;
-            const cuenta = pago.banco_id ? cuentasPorId[pago.banco_id] : undefined;
+          )}
 
-            return (
-              <div key={pago.id} className="bg-card rounded-xl border border-border p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`h-10 w-10 rounded-full ${config.color}/10 flex items-center justify-center`}>
-                      <StatusIcon className={`h-5 w-5 ${config.color.replace("bg-", "text-")}`} />
+          <div className="space-y-2 lg:hidden">
+            <Button className="w-full gap-2" size="lg" onClick={() => abrirDeclaracion()} data-testid="declarar-pago-movil">
+              <Plus className="h-5 w-5" />Declarar un pago
+            </Button>
+            <Link to="/portal/cuenta/pagos" className="flex items-center justify-center gap-1.5 py-1 text-sm font-medium text-primary">
+              <Landmark className="h-4 w-4" />Ver cuentas para pagar
+            </Link>
+          </div>
+
+          {/* Facturas pendientes: el detalle de "Por pagar" */}
+          {!loading && facturasPorPagar.length > 0 && (
+            <Panel titulo="Facturas pendientes" descripcion="Toca una factura para declarar su pago." cuerpoClassName="p-0 sm:p-0">
+              <ul className="divide-y divide-border">
+                {facturasPorPagar.map((f) => (
+                  <li key={f.id}>
+                    <button
+                      type="button"
+                      onClick={() => abrirDeclaracion(`f:${f.id}`)}
+                      aria-label={`Declarar pago de la factura ${f.numero}`}
+                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/40 sm:px-5"
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium">Factura {f.numero}</span>
+                          <span className={cn("block text-xs", vencida(f) ? "text-destructive" : "text-muted-foreground")}>
+                            {vencida(f) ? "Vencida el " : "Vence el "}{formatDate(f.fecha_vencimiento || f.fecha_emision)}
+                          </span>
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-sm font-semibold tabular-nums">{formatPrice(f.saldo_usd)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          )}
+        </aside>
+
+        {/* Pagos declarados */}
+        <section className="mt-6 space-y-3 lg:order-1 lg:mt-0" aria-label="Pagos declarados">
+          <Segmentado<"pendientes" | "verificados" | "rechazados">
+            opciones={tabs.map((t) => ({ valor: t.k, etiqueta: t.label, n: t.n }))}
+            valor={activeTab}
+            onCambio={setActiveTab}
+            etiqueta="Estado de los pagos"
+          />
+
+          {loading ? (
+            <SkeletonFilas n={4} alto="h-24" />
+          ) : displayPagos.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card">
+              <EstadoVacio
+                icono={Receipt}
+                titulo={activeTab === "pendientes" ? "No tienes pagos por verificar" : activeTab === "verificados" ? "No hay pagos verificados" : "No tienes pagos rechazados"}
+                descripcion={activeTab === "pendientes" ? "Cuando declares un pago, lo verás aquí hasta que lo revisemos." : undefined}
+              />
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {displayPagos.map((pago) => {
+                const config = statusConfig[pago.estado] || statusConfig.pendiente;
+                const cuenta = pago.banco_id ? cuentasPorId[pago.banco_id] : undefined;
+                return (
+                  <li key={pago.id} className="rounded-xl border border-border bg-card p-4 sm:p-5" data-testid="pago-card">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-lg font-semibold tabular-nums">{formatPrice(pago.monto)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {pago.moneda === "BS" && pago.monto_moneda ? <span className="tabular-nums">{fmtBs(Number(pago.monto_moneda))} · </span> : ""}
+                          {pago.orden?.numero ? `Pedido ${pago.orden.numero}` : "Abono a cuenta"}
+                        </p>
+                      </div>
+                      <PillTono tono={config.tono}>{config.label}</PillTono>
                     </div>
-                    <div>
-                      <p className="font-semibold tabular-nums">{formatPrice(pago.monto)}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {pago.moneda === "BS" && pago.monto_moneda ? `${fmtBs(Number(pago.monto_moneda))} · ` : ""}
-                        {pago.orden?.numero ? `Pedido ${pago.orden.numero}` : "Abono a cuenta"}
+
+                    <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
+                      <div>
+                        <dt className="text-xs text-muted-foreground">Método</dt>
+                        <dd className="font-medium">{METODO_LABEL[pago.metodo] || pago.metodo}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted-foreground">Referencia</dt>
+                        <dd className="break-all font-mono text-sm">{pago.referencia || "—"}</dd>
+                      </div>
+                      {cuenta && (
+                        <div className="col-span-2 sm:col-span-1">
+                          <dt className="text-xs text-muted-foreground">Cuenta</dt>
+                          <dd className="font-medium">{cuenta.nombre}</dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    {pago.estado === "rechazado" && (
+                      <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                        {pago.notas ? `Motivo: ${pago.notas}` : "No se indicó el motivo del rechazo."}
                       </p>
+                    )}
+
+                    <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground">
+                      <span>{formatDate(pago.created_at)}</span>
+                      {pago.numero && <span className="font-mono">{pago.numero}</span>}
                     </div>
-                  </div>
-                  <Badge className={`${config.color} text-white`}>{config.label}</Badge>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Método</p>
-                    <p className="font-medium">{METODO_LABEL[pago.metodo] || pago.metodo}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Referencia</p>
-                    <p className="font-medium font-mono break-all">{pago.referencia || "—"}</p>
-                  </div>
-                  {cuenta && (
-                    <div className="col-span-2">
-                      <p className="text-muted-foreground">Cuenta</p>
-                      <p className="font-medium">{cuenta.nombre}</p>
-                    </div>
-                  )}
-                </div>
-
-                {pago.estado === "rechazado" && (
-                  <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 text-sm text-red-900">
-                    {pago.notas ? `Motivo: ${pago.notas}` : "No se indicó el motivo del rechazo."}
-                  </p>
-                )}
-
-                <div className="mt-3 pt-3 border-t border-border flex justify-between items-center">
-                  <p className="text-xs text-muted-foreground">{formatDate(pago.created_at)}</p>
-                  {pago.numero && <p className="text-xs text-muted-foreground font-mono">{pago.numero}</p>}
-                </div>
-              </div>
-            );
-          })
-        )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
       </div>
-
-      {/* Facturas pendientes: el detalle de "Por pagar" */}
-      {!loading && facturasPorPagar.length > 0 && (
-        <div className="px-4 pb-24">
-          <h3 className="font-semibold mb-3">Facturas pendientes</h3>
-          <div className="space-y-2">
-            {facturasPorPagar.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => abrirDeclaracion(`f:${f.id}`)}
-                aria-label={`Declarar pago de la factura ${f.numero}`}
-                className="w-full bg-card rounded-xl border border-border p-3 flex items-center justify-between gap-3 text-left hover:bg-muted/40"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="h-10 w-10 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
-                    <FileText className="h-5 w-5 text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-medium">Factura {f.numero}</p>
-                    <p className={cn("text-xs", vencida(f) ? "text-red-600" : "text-muted-foreground")}>
-                      {vencida(f) ? "Vencida el " : "Vence el "}{formatDate(f.fecha_vencimiento || f.fecha_emision)}
-                    </p>
-                    <p className="text-xs font-medium text-primary">Declarar pago</p>
-                  </div>
-                </div>
-                <p className="shrink-0 font-bold text-primary tabular-nums">{formatPrice(f.saldo_usd)}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Declarar pago: contenido con scroll propio y pie fijo con el botón siempre visible */}
       <Sheet open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>
         <SheetContent
-          side="bottom"
-          className="flex h-[92vh] supports-[height:100dvh]:h-[92dvh] flex-col gap-0 rounded-t-3xl p-0 sm:mx-auto sm:h-[85vh] sm:max-w-lg"
+          side={esEscritorio ? "right" : "bottom"}
+          className={esEscritorio
+            ? "flex w-full flex-col gap-0 p-0 sm:max-w-lg"
+            : "flex h-[92vh] supports-[height:100dvh]:h-[92dvh] flex-col gap-0 rounded-t-2xl p-0 md:mx-auto md:max-w-2xl"}
         >
           <SheetHeader className="border-b border-border px-4 py-3 pr-12 text-left">
             <SheetTitle>Declarar pago</SheetTitle>
@@ -812,7 +796,7 @@ const PortalPagos = () => {
           </div>
         </SheetContent>
       </Sheet>
-    </PortalMobileLayout>
+    </PortalPagina>
   );
 };
 

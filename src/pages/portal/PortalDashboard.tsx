@@ -1,366 +1,250 @@
-import { useState, useEffect } from "react";
-import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
-import { Badge } from "@/components/ui/badge";
-import { 
-  Package, 
-  Truck, 
-  CreditCard, 
-  ChevronRight, 
-  Percent,
-  Clock,
-  Star,
-  Zap,
-  Loader2,
-  Search
-} from "lucide-react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import {
+  ArrowRight,
+  ClipboardList,
+  CreditCard,
+  FileText,
+  Heart,
+  Landmark,
+  LayoutGrid,
+  Receipt,
+  Search,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useStoreConfig } from "@/contexts/StoreConfigContext";
-import { useAuth } from "@/contexts/AuthContext";
-import { supabase, Producto, Cliente } from "@/lib/supabase";
-import { ProductImage } from "@/components/portal/ProductImage";
+import { Button } from "@/components/ui/button";
 import { BannerVisual } from "@/components/BannerVisual";
-import { useDeviceType } from "@/hooks/use-mobile";
-import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
-import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
+import { estadoVisible } from "@/components/pedidos/estadoPedido";
+import { PortalPagina } from "@/components/portal/PortalPagina";
+import { usePortal } from "@/components/portal/contextoPortal";
+import { TarjetaProducto } from "@/components/portal/TarjetaProducto";
+import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
+import { EstadoPill, EstadoVacio, Kpi, NumeroPedido, Panel, SkeletonFilas, SkeletonProductos, fechaCorta } from "@/components/portal/sistema";
+import { useCarritoPortal, type ProductoConEmpaques } from "@/hooks/useCarritoPortal";
+import { usePreciosListaCliente } from "@/hooks/usePreciosListaCliente";
 
-interface Orden {
-  id: string;
-  numero: string;
-  estado: string;
-  total: number;
-  created_at: string;
-  items_count?: number;
+// Inicio del portal: lo que un comprador B2B necesita al entrar (saldo, crédito, pedidos en curso), sus pedidos recientes,
+// accesos rápidos y productos destacados para recomprar.
+
+interface OrdenResumen {
+  id: string; numero: string; numero_guds: string | null; estado: string; estado_odoo: string | null; aprobacion: string | null;
+  odoo_id: number | null; total: number; created_at: string; fecha_pedido: string | null;
 }
+interface Credito { modo: string; disponible: number; limite: number }
+
+const TOLERANCIA = 0.009;
+
+const ACCESOS: { etiqueta: string; ruta: string; icono: LucideIcon }[] = [
+  { etiqueta: "Catálogo", ruta: "/portal/catalogo", icono: LayoutGrid },
+  { etiqueta: "Favoritos", ruta: "/portal/favoritos", icono: Heart },
+  { etiqueta: "Declarar pago", ruta: "/portal/pagos", icono: Wallet },
+  { etiqueta: "Cuentas para pagar", ruta: "/portal/cuenta/pagos", icono: Landmark },
+  { etiqueta: "Mis pedidos", ruta: "/portal/pedidos", icono: ClipboardList },
+  { etiqueta: "Retenciones", ruta: "/portal/retenciones", icono: Receipt },
+];
 
 const PortalDashboard = () => {
-  const { formatPrice } = useCurrency();
-  const { getActiveBanners, getActiveCategories } = useStoreConfig();
   const { user } = useAuth();
-  const deviceType = useDeviceType();
-  const isTablet = deviceType === "tablet";
-  
-  const [loading, setLoading] = useState(true);
-  const [cliente, setCliente] = useState<Cliente | null>(null);
-  const [productos, setProductos] = useState<Producto[]>([]);
-  const [ordenes, setOrdenes] = useState<Orden[]>([]);
-  
+  const { formatPrice } = useCurrency();
+  const { getActiveBanners } = useStoreConfig();
+  const portal = usePortal();
+  const { precioDe } = usePreciosListaCliente();
+  const { agregar, agregarConEmpaque, cambiarCantidad, cantidadDe, disponibleDe, empaqueProducto, empaquePrecios, cerrarEmpaque } = useCarritoPortal();
+
+  const [cargando, setCargando] = useState(true);
+  const [ordenes, setOrdenes] = useState<OrdenResumen[]>([]);
+  const [facturas, setFacturas] = useState<{ saldo_usd: number; fecha_vencimiento: string | null }[]>([]);
+  const [credito, setCredito] = useState<Credito | null>(null);
+  const [destacados, setDestacados] = useState<ProductoConEmpaques[] | null>(null);
+  // Categorías con productos a la venta en la empresa activa (las vacías o internas no se muestran)
+  const [categorias, setCategorias] = useState<{ nombre: string; n: number }[]>([]);
+
   const banners = getActiveBanners();
-  const categories = getActiveCategories();
 
   useEffect(() => {
-    if (user?.cliente_id) {
-      fetchData();
-    }
-  }, [user]);
+    const cid = user?.cliente_id;
+    if (!cid) { setCargando(false); return; }
+    let activo = true;
+    Promise.all([
+      supabase.from("ordenes").select("id, numero, numero_guds, estado, estado_odoo, aprobacion, odoo_id, total, created_at, fecha_pedido")
+        .eq("cliente_id", cid).order("created_at", { ascending: false }).limit(200),
+      // Deuda real: facturas publicadas con saldo, igual que Pagos y Cuentas por Cobrar del admin
+      supabase.from("facturas").select("saldo_usd, fecha_vencimiento").eq("cliente_id", cid).eq("estado", "posted").gt("saldo_usd", TOLERANCIA),
+      supabase.rpc("credito_disponible", { p_cliente_id: cid }),
+    ]).then(([o, f, c]) => {
+      if (!activo) return;
+      const filas = ((o.data as OrdenResumen[] | null) ?? []).sort((a, b) => (b.fecha_pedido ?? b.created_at).localeCompare(a.fecha_pedido ?? a.created_at));
+      setOrdenes(filas);
+      setFacturas(((f.data as { saldo_usd: number; fecha_vencimiento: string | null }[] | null) ?? []).map((x) => ({ ...x, saldo_usd: Number(x.saldo_usd) })));
+      setCredito(((c.data as Credito[] | null) ?? [])[0] ?? null);
+      setCargando(false);
+    });
+    supabase.from("productos").select("*, producto_empaques(*, tipo_empaque:tipos_empaque(*))").eq("activo", true).eq("destacado", true).order("nombre").limit(8)
+      .then(({ data }) => { if (activo) setDestacados((data as ProductoConEmpaques[] | null) ?? []); });
+    supabase.from("productos").select("categoria:categorias(nombre)").eq("activo", true)
+      .then(({ data }) => {
+        if (!activo) return;
+        const m = new Map<string, number>();
+        ((data as unknown as { categoria: { nombre: string } | null }[] | null) ?? []).forEach((r) => {
+          const n = r.categoria?.nombre; if (n) m.set(n, (m.get(n) ?? 0) + 1);
+        });
+        setCategorias(Array.from(m, ([nombre, n]) => ({ nombre, n })).sort((a, b) => b.n - a.n));
+      });
+    return () => { activo = false; };
+  }, [user?.cliente_id]);
 
-  const fetchData = async () => {
-    setLoading(true);
-    
-    // Fetch cliente info
-    const { data: clienteData } = await supabase
-      .from('clientes')
-      .select('*')
-      .eq('id', user?.cliente_id)
-      .single();
-    
-    if (clienteData) setCliente(clienteData);
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const porPagar = facturas.reduce((s, f) => s + f.saldo_usd, 0);
+  const vencido = facturas.filter((f) => f.fecha_vencimiento && new Date(`${f.fecha_vencimiento}T00:00:00`) < hoy).reduce((s, f) => s + f.saldo_usd, 0);
+  const conEstado = ordenes.map((o) => ({ o, ev: estadoVisible(o) }));
+  const enCurso = conEstado.filter(({ ev }) => !["rechazado", "cancelado", "entregado"].includes(ev.clave));
+  const porAprobar = enCurso.filter(({ ev }) => ev.clave === "por_aprobar").length;
+  const ultimo = conEstado[0];
 
-    // Fetch productos destacados
-    const { data: productosData } = await supabase
-      .from('productos')
-      .select('*, categoria:categorias(*)')
-      .eq('activo', true)
-      .eq('destacado', true)
-      .limit(4);
-    
-    if (productosData) setProductos(productosData);
+  const nombre = user?.nombre?.split(" ")[0] || "";
+  const saludo = nombre ? `Hola, ${nombre}` : "Hola";
 
-    // Fetch órdenes recientes
-    if (user?.cliente_id) {
-      const { data: ordenesData } = await supabase
-        .from('ordenes')
-        .select('*')
-        .eq('cliente_id', user.cliente_id)
-        .order('created_at', { ascending: false })
-        .limit(5);
-      
-      if (ordenesData) setOrdenes(ordenesData);
-    }
-
-    setLoading(false);
-  };
-
-  useRealtimeRefetch('productos', fetchData, !!user?.cliente_id);
-
-  const creditoDisponible = cliente ? cliente.limite_credito - cliente.credito_utilizado : 0;
-  const porcentajeCredito = cliente && cliente.limite_credito > 0 
-    ? (cliente.credito_utilizado / cliente.limite_credito) * 100 
-    : 0;
-
-  // Clases responsivas para tablet
-  const paddingX = isTablet ? "px-6" : "px-4";
-  const gapSize = isTablet ? "gap-4" : "gap-3";
+  const creditoValor = !credito ? "—"
+    : credito.modo === "abierto" ? "Abierto"
+    : Number(credito.limite) > 0 ? formatPrice(Number(credito.disponible)) : "Sin crédito";
+  const creditoDetalle = credito && credito.modo !== "abierto" && Number(credito.limite) > 0 ? `de ${formatPrice(Number(credito.limite))} aprobado` : credito?.modo === "abierto" ? "Sin tope de crédito" : "Pago de contado";
+  const usoCredito = credito && Number(credito.limite) > 0 ? Math.min(100, Math.max(0, (1 - Number(credito.disponible) / Number(credito.limite)) * 100)) : null;
 
   return (
-    <PortalMobileLayout>
-      {/* Search Bar */}
-      <Link to="/portal/catalogo?focus=search">
-        <div className={`${paddingX} mt-4 mb-3`}>
-          <div className={`bg-muted rounded-full flex items-center ${gapSize} ${isTablet ? 'px-5 py-4' : 'px-4 py-3'}`}>
-            <Search className={`text-muted-foreground ${isTablet ? 'h-5 w-5' : 'h-4 w-4'}`} aria-hidden="true" />
-            <span className={`text-muted-foreground ${isTablet ? 'text-base' : 'text-sm'}`}>Buscar productos...</span>
-          </div>
+    <PortalPagina
+      titulo={saludo}
+      descripcion={portal?.cliente?.nombre_negocio ? <>Resumen de <span className="font-medium text-foreground">{portal.cliente.nombre_negocio}</span></> : "Resumen de tu cuenta"}
+      encabezadoMovil={
+        <div className="min-w-0 leading-tight">
+          <p className="truncate text-xs text-muted-foreground">{saludo}</p>
+          <p className="truncate text-sm font-semibold text-foreground" data-testid="nombre-negocio">{portal?.cliente?.nombre_negocio ?? "Mi negocio"}</p>
         </div>
-      </Link>
-
-      {/* Promotions Carousel */}
-      <div className={`${paddingX} mb-4`}>
-        <div className={`flex ${gapSize} overflow-x-auto pb-2 scrollbar-hide`}>
-          {banners.map((banner) => (
-            <Link key={banner.id} to={banner.link} className="flex-shrink-0">
-              <BannerVisual
-                banner={banner}
-                className={`rounded-xl ${isTablet ? 'p-5 min-w-[280px]' : 'p-4 min-w-[200px]'}`}
-                titleClassName={`font-bold ${isTablet ? 'text-3xl' : 'text-2xl'}`}
-                subtitleClassName={`opacity-90 ${isTablet ? 'text-base' : 'text-sm'}`}
-              />
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className={`${paddingX} mb-4`}>
-        <div className={`grid ${isTablet ? 'grid-cols-6' : 'grid-cols-4'} gap-2`}>
-          <Link to="/portal/pedidos" className={`flex flex-col items-center gap-1 bg-card rounded-xl border border-border ${isTablet ? 'p-4' : 'p-3'}`}>
-            <div className={`rounded-full bg-blue-500/10 flex items-center justify-center ${isTablet ? 'h-12 w-12' : 'h-10 w-10'}`}>
-              <Package className={`text-blue-500 ${isTablet ? 'h-6 w-6' : 'h-5 w-5'}`} />
-            </div>
-            <span className={`text-center ${isTablet ? 'text-sm' : 'text-xs'}`}>Mis Pedidos</span>
-          </Link>
-          <Link to="/portal/pagos" className={`flex flex-col items-center gap-1 bg-card rounded-xl border border-border ${isTablet ? 'p-4' : 'p-3'}`}>
-            <div className={`rounded-full bg-green-500/10 flex items-center justify-center ${isTablet ? 'h-12 w-12' : 'h-10 w-10'}`}>
-              <CreditCard className={`text-green-500 ${isTablet ? 'h-6 w-6' : 'h-5 w-5'}`} />
-            </div>
-            <span className={`text-center ${isTablet ? 'text-sm' : 'text-xs'}`}>Pagos</span>
-          </Link>
-          <Link to="/portal/catalogo" className={`flex flex-col items-center gap-1 bg-card rounded-xl border border-border ${isTablet ? 'p-4' : 'p-3'}`}>
-            <div className={`rounded-full bg-orange-500/10 flex items-center justify-center ${isTablet ? 'h-12 w-12' : 'h-10 w-10'}`}>
-              <Percent className={`text-orange-500 ${isTablet ? 'h-6 w-6' : 'h-5 w-5'}`} />
-            </div>
-            <span className={`text-center ${isTablet ? 'text-sm' : 'text-xs'}`}>Ofertas</span>
-          </Link>
-          <Link to="/portal/favoritos" className={`flex flex-col items-center gap-1 bg-card rounded-xl border border-border ${isTablet ? 'p-4' : 'p-3'}`}>
-            <div className={`rounded-full bg-purple-500/10 flex items-center justify-center ${isTablet ? 'h-12 w-12' : 'h-10 w-10'}`}>
-              <Star className={`text-purple-500 ${isTablet ? 'h-6 w-6' : 'h-5 w-5'}`} />
-            </div>
-            <span className={`text-center ${isTablet ? 'text-sm' : 'text-xs'}`}>Favoritos</span>
-          </Link>
-          {isTablet && (
-            <>
-              <Link to="/portal/cuenta/cupones" className={`flex flex-col items-center gap-1 bg-card rounded-xl border border-border p-4`}>
-                <div className="h-12 w-12 rounded-full bg-pink-500/10 flex items-center justify-center">
-                  <Zap className="h-6 w-6 text-pink-500" />
-                </div>
-                <span className="text-sm text-center">Cupones</span>
-              </Link>
-              <Link to="/portal/cuenta" className={`flex flex-col items-center gap-1 bg-card rounded-xl border border-border p-4`}>
-                <div className="h-12 w-12 rounded-full bg-cyan-500/10 flex items-center justify-center">
-                  <Clock className="h-6 w-6 text-cyan-500" />
-                </div>
-                <span className="text-sm text-center">Historial</span>
-              </Link>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Active Order Banner */}
-      {ordenes.filter(o => o.estado === "enviado" || o.estado === "en_camino").slice(0, 1).map((order) => (
-        <Link key={order.id} to="/portal/pedidos">
-          <div className={`${paddingX} mb-4`}>
-            <div className={`bg-blue-500 rounded-xl text-white ${isTablet ? 'p-5' : 'p-4'}`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`rounded-full bg-white/20 flex items-center justify-center ${isTablet ? 'h-12 w-12' : 'h-10 w-10'}`}>
-                    <Truck className={isTablet ? 'h-6 w-6' : 'h-5 w-5'} />
-                  </div>
-                  <div>
-                    <p className={`font-semibold ${isTablet ? 'text-lg' : ''}`}>Pedido en camino</p>
-                    <p className={`opacity-90 ${isTablet ? 'text-base' : 'text-sm'}`}>{order.numero}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className={`font-medium ${isTablet ? 'text-base' : 'text-sm'}`}>{formatPrice(order.total)}</p>
-                  <ChevronRight className={isTablet ? 'h-6 w-6 ml-auto' : 'h-5 w-5 ml-auto'} />
-                </div>
-              </div>
-            </div>
-          </div>
+      }
+      acciones={
+        <>
+          <Button asChild variant="outline" className="gap-2"><Link to="/portal/pagos"><Wallet className="h-4 w-4" />Declarar pago</Link></Button>
+          <Button asChild className="gap-2"><Link to="/portal/catalogo"><LayoutGrid className="h-4 w-4" />Hacer un pedido</Link></Button>
+        </>
+      }
+    >
+      <div className="space-y-6">
+        {/* Buscador (móvil y tableta; en escritorio está en la barra superior) */}
+        <Link to="/portal/catalogo?focus=search" className="flex h-11 items-center gap-2.5 rounded-lg border border-border bg-card px-3.5 text-sm text-muted-foreground lg:hidden">
+          <Search className="h-4 w-4" />Buscar productos por nombre o código
         </Link>
-      ))}
 
-      {/* Categories */}
-      <div className={`${paddingX} mb-4`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className={`font-semibold text-foreground ${isTablet ? 'text-lg' : ''}`}>Categorías</h2>
-          <Link to="/portal/catalogo" className={`text-primary font-medium ${isTablet ? 'text-base' : 'text-sm'}`}>Ver todo</Link>
-        </div>
-        <div className={`flex ${gapSize} overflow-x-auto pb-2 scrollbar-hide`}>
-          {categories.map((cat) => (
-            <Link
-              key={cat.id}
-              to={`/portal/catalogo?cat=${cat.nombre}`}
-              className={`flex flex-col items-center gap-2 ${isTablet ? 'min-w-[90px]' : 'min-w-[70px]'}`}
-            >
-              {/* Inicial de la categoría (el ícono guardado es el mismo emoji genérico de caja en todas; F1 define el placeholder de marca) */}
-              <div className={`rounded-full ${cat.color} flex items-center justify-center font-semibold text-white ${isTablet ? 'h-16 w-16 text-2xl' : 'h-14 w-14 text-xl'}`} aria-hidden="true">
-                {cat.nombre.trim().charAt(0).toUpperCase()}
-              </div>
-              <span className={`text-center text-foreground ${isTablet ? 'text-sm' : 'text-xs'}`}>{cat.nombre}</span>
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      {/* Featured Products */}
-      <div className={`${paddingX} mb-4`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className={`font-semibold text-foreground flex items-center gap-2 ${isTablet ? 'text-lg' : ''}`}>
-            <Zap className={`text-yellow-500 ${isTablet ? 'h-5 w-5' : 'h-4 w-4'}`} />
-            Productos Destacados
-          </h2>
-          <Link to="/portal/catalogo" className={`text-primary font-medium ${isTablet ? 'text-base' : 'text-sm'}`}>Ver todo</Link>
-        </div>
-        {loading ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className={`animate-spin text-primary ${isTablet ? 'h-8 w-8' : 'h-6 w-6'}`} />
-          </div>
-        ) : productos.length === 0 ? (
-          <p className="text-center text-muted-foreground py-4">No hay productos destacados</p>
-        ) : (
-          <div className={`grid ${isTablet ? 'grid-cols-3' : 'grid-cols-2'} ${gapSize}`}>
-            {productos.map((product) => (
-              <Link key={product.id} to="/portal/catalogo">
-                <div className="bg-card rounded-xl border border-border overflow-hidden">
-                  <div className="aspect-square bg-muted flex items-center justify-center relative">
-                    <ProductImage 
-                      imageUrl={product.imagen_url}
-                      emoji={product.imagen_emoji}
-                      alt={product.nombre}
-                      size="xl"
-                      className="h-full w-full rounded-none"
-                    />
-                    {product.en_oferta && product.porcentaje_descuento && (
-                      <Badge className={`absolute top-2 left-2 bg-red-500 text-white z-10 ${isTablet ? 'text-sm' : 'text-xs'}`}>
-                        -{product.porcentaje_descuento}%
-                      </Badge>
-                    )}
-                  </div>
-                  <div className={isTablet ? 'p-4' : 'p-3'}>
-                    <p className={`font-medium text-foreground line-clamp-2 mb-1 ${isTablet ? 'text-base' : 'text-sm'}`}>{product.nombre}</p>
-                    <div className="flex items-center gap-2">
-                      <p className={`text-primary font-bold ${isTablet ? 'text-lg' : ''}`}>
-                        {formatPrice(product.en_oferta && product.precio_oferta ? product.precio_oferta : product.precio_base)}
-                      </p>
-                      {product.en_oferta && product.precio_oferta && (
-                        <p className={`text-muted-foreground line-through ${isTablet ? 'text-sm' : 'text-xs'}`}>
-                          {formatPrice(product.precio_base)}
-                        </p>
-                      )}
-                    </div>
-                    <EtiquetaIva pct={product.impuesto_pct} nombre={product.impuesto_nombre} className="block" />
-                  </div>
-                </div>
+        {banners.length > 0 && (
+          <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
+            {banners.map((b) => (
+              <Link key={b.id} to={b.link} className="shrink-0">
+                <BannerVisual banner={b} className="min-w-[240px] rounded-xl p-4 lg:min-w-[320px] lg:p-5" titleClassName="text-xl font-semibold lg:text-2xl" subtitleClassName="text-sm opacity-90" />
               </Link>
             ))}
           </div>
         )}
-      </div>
 
-      {/* Credit Status */}
-      {cliente && cliente.limite_credito > 0 && (
-        <div className={`${paddingX} mb-4`}>
-          <div className={`bg-card rounded-xl border border-border ${isTablet ? 'p-5' : 'p-4'}`}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className={`font-semibold text-foreground ${isTablet ? 'text-lg' : ''}`}>Mi Línea de Crédito</h3>
-              <Badge variant="outline" className="text-green-500 border-green-500">Activa</Badge>
-            </div>
-            <div className="space-y-2">
-              <div className={`flex justify-between ${isTablet ? 'text-base' : 'text-sm'}`}>
-                <span className="text-muted-foreground">Disponible</span>
-                <span className="font-semibold text-green-500">{formatPrice(creditoDisponible)}</span>
+        {/* Indicadores */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+          <Kpi etiqueta="Por pagar" icono={FileText} href="/portal/pagos" cargando={cargando} testId="kpi-por-pagar"
+            valor={formatPrice(porPagar)} alerta={vencido > TOLERANCIA}
+            detalle={facturas.length === 0 ? "Sin facturas pendientes" : vencido > TOLERANCIA ? `${formatPrice(vencido)} vencido` : `${facturas.length} ${facturas.length === 1 ? "factura" : "facturas"}`} />
+          <Kpi etiqueta="Crédito disponible" icono={CreditCard} cargando={cargando} valor={creditoValor} detalle={creditoDetalle}>
+            {usoCredito != null && (
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+                <div className="h-full rounded-full bg-foreground/70" style={{ width: `${usoCredito}%` }} />
               </div>
-              <div className={`flex justify-between ${isTablet ? 'text-base' : 'text-sm'}`}>
-                <span className="text-muted-foreground">Utilizado</span>
-                <span className="font-medium">{formatPrice(cliente.credito_utilizado)}</span>
-              </div>
-              <div className={`bg-muted rounded-full overflow-hidden ${isTablet ? 'h-3' : 'h-2'}`}>
-                <div className="h-full bg-green-500 rounded-full" style={{ width: `${porcentajeCredito}%` }} />
-              </div>
-              <div className={`flex justify-between text-muted-foreground ${isTablet ? 'text-sm' : 'text-xs'}`}>
-                <span>{porcentajeCredito.toFixed(0)}% utilizado</span>
-                <span>Límite: {formatPrice(cliente.limite_credito)}</span>
-              </div>
-            </div>
+            )}
+          </Kpi>
+          <Kpi etiqueta="Pedidos en curso" icono={ClipboardList} href="/portal/pedidos" cargando={cargando}
+            valor={enCurso.length} detalle={porAprobar > 0 ? `${porAprobar} por aprobar` : "Ninguno por aprobar"} />
+          <Kpi etiqueta="Último pedido" icono={Receipt} cargando={cargando} href={ultimo ? `/portal/pedidos?pedido=${ultimo.o.id}` : "/portal/catalogo"}
+            valor={ultimo ? <span className="text-lg sm:text-xl">{ultimo.o.numero}</span> : "—"}
+            detalle={ultimo ? `${fechaCorta(ultimo.o.fecha_pedido ?? ultimo.o.created_at)} · ${ultimo.ev.etiqueta}` : "Aún no tienes pedidos"} />
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-3 lg:items-start">
+          {/* Pedidos recientes */}
+          <Panel titulo="Pedidos recientes" className="lg:col-span-2" cuerpoClassName="p-0 sm:p-0"
+            accion={<Link to="/portal/pedidos" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">Ver todos<ArrowRight className="h-3.5 w-3.5" /></Link>}>
+            {cargando ? <SkeletonFilas n={4} alto="h-12" className="p-4" /> : ordenes.length === 0 ? (
+              <EstadoVacio icono={ClipboardList} titulo="Aún no tienes pedidos" descripcion="Explora el catálogo y haz tu primer pedido."
+                accion={<Button asChild><Link to="/portal/catalogo">Ir al catálogo</Link></Button>} />
+            ) : (
+              <ul className="divide-y divide-border">
+                {ordenes.slice(0, 5).map((o) => (
+                  <li key={o.id}>
+                    <Link to={`/portal/pedidos?pedido=${o.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 sm:px-5" data-testid="pedido-reciente">
+                      <div className="min-w-0 flex-1">
+                        <NumeroPedido numero={o.numero} numeroGuds={o.numero_guds} className="block truncate text-sm" />
+                        <p className="text-xs text-muted-foreground">{fechaCorta(o.fecha_pedido ?? o.created_at)}</p>
+                      </div>
+                      <EstadoPill pedido={o} className="hidden sm:inline-flex" />
+                      <span className="w-24 shrink-0 text-right text-sm font-semibold tabular-nums">{formatPrice(Number(o.total))}</span>
+                    </Link>
+                    <div className="-mt-1.5 px-4 pb-3 sm:hidden"><EstadoPill pedido={o} /></div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <div className="space-y-6">
+            <Panel titulo="Accesos rápidos" cuerpoClassName="p-2 sm:p-2">
+              <ul className="grid grid-cols-3 gap-1 lg:grid-cols-2">
+                {ACCESOS.map((a) => (
+                  <li key={a.ruta + a.etiqueta}>
+                    <Link to={a.ruta} className="flex h-full flex-col items-center gap-1.5 rounded-lg px-2 py-3 text-center text-xs font-medium text-foreground hover:bg-muted/60 lg:flex-row lg:gap-2.5 lg:px-3 lg:text-left lg:text-sm">
+                      <a.icono className="h-5 w-5 shrink-0 text-muted-foreground lg:h-4 lg:w-4" strokeWidth={1.75} />
+                      <span className="leading-tight">{a.etiqueta}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+
+            {categorias.length > 0 && (
+              <Panel titulo="Categorías" accion={<Link to="/portal/catalogo" className="text-sm font-medium text-primary hover:underline">Ver catálogo</Link>}>
+                <div className="flex flex-wrap gap-2">
+                  {categorias.slice(0, 12).map((c) => (
+                    <Link key={c.nombre} to={`/portal/catalogo?cat=${encodeURIComponent(c.nombre)}`}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:border-foreground/30 hover:bg-muted/50">
+                      {c.nombre.trim()}<span className="tabular-nums text-muted-foreground">{c.n}</span>
+                    </Link>
+                  ))}
+                </div>
+              </Panel>
+            )}
           </div>
         </div>
-      )}
 
-      {/* Recent Activity */}
-      <div className={`${paddingX} mb-6`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className={`font-semibold text-foreground ${isTablet ? 'text-lg' : ''}`}>Actividad Reciente</h2>
-          <Link to="/portal/pedidos" className={`text-primary font-medium ${isTablet ? 'text-base' : 'text-sm'}`}>Ver todo</Link>
-        </div>
-        <div className="space-y-3">
-          {ordenes.length === 0 ? (
-            <div className={`bg-card rounded-xl border border-border text-center ${isTablet ? 'p-8' : 'p-6'}`}>
-              <Package className={`mx-auto text-muted-foreground mb-2 ${isTablet ? 'h-10 w-10' : 'h-8 w-8'}`} />
-              <p className="text-muted-foreground">No hay pedidos recientes</p>
-              <Link to="/portal/catalogo" className={`text-primary font-medium ${isTablet ? 'text-base' : 'text-sm'}`}>Hacer un pedido</Link>
+        {/* Destacados */}
+        {(destacados === null || destacados.length > 0) && (
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-foreground">Productos destacados</h2>
+              <Link to="/portal/catalogo" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">Ver todo<ArrowRight className="h-3.5 w-3.5" /></Link>
             </div>
-          ) : (
-            ordenes.slice(0, isTablet ? 5 : 3).map((order) => (
-              <Link key={order.id} to="/portal/pedidos">
-                <div className={`bg-card rounded-xl border border-border flex items-center justify-between ${isTablet ? 'p-5' : 'p-4'}`}>
-                  <div className="flex items-center gap-3">
-                    <div className={`rounded-full flex items-center justify-center ${isTablet ? 'h-12 w-12' : 'h-10 w-10'} ${
-                      order.estado === "enviado" || order.estado === "en_camino" ? "bg-blue-500/10" : 
-                      order.estado === "completado" ? "bg-green-500/10" : "bg-yellow-500/10"
-                    }`}>
-                      {order.estado === "enviado" || order.estado === "en_camino" ? (
-                        <Truck className={`text-blue-500 ${isTablet ? 'h-6 w-6' : 'h-5 w-5'}`} />
-                      ) : order.estado === "completado" ? (
-                        <Package className={`text-green-500 ${isTablet ? 'h-6 w-6' : 'h-5 w-5'}`} />
-                      ) : (
-                        <Clock className={`text-yellow-500 ${isTablet ? 'h-6 w-6' : 'h-5 w-5'}`} />
-                      )}
-                    </div>
-                    <div>
-                      <p className={`font-medium text-foreground ${isTablet ? 'text-base' : ''}`}>{order.numero}</p>
-                      <p className={`text-muted-foreground ${isTablet ? 'text-sm' : 'text-xs'}`}>{formatPrice(order.total)}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={
-                      order.estado === "enviado" || order.estado === "en_camino" ? "default" : 
-                      order.estado === "completado" ? "secondary" : "outline"
-                    }>
-                      {order.estado === "enviado" || order.estado === "en_camino" ? "En camino" : 
-                       order.estado === "completado" ? "Entregado" : 
-                       order.estado === "pendiente" ? "Pendiente" : order.estado}
-                    </Badge>
-                    <ChevronRight className={`text-muted-foreground ${isTablet ? 'h-5 w-5' : 'h-4 w-4'}`} />
-                  </div>
-                </div>
-              </Link>
-            ))
-          )}
-        </div>
+            {destacados === null ? (
+              <SkeletonProductos n={4} className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 lg:gap-4" />
+            ) : (
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 lg:gap-4">
+                {destacados.map((p) => (
+                  <TarjetaProducto key={p.id} producto={p} precio={precioDe(p)} disponible={disponibleDe(p)} cantidad={cantidadDe(p.id)}
+                    onAgregar={() => agregar(p)} onCambiar={(d) => cambiarCantidad(p, d)} />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
       </div>
-    </PortalMobileLayout>
+
+      <SelectorEmpaqueDialog producto={empaqueProducto} precios={empaquePrecios} onElegir={agregarConEmpaque} onCerrar={cerrarEmpaque} />
+    </PortalPagina>
   );
 };
 
