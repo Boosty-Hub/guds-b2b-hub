@@ -12,7 +12,8 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Minus, Trash2, ShoppingCart, Loader2, Package } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Plus, Minus, Trash2, ShoppingCart, Loader2, Package, Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,9 +25,12 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
 import { useResumenVendedor, mesDe } from "@/components/vendedor/resumen";
+import { EditarPedidoDialog } from "@/components/vendedor/EditarPedidoDialog";
+import { pedidoEditable, type ResultadoEdicion } from "@/components/portal/pedidoEditable";
 
 interface Orden { id: string; numero: string; total: number; estado: string; created_at: string; fecha_pedido: string | null; odoo_id: number | null;
-  aprobacion: "pendiente" | "aprobada" | "rechazada" | null; rechazo_motivo: string | null; cliente?: { nombre_negocio: string } | null; }
+  aprobacion: "pendiente" | "aprobada" | "rechazada" | null; rechazo_motivo: string | null; cliente?: { nombre_negocio: string } | null;
+  cliente_id: string; vendedor_id: string | null; ediciones: number | null; editado_at: string | null; }
 interface Cli { id: string; nombre_negocio: string; }
 interface TipoEmpaque { id: string; nombre: string; unidades: number; }
 interface ProductoEmp { id: string; tipo_empaque_id: string; precio_empaque: number; activo: boolean; tipo_empaque: TipoEmpaque | null; }
@@ -55,6 +59,12 @@ const VendedorPedidos = () => {
   const [addProd, setAddProd] = useState("");
   const [pendingEmpaque, setPendingEmpaque] = useState<Prod | null>(null);
   const [saving, setSaving] = useState(false);
+  // Cargo de envío que estipula el vendedor (vacío = sin envío: sus pedidos no llevan envío automático)
+  const [envio, setEnvio] = useState("");
+  const [iva, setIva] = useState(16);
+  // Clientes de su cartera (activos o no): solo en esos puede editar pedidos por aprobar
+  const [asignados, setAsignados] = useState<string[]>([]);
+  const [editar, setEditar] = useState<Orden | null>(null);
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get("q") || "");
   const [estadoFiltro, setEstadoFiltro] = useState<"todos" | "abiertos">("todos");
@@ -71,12 +81,16 @@ const VendedorPedidos = () => {
     const { data: asignados } = await supabase.from("clientes").select("id").eq("vendedor_asignado_id", user.id);
     const ids = ((asignados ?? []) as { id: string }[]).map((c) => c.id);
     const filtro = ids.length ? `vendedor_id.eq.${user.id},cliente_id.in.(${ids.join(",")})` : `vendedor_id.eq.${user.id}`;
-    const [oRes, cRes, pRes] = await Promise.all([
-      supabase.from("ordenes").select("id, numero, total, estado, created_at, fecha_pedido, odoo_id, aprobacion, rechazo_motivo, cliente:clientes(nombre_negocio)").or(filtro).order("created_at", { ascending: false }),
+    setAsignados(ids);
+    const [oRes, cRes, pRes, ivaRes] = await Promise.all([
+      supabase.from("ordenes").select("id, numero, total, estado, created_at, fecha_pedido, odoo_id, aprobacion, rechazo_motivo, cliente_id, vendedor_id, ediciones, editado_at, cliente:clientes(nombre_negocio)").or(filtro).order("created_at", { ascending: false }),
       // Solo los clientes activos asignados a este vendedor
       supabase.from("clientes").select("id, nombre_negocio").eq("activo", true).eq("vendedor_asignado_id", user.id).order("nombre_negocio"),
       supabase.from("productos").select("id, nombre, precio_base, en_oferta, precio_oferta, stock_disponible, controla_stock, producto_empaques(id, tipo_empaque_id, precio_empaque, activo, tipo_empaque:tipos_empaque(id, nombre, unidades))").eq("activo", true).order("nombre"),
+      supabase.from("configuracion").select("valor").eq("clave", "iva_porcentaje").limit(1),
     ]);
+    const ivaCfg = Number((ivaRes.data as { valor: unknown }[] | null)?.[0]?.valor);
+    if (Number.isFinite(ivaCfg)) setIva(ivaCfg);
     if (oRes.data) setOrdenes(oRes.data as unknown as Orden[]);
     if (cRes.data) setClientes(cRes.data as Cli[]);
     if (pRes.data) setProductos(pRes.data as unknown as Prod[]);
@@ -172,21 +186,43 @@ const VendedorPedidos = () => {
     const n = l.cantidad + d; return n <= 0 ? [] : [{ ...l, cantidad: n }];
   }));
   const subtotal = lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
+  // Resumen estimado: IVA según la configuración y el envío solo si el vendedor lo indica (el servidor calcula el total real)
+  const envioNum = envio.trim() === "" ? null : Number(envio.replace(",", "."));
+  const envioInvalido = envioNum != null && (!Number.isFinite(envioNum) || envioNum < 0);
+  const envioEstimado = envioNum != null && !envioInvalido ? Math.round(envioNum * 100) / 100 : 0;
+  const ivaEstimado = Math.round(subtotal * iva) / 100;
+  const totalEstimado = subtotal + ivaEstimado + envioEstimado;
 
-  const resetForm = () => { setClienteId(""); setLineas([]); setMetodo("transferencia"); setPendingEmpaque(null); setAddProd(""); };
+  const resetForm = () => { setClienteId(""); setLineas([]); setMetodo("transferencia"); setPendingEmpaque(null); setAddProd(""); setEnvio(""); };
 
   const crear = async () => {
     if (!clienteId || lineas.length === 0) { toast({ title: "Faltan datos", description: "Elige cliente y agrega productos", variant: "destructive" }); return; }
+    if (envioInvalido) { toast({ title: "Cargo de envío inválido", description: "Indica un monto de 0 o más, o déjalo vacío para no cobrar envío.", variant: "destructive" }); return; }
     setSaving(true);
     const { data, error } = await supabase.rpc("crear_orden_vendedor", {
       p_cliente_id: clienteId, p_metodo_pago: metodo, p_notas: "Pedido tomado por vendedor",
       p_items: lineas.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad, tipo_empaque_id: l.tipo_empaque_id })),
+      // Sin envío automático: solo el cargo que estipule el vendedor (null = sin envío)
+      p_envio: envioNum != null ? envioEstimado : null,
     });
     setSaving(false);
     if (error) { toast({ title: "No se pudo crear el pedido", description: error.message, variant: "destructive" }); return; }
     const row = Array.isArray(data) ? data[0] : data;
     toast({ title: "Pedido creado", description: `${row?.numero ?? ""} · ${formatPrice(Number(row?.total || 0))}` });
     setOpen(false); resetForm();
+    fetchData(); recargarResumen();
+  };
+
+  // Editar pedidos por aprobar de clientes de su cartera (el servidor valida lo mismo)
+  const puedeEditar = (o: Orden) => pedidoEditable(o) && asignados.includes(o.cliente_id);
+  const alGuardarEdicion = (r: ResultadoEdicion) => {
+    setEditar(null);
+    toast({ title: "Pedido actualizado", description: `${r.numero} · ${formatPrice(r.total)}. Sigue por aprobar.` });
+    fetchData(); recargarResumen();
+  };
+  const alBloquearEdicion = (mensaje: string) => {
+    setEditar(null);
+    toast({ title: "No se puede editar", description: mensaje, variant: "destructive" });
     fetchData(); recargarResumen();
   };
 
@@ -230,11 +266,28 @@ const VendedorPedidos = () => {
               <EncabezadoOrdenable clave="fecha" orden={orden} onOrdenar={alternar} className="hidden sm:table-cell">Fecha</EncabezadoOrdenable>
               <EncabezadoOrdenable clave="total" orden={orden} onOrdenar={alternar} alinear="derecha">Total</EncabezadoOrdenable>
               <EncabezadoOrdenable clave="estado" orden={orden} onOrdenar={alternar}>Estado</EncabezadoOrdenable>
+              <TableHead className="hidden w-px sm:table-cell"><span className="sr-only">Acciones</span></TableHead>
             </TableRow></TableHeader>
             <TableBody>
               {pagination.pageItems.map((o) => (
                 <TableRow key={o.id}>
-                  <TableCell className="whitespace-nowrap font-medium text-emerald-600">{o.numero}</TableCell>
+                  <TableCell className="whitespace-nowrap font-medium text-emerald-600">
+                    {o.numero}
+                    {(o.ediciones ?? 0) > 0 && (
+                      <Badge variant="outline" className="ml-1.5 px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
+                        title={`Editado ${o.ediciones === 1 ? "1 vez" : `${o.ediciones} veces`}${o.editado_at ? ` · último cambio: ${fmt(o.editado_at)}` : ""}`}
+                        data-testid="pedido-editado">
+                        Editado
+                      </Badge>
+                    )}
+                    {/* En el teléfono la tabla se desplaza de lado: la acción va junto al número para que se vea sin desplazar */}
+                    {puedeEditar(o) && (
+                      <Button size="icon" variant="outline" className="ml-1.5 h-9 w-9 align-middle sm:hidden" onClick={() => setEditar(o)}
+                        aria-label={`Editar pedido ${o.numero}`} data-testid="editar-pedido-movil">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </TableCell>
                   <TableCell><span className="block max-w-[280px] truncate" title={o.cliente?.nombre_negocio || undefined}>{o.cliente?.nombre_negocio || "—"}</span></TableCell>
                   <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">{fmt(fechaDe(o))}</TableCell>
                   <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(Number(o.total))}</TableCell>
@@ -242,6 +295,14 @@ const VendedorPedidos = () => {
                     {o.aprobacion === "pendiente" ? <Badge variant="outline" className="border-amber-300 bg-amber-100 text-amber-900">Por aprobar</Badge>
                       : o.aprobacion === "rechazada" ? <Badge variant="destructive" title={o.rechazo_motivo || undefined}>No aprobado</Badge>
                       : <Badge variant={estadoConfig[o.estado]?.variant || "outline"}>{estadoConfig[o.estado]?.label || o.estado}</Badge>}
+                  </TableCell>
+                  <TableCell className="hidden whitespace-nowrap py-1 text-right sm:table-cell">
+                    {puedeEditar(o) && (
+                      <Button size="sm" variant="outline" className="h-8 gap-1.5 px-2.5" onClick={() => setEditar(o)}
+                        aria-label={`Editar pedido ${o.numero}`} data-testid="editar-pedido">
+                        <Pencil className="h-3.5 w-3.5" />Editar
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -255,7 +316,8 @@ const VendedorPedidos = () => {
       <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Nuevo pedido</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-2">
+          {/* min-w-0: sin esto, un nombre largo (truncate) ensancha la columna del grid y el diálogo se sale de la pantalla en el teléfono */}
+          <div className="min-w-0 space-y-3 py-2">
             <div><Label>Cliente</Label>
               <Select value={clienteId} onValueChange={setClienteId}>
                 <SelectTrigger><SelectValue placeholder="Selecciona tu cliente" /></SelectTrigger>
@@ -343,16 +405,34 @@ const VendedorPedidos = () => {
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-xs text-muted-foreground">Se aplicará IVA y envío según la configuración. El total final se calcula en el servidor.</p>
+            <div><Label htmlFor="envio-nuevo">Cargo de envío (USD) <span className="font-normal text-muted-foreground">· opcional</span></Label>
+              <Input id="envio-nuevo" type="number" inputMode="decimal" min={0} step="0.01" placeholder="Sin envío" value={envio}
+                onChange={(e) => setEnvio(e.target.value)} data-testid="envio-nuevo" />
+              {envioInvalido
+                ? <p className="mt-1 text-xs text-destructive">Indica un monto válido (0 o más).</p>
+                : <p className="mt-1 text-xs text-muted-foreground">Tus pedidos no llevan envío automático: vacío = sin envío.</p>}
+            </div>
+            {lineas.length > 0 && (
+              <div className="space-y-1 rounded-lg bg-muted p-3 text-sm" data-testid="resumen-nuevo">
+                <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{formatPrice(subtotal)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">IVA ({iva}%)</span><span className="tabular-nums">{formatPrice(ivaEstimado)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Envío</span><span className="tabular-nums">{envioEstimado > 0 ? formatPrice(envioEstimado) : "Sin envío"}</span></div>
+                <div className="flex justify-between border-t border-border pt-1 font-semibold"><span>Total estimado</span><span className="tabular-nums">{formatPrice(totalEstimado)}</span></div>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">El IVA se aplica según la configuración y el envío solo si lo indicas. El total final se calcula en el servidor.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setOpen(false); resetForm(); }} disabled={saving}>Cancelar</Button>
-            <Button className="bg-emerald-500 hover:bg-emerald-600" onClick={crear} disabled={saving || !clienteId || lineas.length === 0}>
+            <Button className="bg-emerald-500 hover:bg-emerald-600" onClick={crear} disabled={saving || !clienteId || lineas.length === 0 || envioInvalido}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><ShoppingCart className="h-4 w-4 mr-1" />Crear pedido</>}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Editar pedido por aprobar */}
+      <EditarPedidoDialog orden={editar} onCerrar={() => setEditar(null)} onGuardado={alGuardarEdicion} onYaNoEditable={alBloquearEdicion} />
     </VendedorLayout>
   );
 };

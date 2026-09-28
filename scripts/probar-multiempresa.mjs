@@ -227,7 +227,19 @@ const gemelo = (await sql(`select g.id g_id, q.id q_id from clientes g join clie
     and exists (select 1 from facturas f where f.cliente_id = q.id) limit 1`))[0];
 const qaCliente = (await sql(`select id from auth.users where email = 'qa.cliente@guds.test'`))[0]?.id;
 if (gemelo && qaCliente) {
-  const previoGemelo = `insert into usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${qaCliente}', 'qa.cliente@guds.test', 'QA', 'cliente', '${gemelo.g_id}', true);`;
+  const insertarQa = `insert into usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${qaCliente}', 'qa.cliente@guds.test', 'QA', 'cliente', '${gemelo.g_id}', true);`;
+  const empresasQa = `select row_to_json(t)::text from (select count(*) n, bool_or(ue.empresa_id = '${qrt.id}') qrt from usuario_empresas ue join usuarios u on u.id = ue.usuario_id where u.auth_id = '${qaCliente}') t`;
+  // 19s: sin habilitar, el portal solo ofrece la empresa de su ficha; habilitada desde el admin, ofrece ambas
+  await caso('Portal: un cliente con ficha en ambas empresas solo ve la suya hasta que se habilite la otra', (r) => r?.n === 1 && !r?.qrt,
+    como({ rol: 'postgres', empresa: guds.id, previo: insertarQa }, empresasQa));
+  await caso('Portal: el admin habilita Quirutec y el usuario del cliente la recibe', (r) => r?.n === 2 && r?.qrt,
+    como({ empresa: guds.id, previo: `${insertarQa} perform set_config('request.jwt.claims', '${claimsAdmin}', true); perform set_config('request.headers', '${hdr(guds.id)}', true);
+      perform public.habilitar_empresa_portal('${gemelo.g_id}', '${qrt.id}', true);` }, empresasQa));
+  if (vendGuds) {
+    await caso('Portal: un vendedor no habilita empresas del portal', 'No tienes permiso',
+      como({ uid: vendGuds, empresa: guds.id }, `select public.habilitar_empresa_portal('${gemelo.g_id}', '${qrt.id}', true)::text`));
+  }
+  const previoGemelo = `update clientes set portal_habilitado = true where id = '${gemelo.q_id}'; ${insertarQa}`;
   await caso('Cliente en ambas empresas: en Quirutec el portal usa su ficha de Quirutec', (r) => r?.cliente === gemelo.q_id && r?.facturas > 0,
     como({ uid: qaCliente, empresa: qrt.id, previo: previoGemelo },
       `select row_to_json(t)::text from (select public.mi_cliente_id() cliente, (select count(*) from facturas) facturas, (select count(*) from facturas where cliente_id <> '${gemelo.q_id}') ajenas) t`));

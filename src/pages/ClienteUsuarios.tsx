@@ -23,6 +23,8 @@ interface Contacto {
 }
 interface UsuarioPortal { id: string; email: string; activo: boolean; debe_cambiar_clave: boolean; contacto_id: string | null; nombre: string; apellido: string | null }
 interface Credenciales { titulo: string; email: string; password: string }
+// Empresas que se ofrecen al cliente en el portal (migración 19s)
+interface EmpresaPortal { empresa_id: string; empresa: string; ficha_id: string | null; habilitada: boolean; principal: boolean; usuarios: number }
 
 const vacio = { nombre: "", cargo: "", email: "", telefono: "", celular: "", es_principal: false, notas: "" };
 
@@ -43,14 +45,18 @@ const ClienteUsuarios = () => {
   const [trabajando, setTrabajando] = useState<string | null>(null);
   const [aBorrar, setABorrar] = useState<Contacto | null>(null);
   const [credenciales, setCredenciales] = useState<Credenciales | null>(null);
+  const [empresasPortal, setEmpresasPortal] = useState<EmpresaPortal[]>([]);
+  const [cambiandoEmpresa, setCambiandoEmpresa] = useState<string | null>(null);
 
   const cargar = async () => {
     setLoading(true);
-    const [{ data: c }, { data: k }, { data: u }] = await Promise.all([
+    const [{ data: c }, { data: k }, { data: u }, { data: ep }] = await Promise.all([
       supabase.from("clientes").select("nombre_negocio, rif").eq("id", clienteId).maybeSingle(),
       supabase.from("cliente_contactos").select("*").eq("cliente_id", clienteId).order("es_principal", { ascending: false }).order("nombre"),
       supabase.from("usuarios").select("id, email, activo, debe_cambiar_clave, contacto_id, nombre, apellido").eq("cliente_id", clienteId).eq("role", "cliente"),
+      supabase.rpc("empresas_portal_cliente", { p_cliente_id: clienteId }),
     ]);
+    setEmpresasPortal((ep as EmpresaPortal[] | null) ?? []);
     setCliente(c as { nombre_negocio: string; rif: string | null } | null);
     setContactos((k as Contacto[]) ?? []);
     setUsuarios((u as UsuarioPortal[]) ?? []);
@@ -137,6 +143,15 @@ const ClienteUsuarios = () => {
     ? `Hola, ya tienes acceso al portal de clientes de GUDS.\nEntra en ${window.location.origin}/login\nUsuario: ${credenciales.email}\nContraseña temporal: ${credenciales.password}\nAl entrar se te pedirá crear tu propia contraseña.`
     : "";
 
+  const cambiarEmpresaPortal = async (e: EmpresaPortal, habilitada: boolean) => {
+    setCambiandoEmpresa(e.empresa_id);
+    const { error } = await supabase.rpc("habilitar_empresa_portal", { p_cliente_id: clienteId, p_empresa_id: e.empresa_id, p_habilitado: habilitada });
+    setCambiandoEmpresa(null);
+    if (error) { toast({ title: "No se pudo cambiar", description: error.message, variant: "destructive" }); return; }
+    toast({ title: habilitada ? `${e.empresa} habilitada en el portal` : `${e.empresa} deshabilitada en el portal` });
+    setEmpresasPortal((l) => l.map((x) => (x.empresa_id === e.empresa_id ? { ...x, habilitada } : x)));
+  };
+
   const estadoAcceso = (u: UsuarioPortal | null) => {
     if (!u) return <Badge variant="outline" className="font-normal text-muted-foreground">Sin acceso</Badge>;
     if (!u.activo) return <Badge variant="outline" className="border-destructive/40 bg-destructive/10 font-normal text-destructive">Desactivado</Badge>;
@@ -159,6 +174,34 @@ const ClienteUsuarios = () => {
         </div>
         {puedeEditar && <Button className="gap-2" onClick={abrirNuevo}><Plus className="h-4 w-4" /> Nuevo contacto</Button>}
       </div>
+
+      {empresasPortal.length > 1 && (
+        <section className="mb-3 rounded-lg border border-border bg-card p-3" aria-labelledby="empresas-portal">
+          <h2 id="empresas-portal" className="text-sm font-semibold">Empresas en el portal</h2>
+          <p className="mb-2 text-xs text-muted-foreground">
+            El cliente solo ve y compra en las empresas habilitadas. Con más de una, el portal le muestra el selector de empresa.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {empresasPortal.map((e) => (
+              <label key={e.empresa_id}
+                className={`flex min-w-[220px] flex-1 items-center justify-between gap-3 rounded-md border border-border px-3 py-2 ${e.ficha_id ? "cursor-pointer" : "opacity-60"}`}
+                title={!e.ficha_id ? `No es cliente de ${e.empresa} en Odoo` : e.principal ? "La empresa de esta ficha siempre está habilitada" : undefined}>
+                <span className="text-sm">
+                  <span className="font-medium">{e.empresa}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {!e.ficha_id ? "Sin ficha en Odoo" : e.principal ? "Empresa de esta ficha" : e.habilitada ? "Habilitada" : "No habilitada"}
+                  </span>
+                </span>
+                {cambiandoEmpresa === e.empresa_id ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : (
+                  <Switch checked={e.habilitada} aria-label={`Portal: ${e.empresa}`}
+                    disabled={!puedeEditar || !e.ficha_id || e.principal}
+                    onCheckedChange={(v) => cambiarEmpresaPortal(e, v)} />
+                )}
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="rounded-lg border border-border bg-card">
         {loading ? (

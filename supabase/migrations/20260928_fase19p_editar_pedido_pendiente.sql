@@ -3,7 +3,7 @@
 --   1. editar_pedido_pendiente(): mientras el pedido está por aprobar (y no llegó a Odoo) lo puede editar el cliente (sus
 --      pedidos del portal), el vendedor del cliente o administración. Reemplaza las líneas, recalcula precios y totales en el
 --      servidor y el stock comprometido (triggers de orden_items). Deja constancia (editado_at, editado_por, ediciones) y
---      avisa a administración (y al vendedor si editó el cliente).
+--      avisa a administración, y al vendedor si editó el cliente o al cliente si editó su vendedor o administración.
 --   2. crear_orden_vendedor: los pedidos del vendedor ya no llevan envío automático; solo el cargo que indique el vendedor
 --      (p_envio), que viaja a Odoo como la línea de servicio de envío.
 -- ════════════════════════════════════════════════════════════════════════
@@ -15,7 +15,7 @@ alter table public.ordenes
   add column if not exists ediciones integer not null default 0;
 
 drop function if exists public.crear_orden_vendedor(uuid, pago_metodo, text, jsonb);
-create function public.crear_orden_vendedor(p_cliente_id uuid, p_metodo_pago pago_metodo, p_notas text, p_items jsonb, p_envio numeric default null)
+create or replace function public.crear_orden_vendedor(p_cliente_id uuid, p_metodo_pago pago_metodo, p_notas text, p_items jsonb, p_envio numeric default null)
 returns table(orden_id uuid, numero character varying, total numeric)
 language plpgsql security definer set search_path = public as $$
 declare
@@ -141,6 +141,10 @@ begin
     'alerta', '/admin/ordenes?aprobacion=pendiente');
   if v_cliente and not (v_admin or v_vendedor) then
     perform notif_vendedor(o.cliente_id, 'Tu cliente editó un pedido', coalesce(v_cli, 'Cliente') || ': ' || o.numero || ' ahora por ' || fmt_usd(v_total), 'orden', '/vendedor/pedidos');
+  else
+    -- Lo editó su vendedor o administración: el cliente se entera del cambio
+    perform notif_cliente(o.cliente_id, 'Tu pedido fue actualizado',
+      'El pedido ' || o.numero || ' ahora es por ' || fmt_usd(v_total) || ' y sigue pendiente de aprobación.', 'orden', '/portal/pedidos');
   end if;
 
   return query select o.id, o.numero, v_total;

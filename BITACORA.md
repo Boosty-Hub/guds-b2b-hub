@@ -38,7 +38,26 @@ cliente tiene ambas habilitadas, etc.).
   no cuenta como venta (198 pares; Quirutec 87 por ≈ 6 M USD). "Facturado" de Quirutec en septiembre pasa de 3,18 M a 186 mil
   USD. En Reportes → Ventas se ve cuántos pares se excluyen y la lista.
 - Mapbox: el token pasa a la variable `VITE_MAPBOX_TOKEN` (local y Netlify); conviene restringirlo por URL en la cuenta de Mapbox.
-- Verificado: pruebas de base (92 casos) y recuperación de contraseña con Playwright.
+- **Portal del cliente F0** (agente): declarar pago usable (hoja con pie fijo; el cliente indica a qué cuenta pagó; monto en Bs
+  convertido con la tasa), cuentas reales en "Cuentas para pagar", deuda desde facturas (igual que CxC), favoritos que guardan en
+  el carrito, pestaña "Cancelados y rechazados" con motivo, checkout "Pedido recibido · pendiente de aprobación", sin datos de
+  maqueta en Ayuda. El pago adjunto al checkout solo va a cuentas publicadas (19r) y se vaciaron los datos de empresa de ejemplo
+  de `configuracion`.
+- **Vendedor V0** (agente, 19n): `resumen_vendedor()` como fuente única de cifras (misma deuda que CxC), cobro con los datos de la
+  cuenta y referencia obligatoria salvo efectivo, empresa por defecto según su cartera (5 vendedores corregidos + trigger).
+- **Delivery D0** (agente, 19n): **un repartidor leía las entregas de otros repartidores** (permiso "delivery: ver") → corregido;
+  exclusión por `orden_id`, fechas en hora de Caracas, firma y foto visibles en el admin (URL firmada), sin mapa de prueba.
+- **Pedidos pendientes editables** (19p): `editar_pedido_pendiente()` para el cliente (sus pedidos del portal), el vendedor o
+  administración mientras el pedido esté por aprobar; recalcula precios, totales y stock comprometido y avisa; marca "Editado" en
+  Órdenes. Los pedidos del vendedor ya no llevan envío automático (solo el cargo que él indique).
+  Pantallas (agente): "Editar pedido" en el portal del cliente y en el del vendedor (cantidades, quitar/agregar productos,
+  notas; el vendedor también el cargo de envío) y campo "Cargo de envío" al crear el pedido del vendedor. Si lo edita el vendedor
+  o administración, el cliente recibe aviso. Pendiente de definir: un pago ya declarado por el total original no se ajusta al
+  editar, y un cupón porcentual se conserva como monto fijo.
+- **Empresas del cliente en el portal** (19s): el acceso al portal ofrece solo la empresa de la ficha del cliente; la otra se
+  habilita en Clientes → Contactos y acceso ("Empresas en el portal"). Con dos habilitadas, el portal muestra el selector.
+- Verificado: pruebas de base (106 casos), Playwright en admin (Bancos, Reportes, Órdenes, empresas del portal), portal del
+  cliente (criterios F0), vendedor (35/36 casos) y delivery.
 
 ---
 

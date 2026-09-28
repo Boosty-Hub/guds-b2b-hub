@@ -11,7 +11,8 @@ import {
   ChevronRight,
   Loader2,
   XCircle,
-  Ban
+  Ban,
+  Pencil
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
@@ -24,6 +25,9 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { EditorPedidoPendiente } from "@/components/portal/EditorPedidoPendiente";
+import { pedidoEditable, type ResultadoEdicion } from "@/components/portal/pedidoEditable";
 
 interface OrdenDB {
   id: string;
@@ -39,6 +43,10 @@ interface OrdenDB {
   created_at: string;
   fecha_entrega_estimada?: string | null;
   notas?: string;
+  vendedor_id?: string | null;   // pedido cargado por el vendedor: solo él lo edita
+  odoo_id?: number | null;
+  ediciones?: number | null;     // veces que se editó mientras estaba por aprobar
+  editado_at?: string | null;
   items?: OrdenItem[];
 }
 
@@ -77,6 +85,9 @@ const claveEstado = (o: { estado: string; aprobacion?: string | null }) =>
     : o.aprobacion === "aprobada" && o.estado === "pendiente" ? "aprobado"
     : o.estado;
 
+// El cliente edita, mientras está por aprobar, los pedidos que hizo en el portal (los que le cargó su vendedor, no)
+const clientePuedeEditar = (o: OrdenDB) => pedidoEditable(o) && !o.vendedor_id;
+
 type Pestana = "curso" | "entregados" | "cancelados";
 
 const PortalPedidos = () => {
@@ -87,8 +98,12 @@ const PortalPedidos = () => {
   const [loading, setLoading] = useState(true);
   // Pedido recién enviado desde el checkout (?orden=<id>&nuevo=1): se abre su detalle con el estado real
   const [recienEnviado, setRecienEnviado] = useState<string | null>(null);
+  // Edición del pedido por aprobar (se hace dentro del mismo panel de detalle) y aviso con el total que recalculó GUDS
+  const [editando, setEditando] = useState(false);
+  const [actualizado, setActualizado] = useState<{ id: string; total: number } | null>(null);
   const { formatPrice } = useCurrency();
   const { user } = useAuth();
+  const { toast } = useToast();
 
   useEffect(() => {
     if (user?.cliente_id) {
@@ -96,8 +111,9 @@ const PortalPedidos = () => {
     }
   }, [user?.cliente_id]);
 
-  const fetchOrdenes = async () => {
-    setLoading(true);
+  // silencioso: refresca sin reemplazar la lista por el indicador de carga (p. ej. después de editar)
+  const fetchOrdenes = async (silencioso = false) => {
+    if (!silencioso) setLoading(true);
     const { data } = await supabase
       .from('ordenes')
       .select(`
@@ -112,6 +128,35 @@ const PortalPedidos = () => {
 
     if (data) setOrdenes(data);
     setLoading(false);
+    return (data ?? null) as OrdenDB[] | null;
+  };
+
+  // Guardado: se recarga el pedido desde la base y se muestra el total que devolvió el servidor
+  const alGuardarEdicion = async (r: ResultadoEdicion) => {
+    setEditando(false);
+    setActualizado({ id: r.orden_id, total: r.total });
+    toast({ title: "Pedido actualizado", description: `${r.numero} · ${formatPrice(r.total)}. Sigue pendiente de aprobación.` });
+    const data = await fetchOrdenes(true);
+    const o = data?.find((x) => x.id === r.orden_id);
+    if (o) setSelectedOrder(o);
+  };
+
+  // El pedido dejó de estar por aprobar mientras se editaba (lo aprobaron o cambió de estado)
+  const alBloquearEdicion = async (mensaje: string) => {
+    const id = selectedOrder?.id;
+    setEditando(false);
+    setActualizado(null);
+    toast({ title: "No se puede editar", description: mensaje, variant: "destructive" });
+    const data = await fetchOrdenes(true);
+    const o = data?.find((x) => x.id === id);
+    setSelectedOrder(o ?? null);
+  };
+
+  const cerrarDetalle = () => {
+    setSelectedOrder(null);
+    setRecienEnviado(null);
+    setEditando(false);
+    setActualizado(null);
   };
 
   // Abrir el pedido indicado en la URL una vez cargada la lista
@@ -214,7 +259,15 @@ const PortalPedidos = () => {
                       <StatusIcon className={`h-4 w-4 ${config.color.replace('bg-', 'text-')}`} />
                     </div>
                     <div>
-                      <p className="font-semibold text-foreground">{order.numero}</p>
+                      <p className="font-semibold text-foreground">
+                        {order.numero}
+                        {(order.ediciones ?? 0) > 0 && (
+                          <span className="ml-2 rounded border border-border px-1.5 py-0.5 align-middle text-[11px] font-normal text-muted-foreground"
+                            title={order.editado_at ? `Editado el ${formatDate(order.editado_at)}` : undefined} data-testid="pedido-editado">
+                            Editado
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-muted-foreground">{formatDate(order.created_at)}</p>
                     </div>
                   </div>
@@ -281,13 +334,31 @@ const PortalPedidos = () => {
       </div>
 
       {/* Order Detail Sheet: contenido con scroll propio */}
-      <Sheet open={!!selectedOrder} onOpenChange={(v) => { if (!v) { setSelectedOrder(null); setRecienEnviado(null); } }}>
+      <Sheet open={!!selectedOrder} onOpenChange={(v) => { if (!v) cerrarDetalle(); }}>
         <SheetContent side="bottom" className="flex h-[90vh] supports-[height:100dvh]:h-[90dvh] flex-col gap-0 rounded-t-3xl p-0 sm:mx-auto sm:max-w-lg">
-          {selectedOrder && (() => {
+          {selectedOrder && editando && (
+            <>
+              <SheetHeader className="border-b border-border px-4 py-3 pr-12 text-left">
+                <SheetTitle>Editar pedido {selectedOrder.numero}</SheetTitle>
+                <SheetDescription>Cambia cantidades, quita o agrega productos. Sigue pendiente de aprobación y el total final lo calcula GUDS.</SheetDescription>
+              </SheetHeader>
+              <EditorPedidoPendiente
+                key={selectedOrder.id}
+                ordenId={selectedOrder.id}
+                modo="cliente"
+                onCancelar={() => setEditando(false)}
+                onGuardado={alGuardarEdicion}
+                onYaNoEditable={alBloquearEdicion}
+              />
+            </>
+          )}
+          {selectedOrder && !editando && (() => {
             const config = statusConfig[claveEstado(selectedOrder)] || statusConfig.pendiente;
             const descuento = Number(selectedOrder.descuento ?? 0);
             const impuesto = Number(selectedOrder.impuesto ?? 0);
             const envio = selectedOrder.envio == null ? null : Number(selectedOrder.envio);
+            const editado = (selectedOrder.ediciones ?? 0) > 0;
+            const recienActualizado = actualizado?.id === selectedOrder.id;
             return (
               <>
                 <SheetHeader className="border-b border-border px-4 py-3 pr-12 text-left">
@@ -297,7 +368,10 @@ const PortalPedidos = () => {
                       {config.label}
                     </Badge>
                   </SheetTitle>
-                  <SheetDescription>Pedido del {formatDate(selectedOrder.created_at)}</SheetDescription>
+                  <SheetDescription>
+                    Pedido del {formatDate(selectedOrder.created_at)}
+                    {editado && ` · Editado${selectedOrder.editado_at ? ` el ${formatDate(selectedOrder.editado_at)}` : ""}`}
+                  </SheetDescription>
                 </SheetHeader>
 
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-6">
@@ -307,9 +381,26 @@ const PortalPedidos = () => {
                       <p className="mt-1">Nuestro equipo revisará precios, disponibilidad y condiciones. Te avisaremos por notificación cuando lo aprobemos.</p>
                     </div>
                   )}
-                  {selectedOrder.aprobacion === "pendiente" && recienEnviado !== selectedOrder.id && (
+                  {recienActualizado && (
+                    <div className="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900" data-testid="pedido-actualizado">
+                      <p className="font-semibold">Pedido actualizado · pendiente de aprobación</p>
+                      <p className="mt-1">GUDS recalculó el total: <strong>{formatPrice(actualizado?.total ?? selectedOrder.total)}</strong>. Te avisaremos cuando lo aprobemos.</p>
+                    </div>
+                  )}
+                  {selectedOrder.aprobacion === "pendiente" && recienEnviado !== selectedOrder.id && !recienActualizado && (
                     <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
                       Tu pedido está <strong>pendiente de aprobación</strong>. Te avisaremos cuando sea aprobado y pase a preparación.
+                    </p>
+                  )}
+                  {clientePuedeEditar(selectedOrder) && (
+                    <Button variant="outline" className="h-11 w-full gap-2" onClick={() => setEditando(true)} data-testid="editar-pedido">
+                      <Pencil className="h-4 w-4" />
+                      Editar pedido
+                    </Button>
+                  )}
+                  {pedidoEditable(selectedOrder) && selectedOrder.vendedor_id && (
+                    <p className="text-xs text-muted-foreground" data-testid="pedido-del-vendedor">
+                      Este pedido lo cargó tu vendedor. Si necesitas cambiarlo, comunícate con él.
                     </p>
                   )}
                   {selectedOrder.aprobacion === "rechazada" && (
