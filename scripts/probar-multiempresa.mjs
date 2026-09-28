@@ -399,6 +399,22 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
         perform public.editar_pedido_pendiente(current_setting('guds.prueba_orden')::uuid, '[{"producto_id":"${prod.id}","cantidad":5}]'::jsonb, null, 7.5);` },
         `select row_to_json(t)::text from (select current_setting('guds.prueba_cot')::numeric = (select total from ordenes where id = current_setting('guds.prueba_orden')::uuid) ok) t`));
 
+    // ── Línea de tiempo y avisos de lo que cambia en Odoo (20d) ──
+    await caso('Eventos: crear y aprobar un pedido quedan en su línea de tiempo', (r) => r?.creado === 1 && r?.aprobado === 1,
+      como({ empresa: guds.id, previo: `${previoVend} ${comoUsuario(admin)} perform public.aprobar_pedido(${idPend});` },
+        `select row_to_json(t)::text from (select count(*) filter (where tipo = 'creado') creado, count(*) filter (where tipo = 'aprobado') aprobado
+          from orden_eventos where orden_id = ${idPend}) t`));
+    await caso('Eventos: la confirmación que llega de Odoo queda registrada y avisa al vendedor', (r) => r?.confirmado === 1 && r?.aviso >= 1,
+      como({ rol: 'postgres', empresa: guds.id, previo: `${previoVend} perform set_config('guds.prueba_orden', ${idPend}::text, true);
+        perform set_config('request.jwt.claims', '', true);
+        update ordenes set estado_odoo = 'sale' where id = current_setting('guds.prueba_orden')::uuid;` },
+        `select row_to_json(t)::text from (select (select count(*) from orden_eventos where orden_id = current_setting('guds.prueba_orden')::uuid and tipo = 'confirmado' and origen = 'odoo') confirmado,
+          (select count(*) from notificaciones n join usuarios u on u.id = n.usuario_id where u.auth_id = '${vendGuds}' and n.titulo = 'Pedido confirmado'
+            and n.link like '%' || current_setting('guds.prueba_orden')) aviso) t`));
+    await caso('Eventos: el vendedor ve la línea de tiempo de sus pedidos', (r) => r?.n >= 1,
+      como({ uid: vendGuds, empresa: guds.id, previo: `${previoVend} perform set_config('guds.prueba_orden', ${idPend}::text, true);` },
+        `select row_to_json(t)::text from (select count(*) n from orden_eventos where orden_id = current_setting('guds.prueba_orden')::uuid) t`));
+
     // ── Cupón, pago del pedido editado, vendedor y cuentas por empresa (19x) ──
     const fijarId = `perform set_config('guds.prueba_orden', ${idPend}::text, true);`;
     const cuponPct = `insert into cupones (id, codigo, tipo, valor, empresa_id) values ('00000000-0000-0000-0000-0000000c0010', 'PRUEBA-PCT', 'porcentaje', 10, '${guds.id}');
