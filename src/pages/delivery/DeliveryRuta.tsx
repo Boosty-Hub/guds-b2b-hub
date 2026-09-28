@@ -61,7 +61,7 @@ const DeliveryRuta = () => {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold flex items-center gap-2"><Route className="h-5 w-5 text-amber-500" />Ruta de hoy</h2>
+            <h2 className="text-lg font-semibold flex items-center gap-2"><Route className="h-5 w-5 text-amber-500" />Paradas pendientes</h2>
             <p className="text-sm text-muted-foreground">{paradas.length} {paradas.length === 1 ? "parada" : "paradas"} pendientes</p>
           </div>
           {paradas.some((p) => p.orden?.cliente?.latitud) && (

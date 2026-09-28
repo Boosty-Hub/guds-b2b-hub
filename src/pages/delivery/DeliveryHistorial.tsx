@@ -7,6 +7,7 @@ import { CheckCircle, XCircle, Search, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import { fechaHora } from "@/components/delivery/fechas";
 
 interface Row {
   id: string;
@@ -43,7 +44,7 @@ const DeliveryHistorial = () => {
   const fallidas = rows.filter((r) => r.estado === "fallida").length;
   const tasa = total > 0 ? Math.round((entregadas / total) * 100) : 0;
 
-  const fmt = (s: string | null) => (s ? new Date(s).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+  const fmt = fechaHora;
   const filtradas = rows.filter((r) =>
     (r.orden?.cliente?.nombre_negocio || "").toLowerCase().includes(search.toLowerCase()) ||
     (r.orden?.numero || "").toLowerCase().includes(search.toLowerCase()));

@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { Package, Truck, CheckCircle, XCircle, Clock, ArrowRight, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { diaCaracas } from "@/components/delivery/fechas";
 
 interface Row { estado: string; fecha_entrega: string | null; }
 
@@ -23,10 +24,11 @@ const DeliveryDashboard = () => {
   }, [user?.id]);
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
-  const hoy = new Date().toISOString().slice(0, 10);
+  // "Hoy" en hora de Caracas (con la fecha UTC, desde las 20:00 contaba el día siguiente)
+  const hoy = diaCaracas();
   const asignadas = rows.filter((r) => r.estado === "asignada").length;
   const enCamino = rows.filter((r) => r.estado === "en_camino").length;
-  const entregadasHoy = rows.filter((r) => r.estado === "entregada" && r.fecha_entrega?.slice(0, 10) === hoy).length;
+  const entregadasHoy = rows.filter((r) => r.estado === "entregada" && !!r.fecha_entrega && diaCaracas(r.fecha_entrega) === hoy).length;
   const fallidas = rows.filter((r) => r.estado === "fallida").length;
   const pendientes = asignadas + enCamino;
 
@@ -47,7 +49,7 @@ const DeliveryDashboard = () => {
         <div className="space-y-6">
           <div>
             <h2 className="text-lg font-semibold">Hola, {user?.nombre} 👋</h2>
-            <p className="text-muted-foreground">Tienes {pendientes} {pendientes === 1 ? "entrega pendiente" : "entregas pendientes"} hoy.</p>
+            <p className="text-muted-foreground">Tienes {pendientes} {pendientes === 1 ? "entrega pendiente" : "entregas pendientes"}.</p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             {stat(<Clock className="h-5 w-5 text-muted-foreground" />, asignadas, "Asignadas", "bg-muted")}
@@ -58,7 +60,7 @@ const DeliveryDashboard = () => {
           <Card className="border-border"><CardContent className="p-6 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Package className="h-6 w-6 text-amber-500" />
-              <div><p className="font-medium">Tus entregas de hoy</p><p className="text-sm text-muted-foreground">Ver y gestionar tus entregas</p></div>
+              <div><p className="font-medium">Tus entregas</p><p className="text-sm text-muted-foreground">Ver y gestionar tus entregas pendientes</p></div>
             </div>
             <Button asChild className="bg-amber-500 hover:bg-amber-600"><Link to="/delivery/entregas">Ir a entregas <ArrowRight className="h-4 w-4 ml-1" /></Link></Button>
           </CardContent></Card>

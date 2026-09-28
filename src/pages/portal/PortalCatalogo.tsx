@@ -14,8 +14,7 @@ import {
   SlidersHorizontal,
   Heart,
   ChevronLeft,
-  Loader2,
-  Package
+  Loader2
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -24,33 +23,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { supabase, Producto, TipoEmpaque } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { ProductImage } from "@/components/portal/ProductImage";
-import { notifyCartChanged } from "@/components/portal/PortalCartWidget";
-import { useToast } from "@/hooks/use-toast";
+import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
 import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
-
-interface ProductoConEmpaques extends Producto {
-  producto_empaques?: {
-    id: string;
-    tipo_empaque_id: string;
-    tipo_empaque: TipoEmpaque;
-  }[];
-}
-
-interface CartItemDB {
-  id: string;
-  producto_id: string;
-  tipo_empaque_id: string | null;
-  cantidad: number;
-  precio_unitario: number | null;
-}
+import { useCarritoPortal, type ProductoConEmpaques } from "@/hooks/useCarritoPortal";
 
 const PortalCatalogo = () => {
   const [searchParams] = useSearchParams();
@@ -58,7 +35,6 @@ const PortalCatalogo = () => {
   const shouldFocusSearch = searchParams.get('focus') === 'search';
   const searchInputRef = useRef<HTMLInputElement>(null);
   
-  const [cart, setCart] = useState<CartItemDB[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState(categoryFromUrl || "Todos");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -68,15 +44,14 @@ const PortalCatalogo = () => {
   // Precios negociados de la lista del cliente: { producto_id: precio }
   const [precioLista, setPrecioLista] = useState<Record<string, number>>({});
 
-  // Empaque selection dialog
-  const [isEmpaqueDialogOpen, setIsEmpaqueDialogOpen] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<ProductoConEmpaques | null>(null);
-  // Precio real por empaque (mismo que cobra el checkout) para el diálogo: { tipo_empaque_id: precio }
-  const [empaquePrecios, setEmpaquePrecios] = useState<Record<string, number>>({});
+  // Carrito compartido con favoritos (misma lógica de precio, stock y escritura en la tabla carrito)
+  const {
+    cart, agregar, agregarConEmpaque, cambiarCantidad, cantidadDe: getCartQuantity, disponibleDe,
+    empaqueProducto, empaquePrecios, cerrarEmpaque,
+  } = useCarritoPortal();
   const { formatPrice } = useCurrency();
   const { getActiveCategories } = useStoreConfig();
   const { user } = useAuth();
-  const { toast } = useToast();
   const navigate = useNavigate();
   
   const storeCategories = getActiveCategories();
@@ -103,7 +78,6 @@ const PortalCatalogo = () => {
   useEffect(() => {
     fetchProductos();
     if (user?.id) {
-      fetchCart();
       fetchFavorites();
       fetchPrecioLista();
     }
@@ -141,15 +115,6 @@ const PortalCatalogo = () => {
 
   useRealtimeRefetch('productos', fetchProductos);
 
-  const fetchCart = async () => {
-    const { data } = await supabase
-      .from('carrito')
-      .select('id, producto_id, tipo_empaque_id, cantidad, precio_unitario')
-      .eq('usuario_id', user?.id);
-    
-    if (data) setCart(data);
-  };
-
   const fetchFavorites = async () => {
     const { data } = await supabase
       .from('favoritos')
@@ -158,141 +123,6 @@ const PortalCatalogo = () => {
     
     if (data) setFavorites(data.map(f => f.producto_id));
   };
-
-  const handleAddToCart = async (product: ProductoConEmpaques) => {
-    if (!user?.id) return;
-
-    const empaques = product.producto_empaques || [];
-
-    if (empaques.length > 1) {
-      // Show empaque selection dialog con el precio REAL por empaque (el mismo que cobra el checkout)
-      setSelectedProduct(product);
-      setEmpaquePrecios({});
-      setIsEmpaqueDialogOpen(true);
-      const entries = await Promise.all(empaques.map(async (pe) => {
-        const { data } = await supabase.rpc('precio_efectivo', {
-          p_producto_id: product.id,
-          p_tipo_empaque_id: pe.tipo_empaque_id,
-          p_cliente_id: user.cliente_id || null,
-        });
-        const fallback = product.en_oferta && product.precio_oferta ? Number(product.precio_oferta) : Number(product.precio_base);
-        return [pe.tipo_empaque_id, data != null ? Number(data) : fallback] as const;
-      }));
-      setEmpaquePrecios(Object.fromEntries(entries));
-    } else if (empaques.length === 1) {
-      // Only one empaque, add directly
-      addToCartWithEmpaque(product, empaques[0].tipo_empaque);
-    } else {
-      // No empaques, add with default price
-      addToCartWithEmpaque(product, null);
-    }
-  };
-
-  // Disponible para vender (unidades): existencia − lo comprometido en pedidos y entregas. Sin control de stock: sin tope.
-  const disponibleDe = (p: ProductoConEmpaques) => (p.controla_stock === false ? Infinity : Number(p.stock_disponible ?? p.stock_actual ?? 0));
-  const unidadesEmpaque = (p: ProductoConEmpaques, tipoId: string | null) =>
-    Math.max(1, Number(p.producto_empaques?.find((pe) => pe.tipo_empaque_id === tipoId)?.tipo_empaque?.unidades ?? 1));
-  const unidadesEnCarrito = (p: ProductoConEmpaques) =>
-    cart.filter((i) => i.producto_id === p.id).reduce((s, i) => s + i.cantidad * unidadesEmpaque(p, i.tipo_empaque_id), 0);
-  const cabeEnStock = (p: ProductoConEmpaques, unidadesExtra: number) => {
-    const disp = disponibleDe(p);
-    if (unidadesEnCarrito(p) + unidadesExtra <= disp) return true;
-    toast({ title: "Sin disponible suficiente", description: `De ${p.nombre} quedan ${Math.max(0, Math.floor(disp))} unidades disponibles (el resto está comprometido en pedidos).`, variant: "destructive" });
-    return false;
-  };
-
-  const addToCartWithEmpaque = async (product: ProductoConEmpaques, empaque: TipoEmpaque | null) => {
-    if (!user?.id) return;
-    if (!cabeEnStock(product, unidadesEmpaque(product, empaque?.id || null))) return;
-
-    // Precio efectivo autoritativo (lista de cliente / empaque / oferta / base).
-    // Es la misma función que usa el checkout, así el carrito nunca miente.
-    let precioUnitario: number;
-    const { data: precioRpc } = await supabase.rpc('precio_efectivo', {
-      p_producto_id: product.id,
-      p_tipo_empaque_id: empaque?.id || null,
-      p_cliente_id: user.cliente_id || null,
-    });
-    if (precioRpc != null) {
-      precioUnitario = Number(precioRpc);
-    } else {
-      // Fallback defensivo si el RPC no responde: precio del empaque (P4), sin ×unidades.
-      precioUnitario = product.en_oferta && product.precio_oferta ? product.precio_oferta : product.precio_base;
-    }
-
-    // Check if same product with same empaque exists in cart
-    const existing = cart.find((item) => 
-      item.producto_id === product.id && item.tipo_empaque_id === (empaque?.id || null)
-    );
-    
-    if (existing) {
-      // Update quantity
-      const newCantidad = existing.cantidad + 1;
-      setCart(prev => prev.map(item => 
-        item.id === existing.id ? { ...item, cantidad: newCantidad } : item
-      ));
-      
-      await supabase
-        .from('carrito')
-        .update({ cantidad: newCantidad })
-        .eq('id', existing.id);
-    } else {
-      // Insert new item
-      const { data } = await supabase
-        .from('carrito')
-        .insert({
-          usuario_id: user.id,
-          producto_id: product.id,
-          tipo_empaque_id: empaque?.id || null,
-          cantidad: 1,
-          precio_unitario: precioUnitario
-        })
-        .select()
-        .single();
-      
-      if (data) {
-        setCart(prev => [...prev, { 
-          id: data.id, 
-          producto_id: product.id, 
-          tipo_empaque_id: empaque?.id || null,
-          cantidad: 1,
-          precio_unitario: precioUnitario
-        }]);
-      }
-    }
-    
-    setIsEmpaqueDialogOpen(false);
-    setSelectedProduct(null);
-    
-    const empaqueNombre = empaque ? ` (${empaque.nombre})` : '';
-    toast({ title: "Agregado", description: `${product.nombre}${empaqueNombre} agregado al carrito` });
-    notifyCartChanged();
-  };
-
-  const updateQuantity = async (productId: string, delta: number) => {
-    const item = cart.find(i => i.producto_id === productId);
-    if (!item) return;
-    
-    const newCantidad = Math.max(0, item.cantidad + delta);
-    const prod = productos.find((p) => p.id === productId);
-    if (delta > 0 && prod && !cabeEnStock(prod, delta * unidadesEmpaque(prod, item.tipo_empaque_id))) return;
-    
-    if (newCantidad === 0) {
-      // Remove from cart
-      setCart(prev => prev.filter(i => i.producto_id !== productId));
-      await supabase.from('carrito').delete().eq('id', item.id);
-    } else {
-      // Update quantity
-      setCart(prev => prev.map(i =>
-        i.producto_id === productId ? { ...i, cantidad: newCantidad } : i
-      ));
-      await supabase.from('carrito').update({ cantidad: newCantidad }).eq('id', item.id);
-    }
-    notifyCartChanged();
-  };
-
-  const getCartQuantity = (productId: string) =>
-    cart.filter((i) => i.producto_id === productId).reduce((s, i) => s + i.cantidad, 0);
 
   const toggleFavorite = async (productId: string) => {
     if (!user?.id) return;
@@ -479,7 +309,7 @@ const PortalCatalogo = () => {
                             <Button
                               size="sm"
                               className="h-8 w-8 p-0 rounded-full"
-                              onClick={() => handleAddToCart(product)}
+                              onClick={() => agregar(product)}
                             >
                               <Plus className="h-4 w-4" />
                             </Button>
@@ -489,7 +319,7 @@ const PortalCatalogo = () => {
                                 size="sm"
                                 variant="ghost"
                                 className="h-8 w-8 p-0 rounded-full text-white hover:bg-white/20"
-                                onClick={() => updateQuantity(product.id, -1)}
+                                onClick={() => cambiarCantidad(product, -1)}
                               >
                                 <Minus className="h-4 w-4" />
                               </Button>
@@ -498,7 +328,7 @@ const PortalCatalogo = () => {
                                 size="sm"
                                 variant="ghost"
                                 className="h-8 w-8 p-0 rounded-full text-white hover:bg-white/20"
-                                onClick={() => updateQuantity(product.id, 1)}
+                                onClick={() => cambiarCantidad(product, 1)}
                               >
                                 <Plus className="h-4 w-4" />
                               </Button>
@@ -577,58 +407,8 @@ const PortalCatalogo = () => {
         </SheetContent>
       </Sheet>
 
-      {/* Empaque Selection Dialog */}
-      <Dialog open={isEmpaqueDialogOpen} onOpenChange={setIsEmpaqueDialogOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Selecciona el empaque</DialogTitle>
-          </DialogHeader>
-          {selectedProduct && (
-            <div className="space-y-3 py-2">
-              <div className="flex items-center gap-3 pb-3 border-b">
-                <ProductImage
-                  imageUrl={selectedProduct.imagen_url}
-                  images={selectedProduct.imagenes}
-                  emoji={selectedProduct.imagen_emoji}
-                  alt={selectedProduct.nombre}
-                  size="xl"
-                />
-                <div>
-                  <p className="font-medium">{selectedProduct.nombre}</p>
-                  <p className="text-sm text-muted-foreground">
-                    Precio base: {formatPrice(selectedProduct.precio_base)}
-                  </p>
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                {selectedProduct.producto_empaques?.map((pe) => {
-                  // Precio real del empaque (el que cobra el checkout); fallback mientras carga
-                  const precioTotal = empaquePrecios[pe.tipo_empaque_id] ?? (selectedProduct.precio_base * pe.tipo_empaque.unidades);
-                  return (
-                    <button
-                      key={pe.id}
-                      onClick={() => addToCartWithEmpaque(selectedProduct, pe.tipo_empaque)}
-                      className="w-full flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary hover:bg-primary/5 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Package className="h-5 w-5 text-muted-foreground" />
-                        <div className="text-left">
-                          <p className="font-medium">{pe.tipo_empaque.nombre}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {pe.tipo_empaque.unidades} unidades
-                          </p>
-                        </div>
-                      </div>
-                      <p className="font-bold text-primary">{formatPrice(precioTotal)}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Elegir empaque (productos con más de un empaque) */}
+      <SelectorEmpaqueDialog producto={empaqueProducto} precios={empaquePrecios} onElegir={agregarConEmpaque} onCerrar={cerrarEmpaque} />
     </PortalMobileLayout>
   );
 };

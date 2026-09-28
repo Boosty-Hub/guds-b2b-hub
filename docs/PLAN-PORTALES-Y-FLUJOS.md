@@ -24,6 +24,10 @@
 | Evidencias | Firma y foto de entrega en bucket **privado** `evidencias-entrega`; la foto se comprime; **sin evidencia no se cierra** la entrega | 19i, `DeliveryEntregas.tsx` |
 | Seguridad cliente | Un cliente podía insertar por REST pedidos y **pagos ya "verificados"** → solo por las funciones del servidor | 19k |
 | Precios | Un empaque sin precio propio ("Caja ×12") se cobraba al precio de **1 unidad** y a Odoo llegaba precio/12 → ahora `precio_base × unidades` (como Odoo, precio por unidad) | 19k |
+| Cuentas bancarias | **Cualquier usuario con sesión (clientes, vendedores, repartidores) leía la tabla de bancos completa, con los saldos de Odoo y del extracto** → solo administración; clientes y vendedores ven la vista `cuentas_pago`. Número, banco, titular y RIF ahora vienen de Odoo; pago móvil y Zelle se cargan en Bancos; se desactivaron 2 cuentas de maqueta | 19l, importador, `Bancos.tsx` |
+| Acceso | Dominio `portal.guds-supply.com`, correos de acceso en español, página para restablecer la contraseña (antes el enlace no pedía clave nueva) | Configuración de Auth, `RestablecerClave.tsx` |
+| Funciones del servidor | **Sin sesión se podía aprobar un registro de cliente (y recibir la contraseña) y crear cuentas de acceso**; funciones internas (aplicar pagos a facturas, notificaciones) abiertas a cualquiera → cerradas | 19q |
+| Reportes | Facturas anuladas por completo con su NC ya no cuentan como venta (R8a) | 19o, `Reportes.tsx` |
 
 Verificado: 88 pruebas de base (`scripts/probar-multiempresa.mjs`), e2e de aprobación, del portal del vendedor y humo de los
 portales del cliente y de delivery. **En Odoo sigue existiendo una sola cotización de GUDS (S00927).**
@@ -182,42 +186,31 @@ el detalle. "Facturado" y "NC" están inflados por facturas erróneas revertidas
 | 5 | **Entrega**: se valida en GUDS al entregar y GUDS marca el documento como entregado en Odoo; si se valida en Odoo, el sync lo refleja como "Actualizado desde Odoo" | D7. Todos los almacenes son de 1 paso y 437 de 458 productos vendibles facturan **lo entregado**: al validar en la entrega, la factura sale después de entregar y una entrega incompleta factura solo lo entregado (sin nota de crédito). Ver 9.2 |
 | 6 | **Histórico de Profit**: todo, con insignia "Profit", solo lectura | R1. Aporta a todos los reportes; no toca la operación con Odoo |
 
-### 9.2 Consecuencias que hay que confirmar
+### 9.2 Tomadas (28-sep, segunda ronda)
 
-- **a. Momento de facturar**: hoy el almacén valida en Odoo al despachar y la factura sale el mismo día. Con la decisión 5 el
-  almacén debe **dejar de validar al despachar** y la factura sale tras la entrega. Contabilidad debe confirmar qué documento
-  acompaña la mercancía en tránsito (nota de entrega o guía de despacho).
-- **b. Usuario de API dedicado** en Odoo con permisos de Ventas e Inventario (la key actual es personal y vence a los 90 días,
-  lo que también detendría la sincronización). Lo crea el administrador de Odoo.
-- **c. Entrega incompleta**: ¿Odoo deja un pendiente para re-entregar o se cierra sin pendiente? Propuesta: según el motivo
-  (faltó en el camión → pendiente; el cliente no lo quiso → sin pendiente).
-- **d. Rechazo total**: ¿quién decide entre reintentar o anular (y en qué plazo)? GUDS no anula en Odoo.
-- **e. Precio por empaque**: la regla de julio (P4) decía "precio por caja", pero con el catálogo de Odoo el precio es **por
-  unidad** (p. ej. un chocolate de 40 g a $0,53, que Odoo vende por unidades). Solo 3 productos tienen empaque de varias
-  unidades; desde 19k valen precio × unidades. Confirmar.
+| # | Decisión | Qué implica |
+|---|---|---|
+| 7 | **Dominio**: la plataforma pasa a `portal.guds-supply.com` | ✅ URL del sitio y redirecciones de acceso configuradas; correos de acceso en español; página `/restablecer-clave` (probada de punta a punta). El dominio de correo está verificado en el proveedor, pero **Supabase aún no tiene el SMTP** (falta la clave SMTP del proveedor) |
+| 8 | **Pago móvil y Zelle**: pago móvil es la forma de pago de los bancos venezolanos (teléfono, cédula/RIF, código del banco); Zelle es un correo registrado en el banco de EE. UU. | ✅ 19l: campos en Bancos (admin → Bancos → editar), se ofrecen al cliente solo si la cuenta tiene sus datos |
+| 9 | **Momento de facturar**: el almacén deja de validar al despachar; la factura sale tras la entrega | D7 |
+| 10 | **Usuario de API dedicado** en Odoo (Ventas + Inventario) | Lo crea el administrador de Odoo; piloto con 1 documento antes de activar D7 |
+| 11 | **Incompleta** → pendiente o no según el motivo; **rechazo** → administración decide en Odoo (GUDS no anula) | D4/D7 |
+| 12 | **Precio por empaque** = precio por unidad × unidades (19k) | Confirmado |
+| 13 | **Pago después de aprobado**; **crédito abierto** con aviso por deuda vencida > 30 días; aprobación el mismo día hábil | F3/F5, V2 |
+| 14 | **Pedidos pendientes se pueden editar** (cliente y vendedor) mientras no estén aprobados | F4/V1: editar líneas y cantidades recalculando totales y stock comprometido en el servidor; el admin ve que fue editado |
+| 15 | **Fotos y descripciones bidireccionales**: se editan en GUDS y se escriben en Odoo (y lo que cambie en Odoo llega a GUDS) | F2: escritura en Odoo acotada a `product.template` (imagen y descripción de venta), gana el cambio más reciente (`write_date`), marcado "(GUDS)" en el historial; requiere el usuario de API dedicado |
+| 16 | **Multiempresa del cliente**: el selector GUDS / Quirutec solo aparece si el cliente tiene habilitadas ambas empresas; se habilita desde la ficha del cliente en el admin | F1/F6 |
+| 17 | **Mapas** con el token de Mapbox de la cuenta de GUDS (en variables de entorno, no en el código) | D0/D2; restringir el token por URL (`portal.guds-supply.com`) en Mapbox |
+| 18 | Vendedor con efectivo, soporte por WhatsApp y ejecutivo de cuenta, cola de delivery (ventas + reposiciones a consignación, rutas mixtas), evidencia por resultado (24 meses), el cliente y el vendedor ven la evidencia, reportes (venta neta sin ND cambiarias, reversos neteados, NC financieras aparte, costo promedio solo para administración, clasificación en Odoo, mapeo de vendedores propuesto por GUDS, históricos solo con nombre y RIF, metas por vendedor y mes en USD) | Según la propuesta por defecto |
 
-### 9.3 Pendientes (con la propuesta por defecto)
+### 9.3 Pendiente
 
-1. **Pago y aprobación**: el cliente paga después de aprobado, contra la cotización o factura.
-2. **Crédito**: sigue abierto (la aprobación manual es el control); aviso, no bloqueo, si tiene deuda vencida > 30 días.
-3. **Pendientes de aprobar**: aprobación el mismo día hábil; el cliente o vendedor puede **cancelar** mientras está pendiente,
-   no editar (cancela y vuelve a pedir).
-4. **Vendedor y efectivo**: puede registrar cobros en efectivo con comprobante; propone a qué facturas aplica y administración
-   confirma; tasa BCV de la fecha del pago.
-5. **Catálogo**: fotos y descripciones se cargan en Odoo y GUDS las trae (hoy 2 de 105 productos con foto).
-6. **Multiempresa del cliente**: un solo portal con selector GUDS / Quirutec y la marca de cada una.
-7. **Soporte**: WhatsApp de atención y ejecutivo de cuenta (el vendedor asignado) visibles en el portal.
-8. **Cola de delivery**: ventas desde almacenes propios y reposiciones a consignación; rutas mixtas GUDS + Quirutec permitidas.
-9. **Mapas**: Mapbox + sugerencias de Google + navegación con Google Maps/Waze (≈ US$0/mes al volumen actual). Evidencia:
-   completo = foto + firma + nombre; incompleto = lo mismo + motivo por producto; rechazo = foto + motivo; reprogramado = fecha +
-   motivo. Cédula del receptor opcional. Evidencias 24 meses (plan Pro de Supabase cuando se acerque 1 GB).
-10. **El cliente ve la evidencia** de sus entregas y el vendedor la de sus clientes.
-11. **Limpieza en Odoo** antes de arrancar delivery: entregas "listas" de hace más de 30 días, direcciones por sucursal y
-    teléfonos (lo hace el equipo en Odoo, que manda).
-12. **Reportes**: venta neta sin notas de débito cambiarias, reversos por error neteados y NC financieras aparte; costo = costo
-    promedio de Odoo, visible solo para administración; clasificación comercial (línea, sub-línea, marca, tipo de cliente) en
-    Odoo; mapeo de vendedores Profit → Odoo propuesto por GUDS y validado por ustedes; clientes históricos sin pareja solo con
-    nombre y RIF; metas por vendedor y mes en USD, cargadas por administración.
+- **Limpieza de datos en Odoo antes de activar delivery** (explicada al dueño el 28-sep): documentos de entrega abiertos y
+  viejos (24 "listos" y 45 "en espera" de más de 30 días, 6 borradores vacíos), direcciones de sucursal, 39 direcciones con
+  basura `_x000D_` y 132 clientes sin teléfono válido. Falta decidir si se corrige en Odoo con una lista que prepara GUDS o si
+  GUDS también escribe direcciones y teléfonos en Odoo.
+- **Cuenta "Banco Banesco USA" de GUDS en Odoo**: tiene el mismo número que Banesco en bolívares (configuración de Odoo); se
+  dejó sin publicar hasta corregirla en Odoo.
 
 ## 10. Anexos (locales, fuera de git)
 

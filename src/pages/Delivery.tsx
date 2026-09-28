@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, UserPlus } from "lucide-react";
+import { Eye, Loader2, UserPlus } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
@@ -21,16 +21,17 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
+import { DetalleEntregaDialog, type EntregaDetalle } from "@/components/delivery/DetalleEntregaDialog";
+import { fechaCorta } from "@/components/delivery/fechas";
 
 interface Repartidor { id: string; nombre: string; apellido: string | null; }
 interface Orden {
   id: string; numero: string; total: number; estado: string; direccion_entrega: string | null;
   cliente?: { nombre_negocio: string; direccion: string; ciudad: string } | null;
 }
-interface Entrega {
-  id: string; estado: string; prioridad: string | null; fecha_asignacion: string | null;
+interface Entrega extends EntregaDetalle {
+  orden_id: string | null;
   orden?: { numero: string; total: number; cliente?: { nombre_negocio: string; direccion: string } | null } | null;
-  repartidor?: { nombre: string; apellido: string | null } | null;
 }
 
 const estadoConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -54,6 +55,7 @@ const Delivery = () => {
   const [repSel, setRepSel] = useState("");
   const [prioridad, setPrioridad] = useState("normal");
   const [saving, setSaving] = useState(false);
+  const [detalle, setDetalle] = useState<Entrega | null>(null);
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -62,15 +64,16 @@ const Delivery = () => {
     const [rRes, oRes, eRes] = await Promise.all([
       supabase.from("usuarios").select("id, nombre, apellido").eq("role", "delivery").eq("activo", true),
       supabase.from("ordenes").select("id, numero, total, estado, direccion_entrega, cliente:clientes(nombre_negocio, direccion, ciudad)").in("estado", ["confirmado", "procesando", "enviado"]).order("created_at", { ascending: false }),
-      supabase.from("entregas").select("id, estado, prioridad, fecha_asignacion, orden:ordenes(numero, total, cliente:clientes(nombre_negocio, direccion)), repartidor:usuarios!entregas_repartidor_id_fkey(nombre, apellido)").order("fecha_asignacion", { ascending: false }),
+      supabase.from("entregas").select("id, orden_id, estado, prioridad, fecha_asignacion, fecha_inicio_entrega, fecha_entrega, receptor_nombre, notas, motivo_fallo, firma_url, foto_entrega_url, orden:ordenes(numero, total, cliente:clientes(nombre_negocio, direccion)), repartidor:usuarios!entregas_repartidor_id_fkey(nombre, apellido)").order("fecha_asignacion", { ascending: false }),
     ]);
     if (rRes.data) setRepartidores(rRes.data as Repartidor[]);
     if (eRes.data) setEntregas(eRes.data as unknown as Entrega[]);
-    // Órdenes que ya tienen una entrega activa (no fallida) — se excluyen de "por asignar"
-    const activeOrdenNums = new Set(
-      ((eRes.data || []) as unknown as { estado: string; orden?: { numero: string } | null }[]).filter((e) => e.estado !== "fallida").map((e) => e.orden?.numero)
+    // Órdenes que ya tienen una entrega activa (no fallida) — se excluyen de "por asignar". Por id y no por número:
+    // los números se repiten entre empresas (S00360 existe en GUDS y en Quirutec).
+    const ordenesConEntrega = new Set(
+      ((eRes.data || []) as unknown as { estado: string; orden_id: string | null }[]).filter((e) => e.estado !== "fallida" && e.orden_id).map((e) => e.orden_id)
     );
-    const pendientes = ((oRes.data as unknown as Orden[]) ?? []).filter((o) => !activeOrdenNums.has(o.numero));
+    const pendientes = ((oRes.data as unknown as Orden[]) ?? []).filter((o) => !ordenesConEntrega.has(o.id));
     setOrdenes(pendientes);
     if (pendientes.length) {
       const { data: tr } = await supabase.from("transferencias").select("orden_id, estado, numero").eq("tipo", "entrega")
@@ -103,7 +106,7 @@ const Delivery = () => {
   const asignadas = entregas.filter((e) => e.estado === "asignada").length;
   const enCamino = entregas.filter((e) => e.estado === "en_camino").length;
   const entregadas = entregas.filter((e) => e.estado === "entregada").length;
-  const fmt = (s: string | null) => (s ? new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short" }) : "—");
+  const fmt = fechaCorta;
 
   const ordenesVista = soloListas ? ordenes.filter((o) => despacho[o.id]?.estado === "lista") : ordenes;
   const pagination = usePagination(ordenesVista, 50);
@@ -204,7 +207,7 @@ const Delivery = () => {
               <Table>
                 <TableHeader><TableRow>
                   <TableHead>Orden</TableHead><TableHead>Cliente</TableHead><TableHead>Repartidor</TableHead>
-                  <TableHead>Asignada</TableHead><TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead>
+                  <TableHead>Asignada</TableHead><TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead><TableHead className="text-right">Detalle</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {pagination2.pageItems.map((e) => (
@@ -217,6 +220,12 @@ const Delivery = () => {
                       <TableCell className="whitespace-nowrap text-muted-foreground">{fmt(e.fecha_asignacion)}</TableCell>
                       <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(Number(e.orden?.total || 0))}</TableCell>
                       <TableCell className="whitespace-nowrap"><Badge variant={estadoConfig[e.estado]?.variant || "outline"}>{estadoConfig[e.estado]?.label || e.estado}</Badge></TableCell>
+                      <TableCell className="whitespace-nowrap text-right">
+                        <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => setDetalle(e)}
+                          title={e.estado === "entregada" ? "Ver firma y foto de la entrega" : "Ver detalle del envío"}>
+                          <Eye className="h-3.5 w-3.5" />{e.estado === "entregada" ? "Evidencia" : "Ver"}
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -226,6 +235,8 @@ const Delivery = () => {
           </div>
         </TabsContent>
       </Tabs>
+
+      <DetalleEntregaDialog entrega={detalle} onClose={() => setDetalle(null)} />
 
       {/* Asignar repartidor */}
       <Dialog open={!!asignarOrden} onOpenChange={(o) => { if (!o) setAsignarOrden(null); }}>

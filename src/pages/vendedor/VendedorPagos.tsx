@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { VendedorLayout } from "@/components/vendedor/VendedorLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table, TableBody, TableCell, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -13,7 +13,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2, Banknote } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,19 +24,26 @@ import { useSearchParams } from "react-router-dom";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
+import { useCuentasPago, metodosDeCuenta, METODO_LABEL, type CuentaPago } from "@/hooks/useCuentasPago";
+import { CuentaPagoDatos } from "@/components/portal/CuentaPagoDatos";
+import { useResumenVendedor, mesDe } from "@/components/vendedor/resumen";
 
-interface Pago { id: string; numero: string; monto: number; metodo: string; estado: string; referencia: string | null; created_at: string; cliente?: { nombre_negocio: string } | null; }
-interface Cli { id: string; nombre_negocio: string; }
-interface OrdenPend { id: string; numero: string; total: number; cliente_id: string; }
-interface Banco { id: string; nombre: string; metodo_pago: string; metodos: string[] | null; moneda: string; }
+interface Pago { id: string; numero: string; monto: number; metodo: string; estado: string; referencia: string | null; created_at: string; es_igtf: boolean | null; cliente?: { nombre_negocio: string } | null; }
+interface Cli { id: string; nombre_negocio: string; empresa_id: string | null; }
 
-const metodoLabel: Record<string, string> = {
-  transferencia: "Transferencia", efectivo: "Efectivo", pago_movil: "Pago Móvil", credito: "Crédito", tarjeta: "Tarjeta",
+// Efectivo que recibe el propio vendedor: no va a una cuenta publicada (administración elige la caja al verificar)
+const EFECTIVO = "efectivo";
+
+const estadoConfig: Record<string, { label: string; cls: string }> = {
+  pendiente: { label: "Pendiente", cls: "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200" },
+  verificado: { label: "Verificado", cls: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300" },
+  rechazado: { label: "Rechazado", cls: "border-red-300 bg-red-50 text-red-800 dark:bg-red-500/10 dark:text-red-300" },
 };
 
-const estadoConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" }> = {
-  pendiente: { label: "Pendiente", variant: "secondary" }, verificado: { label: "Verificado", variant: "default" }, rechazado: { label: "Rechazado", variant: "destructive" },
-};
+// Día del pago en hora de Caracas (YYYY-MM-DD), para comparar con el mes del resumen
+const diaCaracas = (s: string) => new Date(s).toLocaleDateString("en-CA", { timeZone: "America/Caracas" });
+
+const formVacio = { cliente_id: "", cuenta_id: "", metodo: "", moneda: "USD" as "USD" | "BS", monto: "", referencia: "" };
 
 const VendedorPagos = () => {
   const { formatPrice, exchangeRate } = useCurrency();
@@ -44,79 +51,103 @@ const VendedorPagos = () => {
   const { toast } = useToast();
   const [pagos, setPagos] = useState<Pago[]>([]);
   const [clientes, setClientes] = useState<Cli[]>([]);
-  const [ordenes, setOrdenes] = useState<OrdenPend[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ cliente_id: "", orden_id: "", monto: "", banco_id: "", metodo: "", tasa: "", referencia: "" });
-  const [bancos, setBancos] = useState<Banco[]>([]);
+  const [form, setForm] = useState(formVacio);
   const [saving, setSaving] = useState(false);
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get("q") || "");
-  const [estadoFiltro, setEstadoFiltro] = useState<"todos" | "pendiente">("todos");
+  const [estadoFiltro, setEstadoFiltro] = useState<"todos" | "pendiente" | "verificado_mes">("todos");
+  // Cuentas publicadas (vista cuentas_pago) y cifras desde resumen_vendedor() (misma fuente que el Dashboard)
+  const { cuentas, loading: cargandoCuentas } = useCuentasPago();
+  const { resumen, recargar: recargarResumen } = useResumenVendedor(true);
   // El buscador global abre esta página con ?q=
   useEffect(() => { const v = params.get("q"); if (v !== null) setQ(v); }, [params]);
 
   const fetchData = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
-    const [pRes, cRes, oRes, bRes] = await Promise.all([
-      supabase.from("pagos").select("id, numero, monto, metodo, estado, referencia, created_at, cliente:clientes(nombre_negocio)").order("created_at", { ascending: false }),
+    const [pRes, cRes] = await Promise.all([
+      supabase.from("pagos").select("id, numero, monto, metodo, estado, referencia, created_at, es_igtf, cliente:clientes(nombre_negocio)").order("created_at", { ascending: false }),
       // Solo los clientes asignados a este vendedor
-      supabase.from("clientes").select("id, nombre_negocio").eq("activo", true).eq("vendedor_asignado_id", user.id).order("nombre_negocio"),
-      supabase.from("ordenes").select("id, numero, total, cliente_id").eq("pagado", false).neq("estado", "cancelado"),
-      supabase.from("bancos").select("id, nombre, metodo_pago, metodos, moneda").eq("activo", true).order("nombre"),
+      supabase.from("clientes").select("id, nombre_negocio, empresa_id").eq("activo", true).eq("vendedor_asignado_id", user.id).order("nombre_negocio"),
     ]);
     if (pRes.data) setPagos(pRes.data as unknown as Pago[]);
     if (cRes.data) setClientes(cRes.data as Cli[]);
-    if (oRes.data) setOrdenes(oRes.data as OrdenPend[]);
-    if (bRes.data) setBancos(bRes.data as Banco[]);
     setLoading(false);
   }, [user?.id]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const verificados = pagos.filter((p) => p.estado === "verificado").reduce((s, p) => s + Number(p.monto), 0);
-  const pendientes = pagos.filter((p) => p.estado === "pendiente").reduce((s, p) => s + Number(p.monto), 0);
+  const cliente = clientes.find((c) => c.id === form.cliente_id);
+  const deudaCliente = resumen?.detalle?.find((d) => d.cliente_id === form.cliente_id);
+  // Cuentas de la empresa del cliente (o compartidas)
+  const cuentasCliente = useMemo(
+    () => (cliente ? cuentas.filter((c) => !c.empresa_id || !cliente.empresa_id || c.empresa_id === cliente.empresa_id) : []),
+    [cuentas, cliente],
+  );
+  const esEfectivo = form.cuenta_id === EFECTIVO;
+  const cuenta: CuentaPago | undefined = esEfectivo ? undefined : cuentasCliente.find((c) => c.id === form.cuenta_id);
+  const metodos = cuenta ? metodosDeCuenta(cuenta) : [];
+  // Moneda del monto: la de la cuenta; en efectivo la elige el vendedor
+  const moneda: "USD" | "BS" = cuenta ? (cuenta.moneda === "BS" ? "BS" : "USD") : form.moneda;
+  const esBS = moneda === "BS";
+  const montoNum = Number(form.monto);
+  const montoUSD = esBS ? (exchangeRate > 0 ? montoNum / exchangeRate : 0) : montoNum;
+  const faltaReferencia = !esEfectivo && form.referencia.trim().length < 4;
 
-  const ordenesDelCliente = ordenes.filter((o) => o.cliente_id === form.cliente_id);
-  const bancoSel = bancos.find((b) => b.id === form.banco_id);
-  const esBS = bancoSel?.moneda === "BS";
-  const metodosBanco = bancoSel?.metodos?.length ? bancoSel.metodos : bancoSel ? [bancoSel.metodo_pago] : [];
+  const elegirCuenta = (v: string) => setForm((f) => {
+    const c = cuentasCliente.find((x) => x.id === v);
+    const monedaNueva = v === EFECTIVO ? f.moneda : c?.moneda === "BS" ? "BS" : "USD";
+    const monedaAntes = f.cuenta_id === EFECTIVO ? f.moneda : cuentasCliente.find((x) => x.id === f.cuenta_id)?.moneda === "BS" ? "BS" : "USD";
+    return {
+      ...f, cuenta_id: v, metodo: v === EFECTIVO ? EFECTIVO : "transferencia",
+      // Al cambiar de moneda el número escrito ya no vale: nunca un monto en USD con etiqueta de Bs.
+      monto: f.cuenta_id && monedaNueva !== monedaAntes ? "" : f.monto,
+    };
+  });
 
   const registrar = async () => {
-    if (!form.cliente_id || !form.monto || Number(form.monto) <= 0) { toast({ title: "Faltan datos", description: "Elige cliente y monto", variant: "destructive" }); return; }
-    if (esBS && (!form.tasa || Number(form.tasa) <= 0)) { toast({ title: "Falta la tasa", description: "Indica la tasa (Bs. por USD) para un cobro en bolívares.", variant: "destructive" }); return; }
+    if (!form.cliente_id) { toast({ title: "Falta el cliente", variant: "destructive" }); return; }
+    if (!form.cuenta_id || (!esEfectivo && !cuenta)) { toast({ title: "Falta la cuenta", description: "Indica a qué cuenta pagó el cliente o si te entregó efectivo.", variant: "destructive" }); return; }
+    if (!(montoNum > 0)) { toast({ title: "Falta el monto", variant: "destructive" }); return; }
+    if (faltaReferencia) { toast({ title: "Falta la referencia", description: "Escribe el número de referencia de la operación (mínimo 4 caracteres).", variant: "destructive" }); return; }
+    if (esBS && !(exchangeRate > 0)) { toast({ title: "No hay tasa del día", description: "No se puede registrar un cobro en bolívares sin la tasa BCV del día.", variant: "destructive" }); return; }
     setSaving(true);
     const { error } = await supabase.rpc("registrar_pago", {
-      p_cliente_id: form.cliente_id, p_orden_id: form.orden_id || null, p_banco_id: form.banco_id || null,
-      p_metodo: form.metodo || metodosBanco[0] || "transferencia", p_monto_moneda: Number(form.monto),
-      p_moneda: bancoSel?.moneda || "USD", p_tasa_cambio: esBS ? Number(form.tasa) : null, p_referencia: form.referencia || null,
+      p_cliente_id: form.cliente_id, p_orden_id: null, p_banco_id: cuenta?.id ?? null,
+      p_metodo: esEfectivo ? EFECTIVO : (form.metodo || "transferencia"), p_monto_moneda: montoNum,
+      p_moneda: moneda, p_tasa_cambio: esBS ? exchangeRate : null, p_referencia: form.referencia.trim() || null,
     });
     setSaving(false);
     if (error) { toast({ title: "No se pudo registrar el cobro", description: error.message, variant: "destructive" }); return; }
     toast({ title: "Cobro registrado", description: "Queda pendiente de verificación por administración." });
-    setOpen(false); setForm({ cliente_id: "", orden_id: "", monto: "", banco_id: "", metodo: "", tasa: "", referencia: "" });
-    fetchData();
+    setOpen(false); setForm(formVacio);
+    fetchData(); recargarResumen();
   };
 
-  const fmt = (s: string) => new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short" });
+  const fmt = (s: string) => new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", timeZone: "America/Caracas" });
 
+  const cob = resumen?.cobros;
+  const verificadoMes = (p: Pago) => p.estado === "verificado" && !p.es_igtf && !!resumen && diaCaracas(p.created_at) >= resumen.mes_desde && diaCaracas(p.created_at) <= resumen.mes_hasta;
   const texto = q.trim().toLowerCase();
-  const filtrados = pagos.filter((p) => (estadoFiltro === "todos" || p.estado === "pendiente") &&
+  const filtrados = pagos.filter((p) => (estadoFiltro === "todos" || (estadoFiltro === "pendiente" ? p.estado === "pendiente" : verificadoMes(p))) &&
     (!texto || [p.numero, p.cliente?.nombre_negocio, p.referencia].some((v) => (v || "").toLowerCase().includes(texto))));
   const { ordenadas, orden, alternar } = useOrdenTabla(filtrados, {
     numero: (p) => p.numero, cliente: (p) => p.cliente?.nombre_negocio, fecha: (p) => p.created_at, monto: (p) => Number(p.monto || 0),
     metodo: (p) => p.metodo, estado: (p) => p.estado,
   });
   const pagination = usePagination(ordenadas, 50);
-  const nPendientes = pagos.filter((p) => p.estado === "pendiente").length;
 
   return (
     <VendedorLayout title="Pagos">
       <div>
         <KpiStrip items={[
-          { label: "Verificados", valor: formatPrice(verificados), tono: "positivo", onClick: () => setEstadoFiltro("todos"), activo: estadoFiltro === "todos" },
-          { label: "Pendientes de verificar", valor: formatPrice(pendientes), detalle: `${nPendientes} cobros`, tono: nPendientes ? "alerta" : "normal", onClick: () => setEstadoFiltro("pendiente"), activo: estadoFiltro === "pendiente" },
-          { label: "Total registros", valor: pagos.length },
+          { label: `Verificados en ${mesDe(resumen)}`, valor: cob ? formatPrice(cob.verificados_mes_monto) : "—", detalle: cob ? `${cob.verificados_mes_n} cobros · sin IGTF` : undefined,
+            tono: "positivo", onClick: () => setEstadoFiltro("verificado_mes"), activo: estadoFiltro === "verificado_mes" },
+          { label: "Pendientes de verificar", valor: cob ? formatPrice(cob.pendientes_monto) : "—", detalle: cob ? `${cob.pendientes_n} cobros` : undefined,
+            tono: cob?.pendientes_n ? "alerta" : "normal", onClick: () => setEstadoFiltro("pendiente"), activo: estadoFiltro === "pendiente" },
+          { label: "Total registros", valor: cob?.total ?? "—", detalle: cob?.rechazados_mes_n ? `${cob.rechazados_mes_n} rechazados este mes` : undefined,
+            onClick: () => setEstadoFiltro("todos"), activo: estadoFiltro === "todos" },
         ]} />
 
         <BarraLista busqueda={q} onBusqueda={setQ} placeholder="Buscar cobro, cliente o referencia..."
@@ -144,8 +175,8 @@ const VendedorPagos = () => {
                     <TableCell><span className="block max-w-[260px] truncate" title={p.cliente?.nombre_negocio || undefined}>{p.cliente?.nombre_negocio || "—"}</span></TableCell>
                     <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">{fmt(p.created_at)}</TableCell>
                     <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(Number(p.monto))}</TableCell>
-                    <TableCell className="hidden whitespace-nowrap md:table-cell">{metodoLabel[p.metodo] || p.metodo}</TableCell>
-                    <TableCell className="whitespace-nowrap"><Badge variant={estadoConfig[p.estado]?.variant || "secondary"}>{estadoConfig[p.estado]?.label || p.estado}</Badge></TableCell>
+                    <TableCell className="hidden whitespace-nowrap md:table-cell">{METODO_LABEL[p.metodo] || p.metodo}</TableCell>
+                    <TableCell className="whitespace-nowrap"><Badge variant="outline" className={estadoConfig[p.estado]?.cls}>{estadoConfig[p.estado]?.label || p.estado}</Badge></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -155,65 +186,102 @@ const VendedorPagos = () => {
         </div>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setForm(formVacio); }}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader><DialogTitle>Registrar cobro</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-2">
+          <div className="min-w-0 space-y-3 py-1">
             <div><Label>Cliente</Label>
-              <Select value={form.cliente_id} onValueChange={(v) => setForm((f) => ({ ...f, cliente_id: v, orden_id: "" }))}>
+              <Select value={form.cliente_id} onValueChange={(v) => setForm((f) => ({ ...formVacio, cliente_id: v, moneda: f.moneda }))}>
                 <SelectTrigger><SelectValue placeholder="Selecciona el cliente" /></SelectTrigger>
-                <SelectContent>{clientes.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre_negocio}</SelectItem>)}</SelectContent>
+                <SelectContent>
+                  {clientes.length === 0
+                    ? <div className="px-3 py-2 text-sm text-muted-foreground">No tienes clientes asignados en esta empresa</div>
+                    : clientes.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre_negocio}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {deudaCliente && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Por cobrar <span className="font-semibold text-foreground">{formatPrice(Number(deudaCliente.por_cobrar))}</span>
+                  {Number(deudaCliente.vencido) > 0.009 && <> · vencido <span className="font-semibold text-destructive">{formatPrice(Number(deudaCliente.vencido))}</span></>}
+                  {Number(deudaCliente.a_favor) < -0.009 && <> · a favor {formatPrice(Math.abs(Number(deudaCliente.a_favor)))}</>}
+                </p>
+              )}
+            </div>
+
+            <div><Label>¿Dónde pagó el cliente?</Label>
+              <Select value={form.cuenta_id} onValueChange={elegirCuenta} disabled={!form.cliente_id}>
+                <SelectTrigger><SelectValue placeholder={form.cliente_id ? (cargandoCuentas ? "Cargando cuentas…" : "Cuenta que recibió el pago") : "Primero elige el cliente"} /></SelectTrigger>
+                <SelectContent>
+                  {cuentasCliente.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.nombre} · {c.moneda === "BS" ? "Bs." : "USD"}</SelectItem>
+                  ))}
+                  <SelectItem value={EFECTIVO}>Efectivo (me lo entregó a mí)</SelectItem>
+                </SelectContent>
               </Select>
             </div>
-            {form.cliente_id && ordenesDelCliente.length > 0 && (
-              <div><Label>Orden (opcional)</Label>
-                <Select value={form.orden_id} onValueChange={(v) => setForm((f) => ({ ...f, orden_id: v, monto: ordenesDelCliente.find((o) => o.id === v)?.total?.toString() || f.monto }))}>
-                  <SelectTrigger><SelectValue placeholder="Aplicar a una orden" /></SelectTrigger>
-                  <SelectContent>{ordenesDelCliente.map((o) => <SelectItem key={o.id} value={o.id}>{o.numero} — {formatPrice(Number(o.total))}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Banco / cuenta que recibe</Label>
-                <Select value={form.banco_id} onValueChange={(v) => {
-                  const b = bancos.find((x) => x.id === v);
-                  const ms = b?.metodos?.length ? b.metodos : b ? [b.metodo_pago] : [];
-                  const nextTasa = b?.moneda === "BS" && exchangeRate > 0 ? String(exchangeRate) : "";
-                  setForm((f) => ({ ...f, banco_id: v, metodo: ms[0] || "transferencia", tasa: nextTasa }));
-                }}>
-                  <SelectTrigger><SelectValue placeholder="Seleccionar banco" /></SelectTrigger>
-                  <SelectContent>{bancos.map((b) => <SelectItem key={b.id} value={b.id}>{b.nombre} · {b.moneda === "USD" ? "USD $" : "Bs."}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div><Label>Método</Label>
-                <Select value={form.metodo} onValueChange={(v) => setForm((f) => ({ ...f, metodo: v }))} disabled={!form.banco_id}>
-                  <SelectTrigger><SelectValue placeholder={form.banco_id ? "Método" : "Elegí un banco"} /></SelectTrigger>
-                  <SelectContent>{metodosBanco.map((m) => <SelectItem key={m} value={m}>{metodoLabel[m] || m}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div><Label>{esBS ? "Monto recibido (Bs.)" : "Monto recibido (USD $)"}</Label><Input type="number" min="0" step="0.01" value={form.monto} onChange={(e) => setForm((f) => ({ ...f, monto: e.target.value }))} placeholder="0.00" /></div>
-            {esBS && (
-              <div>
-                <div className="flex items-center justify-between">
-                  <Label>Tasa de cambio (Bs. por 1 USD)</Label>
-                  <span className="text-[11px] text-muted-foreground">Tasa BCV precargada</span>
-                </div>
-                <Input type="number" min="0" step="0.01" value={form.tasa} onChange={(e) => setForm((f) => ({ ...f, tasa: e.target.value }))} placeholder="Ej. 400" />
-                {form.monto && form.tasa && Number(form.tasa) > 0 && (
-                  <div className="mt-2 flex items-center justify-between rounded-md bg-muted/60 px-3 py-2">
-                    <span className="text-xs text-muted-foreground">Equivale a</span>
-                    <span className="text-sm font-semibold">{formatPrice(Number(form.monto) / Number(form.tasa))}</span>
+
+            {cuenta && (
+              <>
+                {metodos.length > 1 && (
+                  <div><Label>Método</Label>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {metodos.map((m) => (
+                        <Button key={m} type="button" size="sm" variant={form.metodo === m ? "default" : "outline"}
+                          className={form.metodo === m ? "h-8 bg-emerald-500 hover:bg-emerald-600" : "h-8"}
+                          onClick={() => setForm((f) => ({ ...f, metodo: m }))}>{METODO_LABEL[m] || m}</Button>
+                      ))}
+                    </div>
                   </div>
                 )}
+                <div className="rounded-lg border border-border bg-muted/30 px-3 py-1">
+                  <CuentaPagoDatos cuenta={cuenta} metodo={form.metodo || "transferencia"} />
+                </div>
+              </>
+            )}
+
+            {esEfectivo && (
+              <div><Label>Moneda del efectivo</Label>
+                <div className="mt-1 flex gap-1.5">
+                  {(["USD", "BS"] as const).map((m) => (
+                    <Button key={m} type="button" size="sm" variant={form.moneda === m ? "default" : "outline"}
+                      className={form.moneda === m ? "h-8 bg-emerald-500 hover:bg-emerald-600" : "h-8"}
+                      onClick={() => setForm((f) => ({ ...f, moneda: m, monto: f.moneda === m ? f.monto : "" }))}>
+                      {m === "USD" ? "Dólares (USD)" : "Bolívares (Bs.)"}
+                    </Button>
+                  ))}
+                </div>
+                <p className="mt-1.5 flex items-start gap-1.5 text-xs text-muted-foreground"><Banknote className="mt-0.5 h-3.5 w-3.5 shrink-0" />Entrega el efectivo en administración; allí lo verifican.</p>
               </div>
             )}
-            <div><Label>Referencia</Label><Input value={form.referencia} onChange={(e) => setForm((f) => ({ ...f, referencia: e.target.value }))} placeholder="Nro. de referencia (opcional)" /></div>
+
+            {form.cuenta_id && (
+              <>
+                <div><Label>{esBS ? "Monto recibido (Bs.)" : "Monto recibido (USD $)"}</Label>
+                  <Input type="number" inputMode="decimal" min="0" step="0.01" value={form.monto} onChange={(e) => setForm((f) => ({ ...f, monto: e.target.value }))} placeholder="0.00" />
+                  {esBS && (
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-md bg-muted/60 px-3 py-2">
+                      <span className="text-xs text-muted-foreground">
+                        {exchangeRate > 0 ? <>Tasa BCV del día: {exchangeRate.toLocaleString("es-VE", { maximumFractionDigits: 4 })} Bs./USD</> : "Sin tasa del día"}
+                      </span>
+                      <span className="text-sm font-semibold">{montoNum > 0 && exchangeRate > 0 ? `≈ ${formatPrice(montoUSD)}` : ""}</span>
+                    </div>
+                  )}
+                </div>
+                {!esEfectivo && (
+                  <div><Label>Referencia de la operación</Label>
+                    <Input value={form.referencia} onChange={(e) => setForm((f) => ({ ...f, referencia: e.target.value }))} placeholder="Nro. de referencia (obligatorio)" />
+                  </div>
+                )}
+              </>
+            )}
             <p className="text-xs text-muted-foreground">El cobro queda pendiente hasta que administración lo verifique.</p>
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>Cancelar</Button>
-            <Button className="bg-emerald-500 hover:bg-emerald-600" onClick={registrar} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Registrar cobro"}</Button>
+            <Button className="bg-emerald-500 hover:bg-emerald-600" onClick={registrar}
+              disabled={saving || !form.cliente_id || !form.cuenta_id || !(montoNum > 0) || faltaReferencia || (esBS && !(exchangeRate > 0))}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Registrar cobro"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

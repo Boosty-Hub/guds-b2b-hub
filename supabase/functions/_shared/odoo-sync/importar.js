@@ -30,6 +30,20 @@ const CAMPOS_PROVEEDOR = ['name', 'vat', 'rif', 'cedula', 'email', 'phone', 'mob
   'is_company', 'residence_type', 'property_supplier_payment_term_id', 'website', 'comment', 'active', 'company_id', 'write_date'];
 const RESIDENCIA = { D: 'Domiciliado', R: 'Residente', NR: 'No residente', ND: 'No domiciliado' };
 
+// Datos de la cuenta bancaria de cada diario (número, banco, titular y RIF) para publicarlos a los clientes (19l)
+async function leerCuentasBanco(odoo, diarios, cid) {
+  const ids = [...new Set(diarios.map((j) => m2oId(j.bank_account_id)).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const cuentas = await odoo.leer('res.partner.bank', 'read', [ids], { fields: ['acc_number', 'bank_id', 'partner_id', 'acc_holder_name'] }, cid);
+  const titulares = [...new Set(cuentas.map((c) => m2oId(c.partner_id)).filter(Boolean))];
+  const rif = new Map((titulares.length ? await odoo.leer('res.partner', 'read', [titulares], { fields: ['vat'] }, cid) : [])
+    .map((x) => [x.id, txt(x.vat)]));
+  return new Map(cuentas.map((c) => [c.id, {
+    numero_cuenta: txt(c.acc_number), banco_nombre: m2oNombre(c.bank_id),
+    titular: txt(c.acc_holder_name) || m2oNombre(c.partner_id), documento: rif.get(m2oId(c.partner_id)) || null,
+  }]));
+}
+
 function estadoOrden(state, delivery) {
   if (state === 'cancel') return 'cancelado';
   if (state === 'draft' || state === 'sent') return 'pendiente';
@@ -116,7 +130,8 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       log(`\n[2] Leyendo ${emp.nombre_corto}…`);
       const d = { emp, cid };
       d.diarios = await odoo.leerTodo('account.journal', [['type', 'in', ['bank', 'cash']], ['company_id', '=', cid]],
-        ['name', 'type', 'currency_id', 'active', 'default_account_id', 'bank_acc_number', 'current_statement_balance', 'write_date'], { empresa: cid });
+        ['name', 'type', 'currency_id', 'active', 'default_account_id', 'bank_acc_number', 'bank_account_id', 'current_statement_balance', 'write_date'], { empresa: cid });
+      d.cuentasBanco = await leerCuentasBanco(odoo, d.diarios, cid);
       d.clientes = await odoo.leerTodo('res.partner', [['customer_rank', '>', 0], ...deEmpresa], CAMPOS_CLIENTE, { empresa: cid });
       d.proveedores = await odoo.leerTodo('res.partner', [['supplier_rank', '>', 0], ...deEmpresa], CAMPOS_PROVEEDOR, { empresa: cid });
       d.productos = await odoo.leerTodo('product.template', deEmpresa,
@@ -277,6 +292,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
         odoo_id: j.id, empresa_id: E, nombre: txt(typeof j.name === 'object' ? (j.name.es_VE || j.name.en_US) : j.name),
         moneda: monedaBanco(m2oId(j.currency_id)), metodo: j.type === 'cash' ? 'efectivo' : 'transferencia',
         tipo_odoo: j.type, activo: !!j.active,
+        ...(d.cuentasBanco.get(m2oId(j.bank_account_id)) || { numero_cuenta: null, banco_nombre: null, titular: null, documento: null }),
       }));
       marcas.push(marca('bancos', E, d.diarios));
 
@@ -576,13 +592,19 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
 
       // ─ Upserts (orden de dependencias) ─
       await escribir(`
-        insert into bancos (odoo_id, empresa_id, nombre, moneda, metodo_pago, tipo_odoo, activo, odoo_sync_at)
-        select x.odoo_id, x.empresa_id, x.nombre, x.moneda, x.metodo::pago_metodo, x.tipo_odoo, x.activo, '${ts}'
-        from jsonb_to_recordset(${jsonbLit(bancos)}) as x(odoo_id int, empresa_id uuid, nombre text, moneda text, metodo text, tipo_odoo text, activo boolean)
+        insert into bancos (odoo_id, empresa_id, nombre, moneda, metodo_pago, tipo_odoo, activo, numero_cuenta, banco_nombre, titular, documento,
+          visible_portal, odoo_sync_at)
+        select x.odoo_id, x.empresa_id, x.nombre, x.moneda, x.metodo::pago_metodo, x.tipo_odoo, x.activo, x.numero_cuenta, x.banco_nombre, x.titular,
+          x.documento, x.tipo_odoo = 'bank' and x.activo, '${ts}'
+        from jsonb_to_recordset(${jsonbLit(bancos)}) as x(odoo_id int, empresa_id uuid, nombre text, moneda text, metodo text, tipo_odoo text, activo boolean,
+          numero_cuenta text, banco_nombre text, titular text, documento text)
         on conflict (odoo_id) do update set empresa_id = excluded.empresa_id, nombre = excluded.nombre, moneda = excluded.moneda,
-          tipo_odoo = excluded.tipo_odoo, activo = excluded.activo, odoo_sync_at = excluded.odoo_sync_at, updated_at = now()
-        where (bancos.empresa_id, bancos.nombre, bancos.moneda, bancos.tipo_odoo, bancos.activo)
-          is distinct from (excluded.empresa_id, excluded.nombre, excluded.moneda, excluded.tipo_odoo, excluded.activo)`);
+          tipo_odoo = excluded.tipo_odoo, activo = excluded.activo, numero_cuenta = excluded.numero_cuenta, banco_nombre = excluded.banco_nombre,
+          titular = excluded.titular, documento = excluded.documento,
+          visible_portal = bancos.visible_portal and excluded.activo, odoo_sync_at = excluded.odoo_sync_at, updated_at = now()
+        where (bancos.empresa_id, bancos.nombre, bancos.moneda, bancos.tipo_odoo, bancos.activo, bancos.numero_cuenta, bancos.banco_nombre, bancos.titular, bancos.documento)
+          is distinct from (excluded.empresa_id, excluded.nombre, excluded.moneda, excluded.tipo_odoo, excluded.activo, excluded.numero_cuenta,
+            excluded.banco_nombre, excluded.titular, excluded.documento)`);
 
       for (const lote of lotes(clientes, 500)) {
         await escribir(`

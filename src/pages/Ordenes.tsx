@@ -57,6 +57,8 @@ interface OrdenDB {
   odoo_envio_aviso?: string | null;
   aprobado_at?: string | null;
   odoo_enviado_at?: string | null;
+  editado_at?: string | null;       // editado por el cliente o el vendedor mientras estaba por aprobar (19p)
+  ediciones?: number | null;
   cliente_id: string;
   estado: string;
   subtotal: number;
@@ -368,6 +370,9 @@ const Ordenes = () => {
           {orden.odoo_id ? <OdooBadge /> : <Badge variant="outline" className="px-1 py-0 text-[10px]" title="Creado en GUDS · pendiente de enviar a Odoo">GUDS</Badge>}
           {orden.numero_guds && <Badge variant="secondary" className="px-1 py-0 text-[10px] font-normal" title={`Creado en GUDS como ${orden.numero_guds} y enviado a Odoo`}>{orden.numero_guds}</Badge>}
           {estadoEnvio(orden) && <Badge variant="outline" className={cn("px-1.5 py-0 text-[10px] font-medium", estadoEnvio(orden)!.cls)} title={orden.odoo_envio_error || orden.rechazo_motivo || undefined}>{estadoEnvio(orden)!.txt}</Badge>}
+          {!!orden.ediciones && orden.aprobacion === "pendiente" && (
+            <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal" title={`Editado ${orden.ediciones} ${orden.ediciones === 1 ? "vez" : "veces"} antes de aprobar${orden.editado_at ? ` · último ${formatDate(orden.editado_at)}` : ""}`}>Editado</Badge>
+          )}
         </span>
       </TableCell>
       <TableCell className="font-medium">
@@ -584,6 +589,7 @@ const Ordenes = () => {
                   campos={[
                     { label: "Fecha", valor: formatDate(selectedOrder.fecha_pedido || selectedOrder.created_at) },
                     ...(selectedOrder.numero_guds ? [{ label: "Pedido GUDS", valor: `${selectedOrder.numero_guds} · enviado ${selectedOrder.odoo_enviado_at ? formatDate(selectedOrder.odoo_enviado_at) : ""}` }] : []),
+                    ...(selectedOrder.ediciones ? [{ label: "Editado", valor: `${selectedOrder.ediciones} ${selectedOrder.ediciones === 1 ? "vez" : "veces"}${selectedOrder.editado_at ? ` · último ${formatDate(selectedOrder.editado_at)}` : ""}` }] : []),
                     { label: "Vendedor", valor: selectedOrder.vendedor_odoo },
                     { label: "Método de pago", valor: selectedOrder.metodo_pago ? <span className="capitalize">{selectedOrder.metodo_pago.replace('_', ' ')}</span> : null },
                     { label: "Moneda", valor: selectedOrder.moneda_original },

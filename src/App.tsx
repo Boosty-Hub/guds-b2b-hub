@@ -18,6 +18,7 @@ import { BoostySupport } from "@/components/support/BoostySupport";
 // Public Pages
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import RestablecerClave from "./pages/RestablecerClave";
 import Registro from "./pages/Registro";
 import TerminosCondiciones from "./pages/TerminosCondiciones";
 import Soporte from "./pages/Soporte";
@@ -148,6 +149,7 @@ const App = () => (
                 {/* Public Pages */}
                 <Route path="/" element={<Landing />} />
                 <Route path="/login" element={<Login />} />
+                <Route path="/restablecer-clave" element={<RestablecerClave />} />
                 <Route path="/registro" element={<Registro />} />
                 <Route path="/terminos" element={<TerminosCondiciones />} />
                 <Route path="/soporte" element={<Soporte />} />
@@ -226,6 +228,7 @@ const App = () => (
                 <Route path="/portal/cuenta/preferencias" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalPreferencias /></ProtectedRoute>} />
                 <Route path="/portal/ayuda" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalAyuda /></ProtectedRoute>} />
                 <Route path="/portal/cuenta/eliminar" element={<ProtectedRoute allowedRoles={["cliente"]}><PortalEliminarCuenta /></ProtectedRoute>} />
+                <Route path="/portal/terminos" element={<Navigate to="/terminos" replace />} />
           
                 {/* Portal de Vendedor - Solo vendedor */}
                 <Route path="/vendedor" element={<ProtectedRoute allowedRoles={["vendedor"]}><VendedorDashboard /></ProtectedRoute>} />

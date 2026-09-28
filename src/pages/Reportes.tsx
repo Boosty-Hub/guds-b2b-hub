@@ -7,6 +7,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { Panel } from "@/components/datos/FichaCampos";
@@ -23,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 // ── Tipos de las funciones de reporte (migración 18u) ──
 interface FilaVenta { clave: string; etiqueta: string; detalle: string | null; documentos: number; clientes: number; cantidad: number | null; bruto_usd: number; nc_usd: number; neto_usd: number }
 interface FilaCobro { clave: string; etiqueta: string; detalle: string | null; cobros: number; clientes: number; monto_usd: number }
+interface FilaReverso { empresa: string; cliente: string; factura: string; factura_fecha: string; nota: string; nota_fecha: string; neto_usd: number; motivo: string | null }
 interface FilaInv { producto_id: string; sku: string; nombre: string; categoria: string; existencia: number; comprometido: number; disponible: number; vendido_unidades: number; vendido_usd: number; ultima_venta: string | null; cobertura_dias: number | null }
 
 const num = (v: unknown) => Number(v ?? 0);
@@ -92,6 +95,8 @@ const Reportes = () => {
   const [ventas, setVentas] = useState<Record<string, FilaVenta[]>>({});
   const [ventasPrev, setVentasPrev] = useState<FilaVenta[]>([]);
   const [meses, setMeses] = useState<FilaVenta[]>([]);
+  const [reversos, setReversos] = useState<FilaReverso[]>([]);
+  const [verReversos, setVerReversos] = useState(false);
   const [cobros, setCobros] = useState<Record<string, FilaCobro[]>>({});
   const [cobrosPrev, setCobrosPrev] = useState<FilaCobro[]>([]);
   const [mesesCobro, setMesesCobro] = useState<FilaCobro[]>([]);
@@ -118,14 +123,15 @@ const Reportes = () => {
         if (tab === "ventas") {
           // "empresa" da los totales con un solo redondeo (y la tabla por empresa en modo "Ambas")
           const grupos = ["empresa", "vendedor", "cliente", "producto", "categoria"];
-          const [res, prev, m] = await Promise.all([
+          const [res, prev, m, rev] = await Promise.all([
             Promise.all(grupos.map((g) => rpc<FilaVenta>("reporte_ventas", { p_desde: desde, p_hasta: hasta, p_agrupar: g }))),
             rpc<FilaVenta>("reporte_ventas", { p_desde: pd, p_hasta: ph, p_agrupar: "empresa" }),
             rpc<FilaVenta>("reporte_ventas", { p_desde: ini12, p_hasta: hasta, p_agrupar: "mes" }),
+            rpc<FilaReverso>("reporte_reversos", { p_desde: desde, p_hasta: hasta }),
           ]);
           if (cancelado) return;
           setVentas(Object.fromEntries(grupos.map((g, i) => [g, res[i]])));
-          setVentasPrev(prev); setMeses(m);
+          setVentasPrev(prev); setMeses(m); setReversos(rev);
         } else if (tab === "cobranza") {
           const grupos = ["empresa", "banco", "vendedor", "cliente", "metodo"];
           const [res, prev, m] = await Promise.all([
@@ -249,6 +255,12 @@ const Reportes = () => {
             { label: "Clientes con compra", valor: fmtN(totalVentas.clientes) },
             { label: "Ticket promedio", valor: formatPrice(totalVentas.ticket), detalle: "por factura" },
           ]} />
+          {reversos.length > 0 && (
+            <p className="-mt-1 mb-3 text-xs text-muted-foreground">
+              No se cuentan {fmtN(reversos.length)} facturas anuladas por completo con su nota de crédito ({formatPrice(reversos.reduce((s, r) => s + num(r.neto_usd), 0))}).
+              <Button variant="link" size="sm" className="h-auto px-1 py-0 text-xs" onClick={() => setVerReversos(true)}>Ver lista</Button>
+            </p>
+          )}
           <Panel sinPadding className="mb-3" titulo="Venta neta por mes (últimos 12 meses)">
             <GraficoMeses datos={meses.map((f) => ({ mes: f.clave, valor: num(f.neto_usd) }))} formato={formatPrice} />
           </Panel>
@@ -286,6 +298,22 @@ const Reportes = () => {
               { clave: "neto", titulo: "Venta neta", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
             ]} />
           </div>
+          <Dialog open={verReversos} onOpenChange={setVerReversos}>
+            <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+              <DialogHeader>
+                <DialogTitle>Facturas anuladas con nota de crédito</DialogTitle>
+                <DialogDescription>Factura y nota de crédito por el mismo monto: se excluyen ambas de la venta, lo facturado y el ticket.</DialogDescription>
+              </DialogHeader>
+              <TablaReporte titulo={`${fmtN(reversos.length)} pares`} filas={reversos} exportar="facturas-anuladas" limite={50} columnas={[
+                { clave: "empresa", titulo: "Empresa", valor: (f) => f.empresa, secundaria: true },
+                { clave: "cliente", titulo: "Cliente", valor: (f) => f.cliente },
+                { clave: "factura", titulo: "Factura", valor: (f) => f.factura, render: (f) => <span className="whitespace-nowrap">{f.factura} <span className="text-muted-foreground">· {f.factura_fecha.split("-").reverse().join("/")}</span></span> },
+                { clave: "nota", titulo: "Nota de crédito", valor: (f) => f.nota, render: (f) => <span className="whitespace-nowrap">{f.nota} <span className="text-muted-foreground">· {f.nota_fecha.split("-").reverse().join("/")}</span></span>, ocultarMovil: true },
+                { clave: "motivo", titulo: "Motivo", valor: (f) => f.motivo || "—", ocultarMovil: true },
+                { clave: "neto", titulo: "Neto", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
+              ]} />
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="cobranza" className="mt-0">

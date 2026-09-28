@@ -16,10 +16,14 @@ import {
   CreditCard,
   ChevronRight,
   ShoppingBag,
-  Clock,
   Loader2,
   Upload,
-  Paperclip
+  Paperclip,
+  Landmark,
+  Smartphone,
+  Mail,
+  CalendarClock,
+  Banknote
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -32,8 +36,10 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase, Producto } from "@/lib/supabase";
 import { compressImage } from "@/lib/image";
 import { ProductImage } from "@/components/portal/ProductImage";
+import { CuentaPagoDatos } from "@/components/portal/CuentaPagoDatos";
+import { useCuentasPago, metodosDeCuenta, type MetodoCuenta } from "@/hooks/useCuentasPago";
 
-const METODOS_CON_COMPROBANTE = ["transferencia", "pago_movil"];
+const METODOS_CON_COMPROBANTE = ["transferencia", "pago_movil", "zelle"];
 const MAX_COMPROBANTE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_COMPROBANTE_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 
@@ -56,11 +62,13 @@ interface CuponDB {
   descripcion: string;
 }
 
-const metodosPago = [
-  { id: "transferencia", name: "Transferencia Bancaria", icon: "🏦" },
-  { id: "credito", name: "Crédito (30 días)", icon: "📅" },
-  { id: "efectivo", name: "Efectivo contra entrega", icon: "💵" },
-  { id: "pago_movil", name: "Pago Móvil", icon: "📱" },
+// Pago móvil y Zelle solo aparecen si alguna cuenta publicada tiene esos datos (ver metodosDeCuenta)
+const METODOS_BASE = [
+  { id: "transferencia", name: "Transferencia bancaria", icon: Landmark },
+  { id: "pago_movil", name: "Pago móvil", icon: Smartphone },
+  { id: "zelle", name: "Zelle", icon: Mail },
+  { id: "credito", name: "Crédito", icon: CalendarClock },
+  { id: "efectivo", name: "Efectivo contra entrega", icon: Banknote },
 ];
 
 const PortalCarrito = () => {
@@ -74,8 +82,8 @@ const PortalCarrito = () => {
   const [referenciaPago, setReferenciaPago] = useState("");
   const [comprobanteFile, setComprobanteFile] = useState<File | null>(null);
   const comprobanteInputRef = useRef<HTMLInputElement>(null);
-  // Banco destino que el cliente indica (a dónde pagó), filtrado por moneda
-  const [bancos, setBancos] = useState<{ id: string; nombre: string; moneda: string; numero_cuenta: string | null; titular: string | null; metodo_pago: string }[]>([]);
+  // Cuenta destino que el cliente indica (a dónde pagó): cuentas publicadas (vista cuentas_pago), filtradas por moneda
+  const { cuentas: bancos } = useCuentasPago();
   const [monedaPago, setMonedaPago] = useState<"USD" | "BS">("USD");
   const [bancoPagoId, setBancoPagoId] = useState<string>("");
   // Config de negocio (IVA / envío) leída de la BD; los defaults coinciden con el servidor.
@@ -98,17 +106,7 @@ const PortalCarrito = () => {
       fetchCart();
     }
     fetchConfig();
-    fetchBancos();
   }, [user]);
-
-  const fetchBancos = async () => {
-    const { data } = await supabase
-      .from('bancos')
-      .select('id, nombre, moneda, numero_cuenta, titular, metodo_pago')
-      .eq('activo', true)
-      .order('nombre');
-    if (data) setBancos(data);
-  };
 
   const fetchConfig = async () => {
     const { data } = await supabase
@@ -194,7 +192,7 @@ const PortalCarrito = () => {
     if (data) {
       setCuponApplied(data);
       toast({
-        title: "¡Cupón aplicado!",
+        title: "Cupón aplicado",
         description: data.tipo === 'porcentaje' 
           ? `${data.valor}% de descuento aplicado` 
           : `${formatPrice(data.valor)} de descuento aplicado`,
@@ -231,7 +229,12 @@ const PortalCarrito = () => {
   const cartCount = cart.reduce((sum, item) => sum + item.cantidad, 0);
 
   const requiereComprobante = selectedPayment ? METODOS_CON_COMPROBANTE.includes(selectedPayment) : false;
-  const bancosFiltrados = bancos.filter((b) => b.moneda === monedaPago);
+  const aceptaMetodo = (m: string) => (c: (typeof bancos)[number]) => (metodosDeCuenta(c) as string[]).includes(m);
+  const metodosPago = METODOS_BASE.filter((m) => !METODOS_CON_COMPROBANTE.includes(m.id) || bancos.some(aceptaMetodo(m.id)));
+  // Monedas con al menos una cuenta que recibe el método elegido (Zelle: USD; pago móvil: Bs.)
+  const monedasMetodo = (["USD", "BS"] as const).filter((m) => bancos.some((c) => c.moneda === m && (!selectedPayment || aceptaMetodo(selectedPayment)(c))));
+  const bancosFiltrados = bancos.filter((b) => b.moneda === monedaPago && (!selectedPayment || aceptaMetodo(selectedPayment)(b)));
+  const bancoPago = bancos.find((b) => b.id === bancoPagoId);
   const tasaPago = monedaPago === "BS" ? exchangeRate : 0;
   const montoPagar = monedaPago === "BS" && tasaPago > 0 ? total * tasaPago : total;
 
@@ -325,16 +328,17 @@ const PortalCarrito = () => {
       return;
     }
 
-    const creada = Array.isArray(data) ? data[0] : data;
+    const creada = (Array.isArray(data) ? data[0] : data) as { orden_id?: string; numero?: string } | null;
 
+    // Todo pedido de cliente queda pendiente de aprobación en el admin: no se promete confirmación ni fecha
     toast({
-      title: "¡Pedido confirmado!",
-      description: `Tu pedido ${creada?.numero ?? ''} ha sido enviado para procesamiento`,
+      title: "Pedido recibido · pendiente de aprobación",
+      description: `${creada?.numero ? `Pedido ${creada.numero}. ` : ""}Te avisaremos cuando lo aprobemos.`,
     });
 
     setCart([]);
     setSubmitting(false);
-    navigate("/portal/pedidos");
+    navigate(creada?.orden_id ? `/portal/pedidos?orden=${creada.orden_id}&nuevo=1` : "/portal/pedidos");
   };
 
   if (loading) {
@@ -384,7 +388,7 @@ const PortalCarrito = () => {
           <Truck className="h-5 w-5 text-green-500" />
           <div className="flex-1">
             <p className="text-sm font-medium text-green-700">
-              {shipping === 0 ? "¡Envío gratis!" : `Agrega ${formatPrice(cfg.envioGratis - base)} más para envío gratis`}
+              {shipping === 0 ? "Envío gratis en este pedido" : `Agrega ${formatPrice(cfg.envioGratis - base)} más para envío gratis`}
             </p>
           </div>
         </div>
@@ -513,7 +517,7 @@ const PortalCarrito = () => {
 
               {/* Moneda */}
               <div className="flex gap-2">
-                {(["USD", "BS"] as const).map((m) => (
+                {monedasMetodo.map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -544,9 +548,16 @@ const PortalCarrito = () => {
                   </button>
                 ))}
                 {bancosFiltrados.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No hay cuentas en {monedaPago === "USD" ? "dólares" : "bolívares"} disponibles.</p>
+                  <p className="text-sm text-muted-foreground">No hay cuentas en {monedaPago === "USD" ? "dólares" : "bolívares"} para este método.</p>
                 )}
               </div>
+
+              {bancoPago && (
+                <div className="rounded-xl border border-border bg-muted/40 px-3 py-2">
+                  <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Datos de la cuenta</p>
+                  <CuentaPagoDatos cuenta={bancoPago} metodo={selectedPayment as MetodoCuenta} />
+                </div>
+              )}
 
               {/* Monto a transferir */}
               <div className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2 text-sm">
@@ -600,14 +611,13 @@ const PortalCarrito = () => {
           </div>
         )}
 
-        {/* Delivery Time */}
+        {/* Qué pasa después de enviar (sin fechas fijas: la entrega se coordina al aprobar) */}
         <div className="px-4 mt-4">
           <div className="bg-card rounded-xl border border-border p-4 flex items-center gap-3">
-            <Clock className="h-5 w-5 text-primary" />
-            <div>
-              <p className="font-medium">Entrega estimada</p>
-              <p className="text-sm text-muted-foreground">Mañana, 9:00 AM - 1:00 PM</p>
-            </div>
+            <Truck className="h-5 w-5 shrink-0 text-primary" />
+            <p className="text-sm text-muted-foreground">
+              Tu pedido quedará <strong className="text-foreground">pendiente de aprobación</strong>. Te avisaremos cuando lo aprobemos y coordinaremos la entrega.
+            </p>
           </div>
         </div>
 
@@ -656,7 +666,7 @@ const PortalCarrito = () => {
           {submitting ? (
             <Loader2 className="h-5 w-5 animate-spin" />
           ) : (
-            <>Confirmar Pedido • {formatPrice(total)}</>
+            <>Enviar pedido · {formatPrice(total)}</>
           )}
         </Button>
         <div className="h-2" />
@@ -674,6 +684,10 @@ const PortalCarrito = () => {
                 key={metodo.id}
                 onClick={() => {
                   setSelectedPayment(metodo.id);
+                  // La moneda y la cuenta deben admitir el método (p. ej. Zelle solo en cuentas en USD)
+                  const monedas = (["USD", "BS"] as const).filter((m) => bancos.some((c) => c.moneda === m && aceptaMetodo(metodo.id)(c)));
+                  if (monedas.length > 0 && !monedas.includes(monedaPago)) setMonedaPago(monedas[0]);
+                  if (bancoPago && !aceptaMetodo(metodo.id)(bancoPago)) setBancoPagoId("");
                   setIsPaymentOpen(false);
                 }}
                 className={`w-full p-4 rounded-xl border flex items-center gap-3 transition-colors ${
@@ -682,7 +696,7 @@ const PortalCarrito = () => {
                     : "border-border"
                 }`}
               >
-                <span className="text-2xl">{metodo.icon}</span>
+                <metodo.icon className="h-6 w-6 shrink-0 text-primary" />
                 <span className="text-left">
                   <span className="block font-medium">{metodo.name}</span>
                   {metodo.id === "credito" && credito && (

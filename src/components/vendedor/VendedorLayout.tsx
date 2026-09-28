@@ -12,7 +12,6 @@ import {
   ShoppingCart,
   CreditCard,
   Target,
-  Warehouse,
   LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,8 +34,8 @@ interface VendedorLayoutProps {
   title: string;
 }
 
-// Barra inferior: 5 items ya llenan el ancho en móvil (justify-around),
-// así que Inventario no entra ahí — solo en el menú hamburguesa (sheetNavItems).
+// Barra inferior: 5 items ya llenan el ancho en móvil (justify-around); el resto
+// (Inventario, Consignación, Retenciones) se alcanza desde el menú hamburguesa.
 const mobileNavItems = [
   { icon: LayoutDashboard, label: "Inicio", path: "/vendedor" },
   { icon: Users, label: "Clientes", path: "/vendedor/clientes" },
@@ -45,10 +44,8 @@ const mobileNavItems = [
   { icon: Target, label: "Metas", path: "/vendedor/metas" },
 ];
 
-const sheetNavItems = [
-  ...mobileNavItems,
-  { icon: Warehouse, label: "Inventario", path: "/vendedor/inventario" },
-];
+// Menú hamburguesa = el mismo menú del sidebar (navegacion.ts), para que ninguna entrada quede fuera en el teléfono
+const sheetNavItems = navVendedor;
 
 // Accesos "Ir a" del buscador del vendedor
 const modulosVendedor: ModuloBuscador[] = navVendedor.map((i) => ({ label: i.label, path: i.path, seccion: "Portal vendedor" }));

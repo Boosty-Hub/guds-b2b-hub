@@ -10,6 +10,38 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-28 · Decisiones del plan de portales, dominio nuevo, cuentas de pago, seguridad de funciones y reversos
+
+Decisiones del dueño registradas en `docs/PLAN-PORTALES-Y-FLUJOS.md` §9 (impuestos y listas de precios desde Odoo, sin envío
+automático en pedidos del vendedor, todas las cuentas bancarias publicadas, entregado en GUDS → entregado en Odoo, histórico de
+Profit de solo lectura, pedidos pendientes editables, fotos y descripciones bidireccionales, selector de empresa solo si el
+cliente tiene ambas habilitadas, etc.).
+
+- **Dominio `portal.guds-supply.com`**: URL del sitio y redirecciones de Supabase Auth (se quitaron las de Lovable), correos de
+  acceso en español y página `/restablecer-clave` (antes el enlace de recuperación no pedía clave nueva). Probado de punta a
+  punta con un usuario desechable. **Falta la clave SMTP** del proveedor de correo en Supabase: el dominio está verificado en el
+  proveedor, pero Supabase sigue con el correo por defecto (2 por hora, solo al equipo).
+- **Cuentas de pago** (`20260928_fase19l_cuentas_pago.sql` + importador): número, banco, titular y RIF de las 18 cuentas vienen de
+  Odoo (`res.partner.bank` del diario); pago móvil (teléfono, cédula/RIF, código del banco) y Zelle (correo del banco de EE. UU.)
+  se cargan en Bancos; "Publicar a clientes y vendedores" decide qué se muestra. Clientes y vendedores leen la vista
+  `cuentas_pago`. **Hueco cerrado**: cualquier usuario con sesión leía la tabla `bancos` completa, con los saldos de Odoo y del
+  extracto. Se desactivaron 2 cuentas de maqueta y la cuenta "Banco Banesco USA" de GUDS queda sin publicar (en Odoo tiene el
+  número de Banesco en bolívares).
+- **Seguridad de funciones** (`…19q_seguridad_funciones.sql`): varias migraciones hacían `revoke … from public`, pero Supabase
+  concede EXECUTE directo a `anon` y `authenticated`, así que seguían abiertas a cualquiera con la llave pública, **incluso sin
+  sesión**. Críticos: `aprobar_registro_cliente` no validaba quién llamaba (cualquiera podía aprobar su propio registro y recibir
+  la contraseña temporal) y `crear_auth_user` creaba cuentas con cualquier correo; además `aplicar_pago_a_facturas` y las
+  `notif_*` (notificaciones con enlace arbitrario). Ahora: aprobar registros exige administración; las funciones internas no las
+  ejecuta nadie desde fuera; las acciones de negocio no las ejecuta `anon`; y las funciones nuevas ya no quedan abiertas a `anon`
+  por defecto.
+- **Reportes: neteo de reversos** (`…19o_reportes_reversos.sql`): una factura anulada por completo con una NC por el mismo monto
+  no cuenta como venta (198 pares; Quirutec 87 por ≈ 6 M USD). "Facturado" de Quirutec en septiembre pasa de 3,18 M a 186 mil
+  USD. En Reportes → Ventas se ve cuántos pares se excluyen y la lista.
+- Mapbox: el token pasa a la variable `VITE_MAPBOX_TOKEN` (local y Netlify); conviene restringirlo por URL en la cuenta de Mapbox.
+- Verificado: pruebas de base (92 casos) y recuperación de contraseña con Playwright.
+
+---
+
 ## 2026-09-28 · Fase 9b: aprobación de pedidos en el admin y envío como línea de servicio
 
 Decisiones del dueño (28-sep): el envío que cobra GUDS va a Odoo como **línea de servicio** con el monto de GUDS; el pedido

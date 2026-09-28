@@ -1,149 +1,97 @@
-import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { ChevronLeft, Landmark, Loader2, Receipt } from "lucide-react";
 import { PortalMobileLayout } from "@/components/portal/PortalMobileLayout";
+import { CuentaPagoDatos } from "@/components/portal/CuentaPagoDatos";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  ChevronLeft,
-  CreditCard,
-  Building2,
-  Smartphone,
-  Banknote,
-  Plus,
-  Check
-} from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useEmpresa } from "@/contexts/EmpresaContext";
+import { useCuentasPago, metodosDeCuenta, METODO_LABEL, type CuentaPago } from "@/hooks/useCuentasPago";
 
-const metodosPago = [
-  { 
-    id: "transferencia", 
-    name: "Transferencia Bancaria", 
-    icon: Building2, 
-    description: "Banco Nacional - ****4521",
-    active: true 
-  },
-  { 
-    id: "pago_movil", 
-    name: "Pago Móvil", 
-    icon: Smartphone, 
-    description: "0414-***-**89",
-    active: true 
-  },
-  { 
-    id: "efectivo", 
-    name: "Efectivo contra entrega", 
-    icon: Banknote, 
-    description: "Pago al momento de la entrega",
-    active: true 
-  },
-  { 
-    id: "credito", 
-    name: "Crédito", 
-    icon: CreditCard, 
-    description: "Línea de crédito aprobada",
-    active: true 
-  },
-];
-
+// Cuentas oficiales donde el cliente puede pagar (vista cuentas_pago: cuentas publicadas de la empresa activa, con los
+// datos traídos de Odoo). Reemplaza la maqueta anterior, que mostraba un banco, una cuenta, un RIF y un pago móvil
+// inventados.
 const PortalMetodosPago = () => {
   const navigate = useNavigate();
-  const [selectedMethod, setSelectedMethod] = useState("transferencia");
+  const { empresaActiva } = useEmpresa();
+  const { cuentas, loading, error } = useCuentasPago();
+
+  const grupos: { titulo: string; lista: CuentaPago[] }[] = [
+    { titulo: "Bolívares (Bs.)", lista: cuentas.filter((c) => c.moneda === "BS") },
+    { titulo: "Dólares (USD)", lista: cuentas.filter((c) => c.moneda === "USD") },
+  ].filter((g) => g.lista.length > 0);
 
   return (
     <PortalMobileLayout showHeader={false} showNav={false}>
       {/* Header */}
       <div className="bg-primary text-primary-foreground px-4 py-3 sticky top-0 z-50">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-1">
+          <button onClick={() => navigate(-1)} className="p-1" aria-label="Volver">
             <ChevronLeft className="h-6 w-6" />
           </button>
-          <h1 className="text-lg font-semibold">Métodos de Pago</h1>
+          <h1 className="text-lg font-semibold">Cuentas para pagar</h1>
         </div>
       </div>
 
       <div className="px-4 py-4 space-y-4">
-        {/* Payment Methods */}
-        <div className="space-y-3">
-          {metodosPago.map((metodo) => {
-            const Icon = metodo.icon;
-            const isSelected = selectedMethod === metodo.id;
-            
-            return (
-              <button
-                key={metodo.id}
-                onClick={() => setSelectedMethod(metodo.id)}
-                className={`w-full bg-card rounded-xl border p-4 flex items-center gap-4 transition-colors ${
-                  isSelected ? "border-primary bg-primary/5" : "border-border"
-                }`}
-              >
-                <div className={`h-12 w-12 rounded-full flex items-center justify-center ${
-                  isSelected ? "bg-primary/10" : "bg-muted"
-                }`}>
-                  <Icon className={`h-6 w-6 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
-                </div>
-                <div className="flex-1 text-left">
-                  <p className="font-medium">{metodo.name}</p>
-                  <p className="text-sm text-muted-foreground">{metodo.description}</p>
-                </div>
-                {isSelected && (
-                  <div className="h-6 w-6 rounded-full bg-primary flex items-center justify-center">
-                    <Check className="h-4 w-4 text-white" />
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Info */}
-        <div className="bg-muted rounded-xl p-4">
-          <h3 className="font-semibold mb-2">Información</h3>
-          <p className="text-sm text-muted-foreground">
-            Selecciona tu método de pago preferido. Este será el método sugerido 
-            al momento de realizar un pedido, pero siempre podrás cambiarlo.
+        <div className="rounded-xl bg-muted p-4">
+          <p className="text-sm">
+            Estas son las cuentas oficiales de <strong>{empresaActiva?.nombre || "la empresa"}</strong>
+            {empresaActiva?.rif ? ` (RIF ${empresaActiva.rif})` : ""}. Paga solo a estas cuentas.
           </p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Después de pagar, declara el pago indicando a qué cuenta pagaste, la referencia y el comprobante.
+          </p>
+          <Link to="/portal/pagos" className="mt-3 block">
+            <Button variant="outline" className="w-full gap-2">
+              <Receipt className="h-4 w-4" />
+              Declarar un pago
+            </Button>
+          </Link>
         </div>
 
-        {/* Bank Info */}
-        <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="font-semibold mb-3">Datos para transferencia</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Banco</span>
-              <span className="font-medium">Banco Nacional</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Cuenta</span>
-              <span className="font-medium font-mono">0102-0345-6789-0123</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">RIF</span>
-              <span className="font-medium">J-12345678-9</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Titular</span>
-              <span className="font-medium">GUDS Distribuidora C.A.</span>
-            </div>
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
-        </div>
-
-        {/* Pago Móvil Info */}
-        <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="font-semibold mb-3">Datos para Pago Móvil</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Teléfono</span>
-              <span className="font-medium font-mono">0414-123-4567</span>
+        ) : error ? (
+          <p className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+            No pudimos cargar las cuentas. Intenta de nuevo en unos minutos.
+          </p>
+        ) : cuentas.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="h-16 w-16 rounded-full bg-muted mx-auto flex items-center justify-center mb-4">
+              <Landmark className="h-8 w-8 text-muted-foreground" />
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Banco</span>
-              <span className="font-medium">0102 - Banco Nacional</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Cédula/RIF</span>
-              <span className="font-medium">J-12345678-9</span>
-            </div>
+            <p className="text-muted-foreground">
+              Todavía no hay cuentas publicadas para recibir pagos. Consulta con tu ejecutivo de cuenta.
+            </p>
           </div>
-        </div>
+        ) : (
+          grupos.map((g) => (
+            <section key={g.titulo} className="space-y-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{g.titulo}</h2>
+              {g.lista.map((c) => (
+                <article key={c.id} className="bg-card rounded-xl border border-border p-4" data-testid="cuenta-pago">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Landmark className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{c.nombre}</h3>
+                        <p className="text-xs text-muted-foreground">
+                          {metodosDeCuenta(c).map((m) => METODO_LABEL[m]).join(" · ")}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="shrink-0">{c.moneda === "USD" ? "USD" : "Bs."}</Badge>
+                  </div>
+                  <CuentaPagoDatos cuenta={c} className="mt-2" />
+                </article>
+              ))}
+            </section>
+          ))
+        )}
       </div>
     </PortalMobileLayout>
   );

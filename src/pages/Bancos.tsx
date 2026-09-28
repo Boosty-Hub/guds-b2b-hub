@@ -41,6 +41,14 @@ interface Banco {
   documento: string | null;
   activo: boolean;
   metodos: string[] | null;
+  banco_nombre?: string | null;
+  visible_portal?: boolean;
+  pago_movil_telefono?: string | null;
+  pago_movil_documento?: string | null;
+  pago_movil_banco?: string | null;
+  zelle_correo?: string | null;
+  zelle_titular?: string | null;
+  instrucciones?: string | null;
   saldo_odoo?: number | null;
   saldo_extracto?: number | null;
   cuenta_compartida?: boolean;
@@ -54,7 +62,7 @@ interface PorIdentificar { id: string; monto: number; referencia: string | null;
 const saldoDe = (b: Banco) => (b.odoo_id ? Number((b.cuenta_compartida ? b.saldo_extracto : b.saldo_odoo) ?? 0) : Number(b.saldo || 0));
 
 const metodoLabel: Record<string, string> = {
-  transferencia: "Transferencia", efectivo: "Efectivo", pago_movil: "Pago Móvil", credito: "Crédito", tarjeta: "Tarjeta",
+  transferencia: "Transferencia", efectivo: "Efectivo", pago_movil: "Pago Móvil", credito: "Crédito", tarjeta: "Tarjeta", zelle: "Zelle",
 };
 
 const METODOS = [
@@ -69,7 +77,10 @@ const fmtMoneda = (n: number, moneda: string) =>
     ? `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : `Bs. ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const emptyForm = { nombre: "", metodos: ["transferencia"], moneda: "USD", numero_cuenta: "", titular: "", documento: "", activo: true };
+const emptyForm = {
+  nombre: "", metodos: ["transferencia"], moneda: "USD", numero_cuenta: "", titular: "", documento: "", activo: true,
+  visible_portal: true, pago_movil_telefono: "", pago_movil_documento: "", pago_movil_banco: "", zelle_correo: "", zelle_titular: "", instrucciones: "",
+};
 
 const Bancos = () => {
   const { toast } = useToast();
@@ -113,6 +124,8 @@ const Bancos = () => {
     setForm({
       nombre: b.nombre, metodos: b.metodos && b.metodos.length ? b.metodos : [b.metodo_pago], moneda: b.moneda,
       numero_cuenta: b.numero_cuenta || "", titular: b.titular || "", documento: b.documento || "", activo: b.activo,
+      visible_portal: !!b.visible_portal, pago_movil_telefono: b.pago_movil_telefono || "", pago_movil_documento: b.pago_movil_documento || "",
+      pago_movil_banco: b.pago_movil_banco || "", zelle_correo: b.zelle_correo || "", zelle_titular: b.zelle_titular || "", instrucciones: b.instrucciones || "",
     });
     setFormOpen(true);
   };
@@ -120,16 +133,25 @@ const Bancos = () => {
   const save = async () => {
     if (!form.nombre.trim()) { toast({ title: "Falta el nombre", variant: "destructive" }); return; }
     if (form.metodos.length === 0) { toast({ title: "Elegí al menos un método de pago", variant: "destructive" }); return; }
+    const pmTel = form.pago_movil_telefono.trim(), zelle = form.zelle_correo.trim();
+    if (pmTel && (!form.pago_movil_documento.trim() || !/^\d{4}$/.test(form.pago_movil_banco.trim()))) {
+      toast({ title: "Pago móvil incompleto", description: "Indica la cédula o RIF y el código de 4 dígitos del banco.", variant: "destructive" }); return;
+    }
+    if (zelle && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(zelle)) { toast({ title: "Correo de Zelle inválido", variant: "destructive" }); return; }
     setSaving(true);
+    // Pago móvil y Zelle se ofrecen al cliente solo si la cuenta tiene sus datos
+    const metodos = [...new Set([...form.metodos.filter((m) => m !== "pago_movil" && m !== "zelle"), ...(pmTel ? ["pago_movil"] : []), ...(zelle ? ["zelle"] : [])])];
+    const paraCliente = {
+      metodo_pago: metodos[0] || "transferencia", metodos, visible_portal: form.visible_portal,
+      pago_movil_telefono: pmTel || null, pago_movil_documento: pmTel ? form.pago_movil_documento.trim() : null, pago_movil_banco: pmTel ? form.pago_movil_banco.trim() : null,
+      zelle_correo: zelle || null, zelle_titular: zelle ? form.zelle_titular.trim() || null : null, instrucciones: form.instrucciones.trim() || null,
+    };
     const payload = {
-      nombre: form.nombre.trim(), metodo_pago: form.metodos[0], metodos: form.metodos, moneda: form.moneda,
+      ...paraCliente, nombre: form.nombre.trim(), moneda: form.moneda,
       numero_cuenta: form.numero_cuenta || null, titular: form.titular || null, documento: form.documento || null, activo: form.activo,
     };
-    // Banco de Odoo: nombre, moneda y estado vienen de Odoo; GUDS administra métodos y datos para el cliente
-    const propios = {
-      metodo_pago: payload.metodo_pago, metodos: payload.metodos, numero_cuenta: payload.numero_cuenta,
-      titular: payload.titular, documento: payload.documento,
-    };
+    // Banco de Odoo: nombre, moneda, estado, número, banco, titular y RIF vienen de Odoo; GUDS administra métodos y datos para el cliente
+    const propios = paraCliente;
     const { error } = editing
       ? await supabase.from("bancos").update(editing.odoo_id ? propios : payload).eq("id", editing.id)
       : await supabase.from("bancos").insert(payload);
@@ -216,7 +238,10 @@ const Bancos = () => {
                   <TableCell className="text-muted-foreground">
                     <span className="block max-w-[200px] truncate" title={b.titular || undefined}>{b.titular || "—"}</span>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap"><Badge variant={b.activo ? "default" : "outline"}>{b.activo ? "Activo" : "Inactivo"}</Badge></TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <Badge variant={b.activo ? "default" : "outline"}>{b.activo ? "Activo" : "Inactivo"}</Badge>
+                    {b.visible_portal && <Badge variant="outline" className="ml-1 px-1.5 py-0 text-[11px] font-normal" title="Se muestra a clientes y vendedores como cuenta donde pagar">Portal</Badge>}
+                  </TableCell>
                   <TableCell className="whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end gap-1">
                       <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" onClick={() => openEdit(b)}><Pencil className="h-3.5 w-3.5" /></Button>
@@ -254,7 +279,7 @@ const Bancos = () => {
       )}
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader><DialogTitle className="flex items-center gap-2">{editing ? "Editar banco" : "Nuevo banco"} {!!editing?.odoo_id && <OdooBadge />}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-3 py-2">
             <div className="col-span-2"><Label className="flex items-center gap-1.5">Nombre del banco / cuenta {!!editing?.odoo_id && <OdooBadge />}</Label>
@@ -284,12 +309,44 @@ const Bancos = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div className="col-span-2"><Label>Número de cuenta / identificador</Label>
-              <Input value={form.numero_cuenta} onChange={(e) => setForm(f => ({ ...f, numero_cuenta: e.target.value }))} placeholder="0105-… o correo Zelle" /></div>
-            <div><Label>Titular</Label>
-              <Input value={form.titular} onChange={(e) => setForm(f => ({ ...f, titular: e.target.value }))} /></div>
-            <div><Label>Documento (RIF/Cédula)</Label>
-              <Input value={form.documento} onChange={(e) => setForm(f => ({ ...f, documento: e.target.value }))} /></div>
+            {!!editing?.banco_nombre && (
+              <div className="col-span-2"><Label className="flex items-center gap-1.5">Banco <OdooBadge /></Label>
+                <Input value={editing.banco_nombre} disabled /></div>
+            )}
+            <div className="col-span-2"><Label className="flex items-center gap-1.5">Número de cuenta {!!editing?.odoo_id && <OdooBadge />}</Label>
+              <Input value={form.numero_cuenta} disabled={!!editing?.odoo_id} onChange={(e) => setForm(f => ({ ...f, numero_cuenta: e.target.value }))} placeholder="0105-…" /></div>
+            <div><Label className="flex items-center gap-1.5">Titular {!!editing?.odoo_id && <OdooBadge />}</Label>
+              <Input value={form.titular} disabled={!!editing?.odoo_id} onChange={(e) => setForm(f => ({ ...f, titular: e.target.value }))} /></div>
+            <div><Label className="flex items-center gap-1.5">RIF / cédula {!!editing?.odoo_id && <OdooBadge />}</Label>
+              <Input value={form.documento} disabled={!!editing?.odoo_id} onChange={(e) => setForm(f => ({ ...f, documento: e.target.value }))} /></div>
+            {form.moneda === "BS" ? (
+              <fieldset className="col-span-2 grid grid-cols-3 gap-2 rounded-lg border p-3">
+                <legend className="px-1 text-xs font-medium text-muted-foreground">Pago móvil (opcional)</legend>
+                <div><Label htmlFor="pm-tel" className="text-xs">Teléfono</Label>
+                  <Input id="pm-tel" value={form.pago_movil_telefono} onChange={(e) => setForm(f => ({ ...f, pago_movil_telefono: e.target.value }))} placeholder="0414-0000000" /></div>
+                <div><Label htmlFor="pm-doc" className="text-xs">Cédula / RIF</Label>
+                  <Input id="pm-doc" value={form.pago_movil_documento} onChange={(e) => setForm(f => ({ ...f, pago_movil_documento: e.target.value }))} placeholder="J-00000000-0" /></div>
+                <div><Label htmlFor="pm-banco" className="text-xs">Código del banco</Label>
+                  <Input id="pm-banco" inputMode="numeric" maxLength={4} value={form.pago_movil_banco} onChange={(e) => setForm(f => ({ ...f, pago_movil_banco: e.target.value.replace(/\D/g, "") }))} placeholder="0134" /></div>
+              </fieldset>
+            ) : (
+              <fieldset className="col-span-2 grid grid-cols-2 gap-2 rounded-lg border p-3">
+                <legend className="px-1 text-xs font-medium text-muted-foreground">Zelle (opcional, cuentas de EE. UU.)</legend>
+                <div><Label htmlFor="zelle-correo" className="text-xs">Correo registrado en el banco</Label>
+                  <Input id="zelle-correo" type="email" value={form.zelle_correo} onChange={(e) => setForm(f => ({ ...f, zelle_correo: e.target.value }))} /></div>
+                <div><Label htmlFor="zelle-titular" className="text-xs">Nombre que ve quien paga</Label>
+                  <Input id="zelle-titular" value={form.zelle_titular} onChange={(e) => setForm(f => ({ ...f, zelle_titular: e.target.value }))} /></div>
+              </fieldset>
+            )}
+            <div className="col-span-2"><Label htmlFor="banco-instrucciones">Instrucciones para el cliente (opcional)</Label>
+              <Input id="banco-instrucciones" value={form.instrucciones} onChange={(e) => setForm(f => ({ ...f, instrucciones: e.target.value }))} placeholder="Ej. Indica el número de factura en el concepto" /></div>
+            <div className="col-span-2 flex items-center justify-between rounded-lg border border-border p-3">
+              <Label htmlFor="banco-portal" className="cursor-pointer">
+                Publicar a clientes y vendedores
+                <span className="block text-xs font-normal text-muted-foreground">Aparece en "Cómo pagar" y al declarar un pago.</span>
+              </Label>
+              <Switch id="banco-portal" checked={form.visible_portal} onCheckedChange={(v) => setForm(f => ({ ...f, visible_portal: v }))} />
+            </div>
             <div className="flex items-center justify-between col-span-2 rounded-lg border border-border p-3">
               <Label className="flex cursor-pointer items-center gap-1.5">Activo {!!editing?.odoo_id && <OdooBadge />}</Label>
               <Switch disabled={!!editing?.odoo_id} checked={form.activo} onCheckedChange={(v) => setForm(f => ({ ...f, activo: v }))} />

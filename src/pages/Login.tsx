@@ -37,7 +37,7 @@ const Login = () => {
       return;
     }
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/login`,
+      redirectTo: `${window.location.origin}/restablecer-clave`,
     });
     if (error) {
       toast({ title: "No se pudo enviar", description: error.message, variant: "destructive" });

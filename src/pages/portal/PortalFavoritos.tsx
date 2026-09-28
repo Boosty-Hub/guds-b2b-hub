@@ -4,45 +4,41 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Heart, 
-  Plus, 
-  Minus, 
+import {
+  Heart,
+  Plus,
+  Minus,
   Trash2,
   Loader2,
-  ShoppingBag,
-  Package
+  ShoppingBag
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { supabase, Producto } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { ProductImage } from "@/components/portal/ProductImage";
+import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
 import { useToast } from "@/hooks/use-toast";
+import { useCarritoPortal, type ProductoConEmpaques } from "@/hooks/useCarritoPortal";
 
 interface FavoritoDB {
   id: string;
   producto_id: string;
   created_at: string;
-  producto: Producto;
-}
-
-interface CartItem {
-  id: string;
-  nombre: string;
-  precio: number;
-  unidad: string;
-  imagen: string;
-  quantity: number;
+  producto: ProductoConEmpaques | null;
 }
 
 const PortalFavoritos = () => {
   const { formatPrice } = useCurrency();
   const { user } = useAuth();
   const { toast } = useToast();
-  
+
   const [favoritos, setFavoritos] = useState<FavoritoDB[]>([]);
   const [loading, setLoading] = useState(true);
-  const [cart, setCart] = useState<CartItem[]>([]);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  // Mismo carrito que el catálogo: agrega a la tabla carrito con precio_efectivo y tope de disponible
+  const {
+    cart, agregar, agregarConEmpaque, cambiarCantidad, cantidadDe, disponibleDe,
+    empaqueProducto, empaquePrecios, cerrarEmpaque,
+  } = useCarritoPortal();
 
   useEffect(() => {
     if (user?.id) {
@@ -52,76 +48,41 @@ const PortalFavoritos = () => {
 
   const fetchFavoritos = async () => {
     setLoading(true);
-    
+
     const { data } = await supabase
       .from('favoritos')
       .select(`
         *,
-        producto:productos(*)
+        producto:productos(*, producto_empaques(*, tipo_empaque:tipos_empaque(*)))
       `)
       .eq('usuario_id', user?.id)
       .order('created_at', { ascending: false });
-    
-    if (data) setFavoritos(data);
+
+    if (data) setFavoritos(data as FavoritoDB[]);
     setLoading(false);
   };
 
   const removeFavorito = async (favoritoId: string) => {
     setRemovingId(favoritoId);
-    
+
     const { error } = await supabase
       .from('favoritos')
       .delete()
       .eq('id', favoritoId);
-    
+
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
       setFavoritos(prev => prev.filter(f => f.id !== favoritoId));
       toast({ title: "Eliminado", description: "Producto eliminado de favoritos" });
     }
-    
+
     setRemovingId(null);
   };
 
-  const addToCart = (product: Producto) => {
-    setCart((prev) => {
-      const existing = prev.find((item) => item.id === product.id);
-      if (existing) {
-        return prev.map((item) =>
-          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-        );
-      }
-      const precio = product.en_oferta && product.precio_oferta ? product.precio_oferta : product.precio_base;
-      return [...prev, { 
-        id: product.id, 
-        nombre: product.nombre, 
-        precio: precio,
-        unidad: product.unidad,
-        imagen: product.imagen_emoji || '📦',
-        quantity: 1 
-      }];
-    });
-    toast({ title: "Agregado", description: `${product.nombre} agregado al carrito` });
-  };
-
-  const updateQuantity = (id: string, delta: number) => {
-    setCart((prev) =>
-      prev
-        .map((item) =>
-          item.id === id ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item
-        )
-        .filter((item) => item.quantity > 0)
-    );
-  };
-
-  const getCartQuantity = (productId: string) => {
-    const item = cart.find((i) => i.id === productId);
-    return item?.quantity || 0;
-  };
-
-  const cartTotal = cart.reduce((sum, item) => sum + item.precio * item.quantity, 0);
-  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  // Total del carrito real (precio guardado al agregar = precio_efectivo)
+  const cartTotal = cart.reduce((sum, item) => sum + Number(item.precio_unitario ?? 0) * item.cantidad, 0);
+  const cartCount = cart.reduce((sum, item) => sum + item.cantidad, 0);
 
   return (
     <PortalMobileLayout title="Mis Favoritos">
@@ -167,12 +128,12 @@ const PortalFavoritos = () => {
             {favoritos.map((favorito) => {
               const product = favorito.producto;
               if (!product) return null;
-              
-              const precio = product.en_oferta && product.precio_oferta 
-                ? product.precio_oferta 
+
+              const precio = product.en_oferta && product.precio_oferta
+                ? product.precio_oferta
                 : product.precio_base;
-              const quantity = getCartQuantity(product.id);
-              const inStock = product.controla_stock === false || Number(product.stock_disponible ?? product.stock_actual) > 0;
+              const quantity = cantidadDe(product.id);
+              const inStock = disponibleDe(product) > 0;
 
               return (
                 <div
@@ -183,6 +144,7 @@ const PortalFavoritos = () => {
                   <button
                     onClick={() => removeFavorito(favorito.id)}
                     disabled={removingId === favorito.id}
+                    aria-label={`Quitar ${product.nombre} de favoritos`}
                     className="absolute top-3 right-3 p-2 rounded-full bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
                   >
                     {removingId === favorito.id ? (
@@ -195,7 +157,7 @@ const PortalFavoritos = () => {
                   <div className="flex gap-4">
                     {/* Product Image */}
                     <div className="relative">
-                      <ProductImage 
+                      <ProductImage
                         imageUrl={product.imagen_url}
                         emoji={product.imagen_emoji}
                         alt={product.nombre}
@@ -216,7 +178,7 @@ const PortalFavoritos = () => {
                       <p className="text-xs text-muted-foreground mb-2">
                         por {product.unidad}
                       </p>
-                      
+
                       <div className="flex items-center gap-2">
                         <p className="text-primary font-bold text-lg">{formatPrice(precio)}</p>
                         {product.en_oferta && product.precio_oferta && (
@@ -239,7 +201,7 @@ const PortalFavoritos = () => {
                       {quantity === 0 ? (
                         <Button
                           className="w-full gap-2"
-                          onClick={() => addToCart(product)}
+                          onClick={() => agregar(product)}
                         >
                           <Plus className="h-4 w-4" />
                           Agregar al carrito
@@ -251,8 +213,9 @@ const PortalFavoritos = () => {
                             <Button
                               size="sm"
                               variant="ghost"
+                              aria-label={`Quitar una unidad de ${product.nombre}`}
                               className="h-9 w-9 p-0 rounded-full text-white hover:bg-white/20"
-                              onClick={() => updateQuantity(product.id, -1)}
+                              onClick={() => cambiarCantidad(product, -1)}
                             >
                               <Minus className="h-4 w-4" />
                             </Button>
@@ -260,8 +223,9 @@ const PortalFavoritos = () => {
                             <Button
                               size="sm"
                               variant="ghost"
+                              aria-label={`Agregar una unidad de ${product.nombre}`}
                               className="h-9 w-9 p-0 rounded-full text-white hover:bg-white/20"
-                              onClick={() => updateQuantity(product.id, 1)}
+                              onClick={() => cambiarCantidad(product, 1)}
                             >
                               <Plus className="h-4 w-4" />
                             </Button>
@@ -277,7 +241,7 @@ const PortalFavoritos = () => {
         )}
       </div>
 
-      {/* Floating Cart Button */}
+      {/* Floating Cart Button (carrito real, el mismo del catálogo y el checkout) */}
       {cartCount > 0 && (
         <Link to="/portal/carrito">
           <div className="fixed bottom-24 left-4 right-4 max-w-md mx-auto">
@@ -293,6 +257,9 @@ const PortalFavoritos = () => {
           </div>
         </Link>
       )}
+
+      {/* Elegir empaque (productos con más de un empaque) */}
+      <SelectorEmpaqueDialog producto={empaqueProducto} precios={empaquePrecios} onElegir={agregarConEmpaque} onCerrar={cerrarEmpaque} />
     </PortalMobileLayout>
   );
 };

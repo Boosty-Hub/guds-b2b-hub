@@ -23,6 +23,7 @@ import { useSearchParams } from "react-router-dom";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
+import { useResumenVendedor, mesDe } from "@/components/vendedor/resumen";
 
 interface Orden { id: string; numero: string; total: number; estado: string; created_at: string; fecha_pedido: string | null; odoo_id: number | null;
   aprobacion: "pendiente" | "aprobada" | "rechazada" | null; rechazo_motivo: string | null; cliente?: { nombre_negocio: string } | null; }
@@ -57,15 +58,22 @@ const VendedorPedidos = () => {
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get("q") || "");
   const [estadoFiltro, setEstadoFiltro] = useState<"todos" | "abiertos">("todos");
+  // Contadores desde resumen_vendedor() (misma fuente que el Dashboard y Metas)
+  const { resumen, recargar: recargarResumen } = useResumenVendedor();
   // El buscador global abre esta página con ?q=
   useEffect(() => { const v = params.get("q"); if (v !== null) setQ(v); }, [params]);
 
   const fetchData = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
+    // Todos sus clientes asignados (activos o no): la lista de pedidos se filtra explícitamente por su cartera,
+    // además de lo que ya limita RLS (los pedidos que tomó él aunque el cliente ya no sea suyo también cuentan)
+    const { data: asignados } = await supabase.from("clientes").select("id").eq("vendedor_asignado_id", user.id);
+    const ids = ((asignados ?? []) as { id: string }[]).map((c) => c.id);
+    const filtro = ids.length ? `vendedor_id.eq.${user.id},cliente_id.in.(${ids.join(",")})` : `vendedor_id.eq.${user.id}`;
     const [oRes, cRes, pRes] = await Promise.all([
-      supabase.from("ordenes").select("id, numero, total, estado, created_at, fecha_pedido, odoo_id, aprobacion, rechazo_motivo, cliente:clientes(nombre_negocio)").order("created_at", { ascending: false }),
-      // Solo los clientes asignados a este vendedor
+      supabase.from("ordenes").select("id, numero, total, estado, created_at, fecha_pedido, odoo_id, aprobacion, rechazo_motivo, cliente:clientes(nombre_negocio)").or(filtro).order("created_at", { ascending: false }),
+      // Solo los clientes activos asignados a este vendedor
       supabase.from("clientes").select("id, nombre_negocio").eq("activo", true).eq("vendedor_asignado_id", user.id).order("nombre_negocio"),
       supabase.from("productos").select("id, nombre, precio_base, en_oferta, precio_oferta, stock_disponible, controla_stock, producto_empaques(id, tipo_empaque_id, precio_empaque, activo, tipo_empaque:tipos_empaque(id, nombre, unidades))").eq("activo", true).order("nombre"),
     ]);
@@ -179,31 +187,31 @@ const VendedorPedidos = () => {
     const row = Array.isArray(data) ? data[0] : data;
     toast({ title: "Pedido creado", description: `${row?.numero ?? ""} · ${formatPrice(Number(row?.total || 0))}` });
     setOpen(false); resetForm();
-    fetchData();
+    fetchData(); recargarResumen();
   };
 
   const fmt = (s: string) => new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
-  const ABIERTOS = ["pendiente", "confirmado", "procesando", "enviado", "en_camino"];
-  const porAprobar = ordenes.filter((o) => o.aprobacion === "pendiente").length;
+  // "En curso" con la misma definición que resumen_vendedor(): estado abierto y no rechazado
+  const ABIERTOS = ["pendiente", "confirmado", "procesando", "enviado"];
+  const abierto = (o: Orden) => ABIERTOS.includes(o.estado) && o.aprobacion !== "rechazada";
   const texto = q.trim().toLowerCase();
-  const filtradas = ordenes.filter((o) => (estadoFiltro === "todos" || ABIERTOS.includes(o.estado)) &&
+  const filtradas = ordenes.filter((o) => (estadoFiltro === "todos" || abierto(o)) &&
     (!texto || o.numero.toLowerCase().includes(texto) || (o.cliente?.nombre_negocio || "").toLowerCase().includes(texto)));
   const fechaDe = (o: Orden) => o.fecha_pedido || o.created_at;
   const { ordenadas, orden, alternar } = useOrdenTabla(filtradas, {
     numero: (o) => o.numero, cliente: (o) => o.cliente?.nombre_negocio, fecha: (o) => fechaDe(o), total: (o) => Number(o.total || 0), estado: (o) => o.estado,
   });
   const pagination = usePagination(ordenadas, 50);
-  const inicioMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-  const delMes = ordenes.filter((o) => fechaDe(o) >= inicioMes && o.estado !== "cancelado");
-  const abiertos = ordenes.filter((o) => ABIERTOS.includes(o.estado));
+  const ped = resumen?.pedidos;
 
   return (
     <VendedorLayout title="Pedidos">
       <KpiStrip items={[
-        { label: "Pedidos de mis clientes", valor: ordenes.length, tono: "primario", onClick: () => setEstadoFiltro("todos"), activo: estadoFiltro === "todos" },
-        { label: "En curso", valor: abiertos.length, detalle: porAprobar ? `${porAprobar} por aprobar` : undefined, tono: abiertos.length ? "alerta" : "normal", onClick: () => setEstadoFiltro("abiertos"), activo: estadoFiltro === "abiertos" },
-        { label: "Vendido este mes", valor: formatPrice(delMes.reduce((s, o) => s + Number(o.total || 0), 0)), detalle: `${delMes.length} pedidos`, tono: "positivo" },
+        { label: "Pedidos de mis clientes", valor: ped?.total ?? "—", tono: "primario", onClick: () => setEstadoFiltro("todos"), activo: estadoFiltro === "todos" },
+        { label: "En curso", valor: ped?.abiertos ?? "—", detalle: ped?.por_aprobar ? `${ped.por_aprobar} por aprobar` : undefined, tono: ped?.abiertos ? "alerta" : "normal", onClick: () => setEstadoFiltro("abiertos"), activo: estadoFiltro === "abiertos" },
+        { label: `Pedidos de ${mesDe(resumen)}`, valor: ped ? formatPrice(ped.mes_monto) : "—", detalle: ped ? `${ped.mes_n} pedidos` : undefined, tono: "positivo",
+          titulo: "Pedidos no cancelados del mes. Lo facturado está en Dashboard y Metas." },
       ]} />
 
       <BarraLista busqueda={q} onBusqueda={setQ} placeholder="Buscar pedido o cliente..."

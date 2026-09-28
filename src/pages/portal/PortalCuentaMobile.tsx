@@ -32,7 +32,7 @@ const menuItems = [
     items: [
       { icon: User, label: "Datos personales", path: "/portal/cuenta/perfil", badge: null },
       { icon: MapPin, label: "Direcciones de entrega", path: "/portal/cuenta/direcciones", badge: null },
-      { icon: CreditCard, label: "Métodos de pago", path: "/portal/cuenta/pagos", badge: null },
+      { icon: CreditCard, label: "Cuentas para pagar", path: "/portal/cuenta/pagos", badge: null },
     ]
   },
   {
@@ -56,7 +56,7 @@ const menuItems = [
     title: "Ayuda",
     items: [
       { icon: HelpCircle, label: "Centro de ayuda", path: "/portal/ayuda", badge: null },
-      { icon: FileText, label: "Términos y condiciones", path: "/portal/terminos", badge: null },
+      { icon: FileText, label: "Términos y condiciones", path: "/terminos", badge: null },
       { icon: Trash2, label: "Eliminar cuenta", path: "/portal/cuenta/eliminar", badge: null },
     ]
   },

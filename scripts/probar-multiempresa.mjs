@@ -79,7 +79,7 @@ await caso('No se mezcla: orden de GUDS con cliente de Quirutec', 'mezclar empre
 await caso('Orden nueva en GUDS numerada GUDS-ORD-…', (r) => /^GUDS-ORD-\d{5}$/.test(r.numero),
   como({ empresa: guds.id }, `with x as (insert into ordenes (cliente_id, subtotal, total, estado) values ('${cliGuds}', 0, 0, 'pendiente') returning numero) select row_to_json(x)::text from x`));
 await caso('Numeración de Quirutec QRT-ORD-…', (r) => /^QRT-ORD-\d{5}$/.test(r.numero),
-  como({ empresa: qrt.id }, `select row_to_json(t)::text from (select public.generar_numero_orden() numero) t`));
+  como({ rol: 'postgres', empresa: qrt.id }, `select row_to_json(t)::text from (select public.generar_numero_orden() numero) t`));
 await caso('Ítems heredan la empresa de la orden', (r) => r.empresa_id === guds.id,
   como({ empresa: guds.id }, `with o as (insert into ordenes (cliente_id, subtotal, total, estado) values ('${cliGuds}', 0, 0, 'pendiente') returning id),
     i as (insert into orden_items (orden_id, producto_id, cantidad, precio_unitario, subtotal) select o.id, '${prodGuds}', 1, 1, 1 from o returning empresa_id)
@@ -187,12 +187,13 @@ if (salida && entrada) {
     como({ empresa: guds.id, previo }, `select public.conciliar_extracto_automatico('00000000-0000-0000-0000-00000000e001')::text`));
 }
 
+const bancoGuds = (await sql(`select id from bancos where empresa_id = '${guds.id}' limit 1`))[0].id;
 if (vendGuds) {
   await caso('Tesorería: un vendedor (sin módulo bancos) no ve extractos', (r) => r.n === 0, como({ uid: vendGuds, empresa: guds.id }, cuenta('extracto_odoo_lineas')));
   await caso('Seguridad: un vendedor no edita almacenes ni su cliente', (r, err) => r === null || /row-level|permission/.test(err || ''),
     como({ uid: vendGuds, empresa: guds.id }, upd('almacenes', `cliente_id = null`, almConsig)));
   await caso('Seguridad: un vendedor no registra movimientos bancarios', 'row-level security',
-    como({ uid: vendGuds, empresa: guds.id }, `with x as (insert into movimientos_bancarios (banco_id, tipo, monto) select id, 'entrada', 1 from bancos where empresa_id = '${guds.id}' limit 1 returning id) select row_to_json(x)::text from x`));
+    como({ uid: vendGuds, empresa: guds.id }, `with x as (insert into movimientos_bancarios (banco_id, tipo, monto) values ('${bancoGuds}', 'entrada', 1) returning id) select row_to_json(x)::text from x`));
   await caso('Seguridad: un vendedor no cambia existencias', (r, err) => r === null || /row-level|permission/.test(err || ''),
     como({ uid: vendGuds, empresa: guds.id }, `with x as (update inventario_almacen set cantidad = 0 where empresa_id = '${guds.id}' returning id) select row_to_json(x)::text from (select * from x limit 1) x`));
 }
@@ -200,20 +201,20 @@ if (cliUser) {
   await caso('Seguridad: un cliente del portal no edita almacenes', (r, err) => r === null || /row-level|permission/.test(err || ''),
     como({ uid: cliUser, empresa: guds.id }, upd('almacenes', `cliente_id = null`, almConsig)));
   await caso('Seguridad: un cliente del portal no registra movimientos bancarios', 'row-level security',
-    como({ uid: cliUser, empresa: guds.id }, `with x as (insert into movimientos_bancarios (banco_id, tipo, monto) select id, 'entrada', 1 from bancos where empresa_id = '${guds.id}' limit 1 returning id) select row_to_json(x)::text from x`));
+    como({ uid: cliUser, empresa: guds.id }, `with x as (insert into movimientos_bancarios (banco_id, tipo, monto) values ('${bancoGuds}', 'entrada', 1) returning id) select row_to_json(x)::text from x`));
 }
 
 // ── Fase 8: crédito, stock comprometido, clientes en ambas empresas y acceso de contactos ──
 const cliSinLimite = (await sql(`select id from clientes where empresa_id = '${guds.id}' and coalesce(limite_credito, 0) = 0 limit 1`))[0].id;
 const cred = (sql1) => `select row_to_json(t)::text from (select 'ok' r from (select public.validar_credito('${cliSinLimite}', 100)) x) t`;
-await caso('Crédito: en modo abierto se compra a crédito aunque el límite sea 0', (r, err) => r?.r === 'ok' && !err, como(E, cred()));
+await caso('Crédito: en modo abierto se compra a crédito aunque el límite sea 0', (r, err) => r?.r === 'ok' && !err, como({ ...E, rol: 'postgres' }, cred()));
 await caso('Crédito: en modo límite, sin límite aprobado no se compra a crédito', 'no tiene crédito aprobado',
-  como({ empresa: guds.id, previo: `update configuracion set valor = 'limite' where clave = 'credito_modo';` }, cred()));
+  como({ rol: 'postgres', empresa: guds.id, previo: `update configuracion set valor = 'limite' where clave = 'credito_modo';` }, cred()));
 const agotado = (await sql(`select id from productos where empresa_id = '${guds.id}' and controla_stock and stock_disponible = 0 and comprometido_odoo > 0 limit 1`))[0]?.id;
 const conStock = (await sql(`select id, comprometido_guds from productos where empresa_id = '${guds.id}' and controla_stock and stock_disponible > 100 and activo limit 1`))[0];
 if (agotado) {
   await caso('Stock: no se pide sobre lo comprometido (disponible 0)', 'Stock insuficiente',
-    como(E, `select row_to_json(t)::text from (select public.validar_stock_pedido('[{"producto_id":"${agotado}","cantidad":1}]'::jsonb)) t`));
+    como({ ...E, rol: 'postgres' }, `select row_to_json(t)::text from (select public.validar_stock_pedido('[{"producto_id":"${agotado}","cantidad":1}]'::jsonb)) t`));
 }
 const claimsAdmin = JSON.stringify({ sub: admin, role: 'authenticated' }).replace(/'/g, "''");
 const hdr = (emp) => JSON.stringify({ 'x-empresa-id': emp }).replace(/'/g, "''");
@@ -284,9 +285,13 @@ await caso('Buscador admin: con contexto por defecto conserva los enlaces de adm
 
 // ── Reportes (18u): permiso "reportes", empresa activa, sin saldos iniciales ni ND ──
 {
-  const suma = async (emp) => Number((await sql(`select coalesce(round(sum(case when total<>0 then subtotal*total_usd/total end),2),0) n from facturas
+  const suma = async (emp) => Number((await sql(`with rev as (select fa.id f, nc.id n from facturas nc join facturas fa on fa.id = nc.factura_origen_id
+      where nc.tipo = 'nota_credito' and fa.tipo = 'factura' and nc.estado = 'posted' and fa.estado = 'posted'
+        and fa.moneda is not distinct from nc.moneda and abs(abs(nc.total) - abs(fa.total)) < 0.01)
+    select coalesce(round(sum(case when total<>0 then subtotal*total_usd/total end),2),0) n from facturas
     where estado='posted' and tipo in ('factura','nota_credito') and not es_saldo_inicial and not coalesce(es_nota_debito,false)
-      and fecha_emision between '2026-08-01' and '2026-08-31' and empresa_id = '${emp}'`))[0].n);
+      and fecha_emision between '2026-08-01' and '2026-08-31' and empresa_id = '${emp}'
+      and id not in (select f from rev union select n from rev)`))[0].n);
   const [sg, sq] = [await suma(guds.id), await suma(qrt.id)];
   const rep = (emp) => como({ empresa: emp }, `select row_to_json(t)::text from (select round(sum(neto_usd),2) neto, count(*) filas
     from public.reporte_ventas('2026-08-01','2026-08-31','empresa')) t`);
@@ -345,6 +350,26 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
     await caso('Aprobación: rechazar cancela el pedido y libera el stock', (r) => r?.aprobacion === 'rechazada' && r?.estado === 'cancelado' && Number(r?.comp) === Number(prod.comprometido_guds) && r?.motivo === 'Sin disponibilidad',
       como({ empresa: guds.id, previo: `${previoVend} ${comoUsuario(admin)} perform public.rechazar_pedido(${idPend}, 'Sin disponibilidad');` },
         `select row_to_json(t)::text from (select aprobacion, estado::text estado, rechazo_motivo motivo, (select comprometido_guds from productos where id = '${prod.id}') comp from ordenes where id = ${idPend}) t`));
+
+    // ── Pedidos pendientes editables y envío del vendedor (19p) ──
+    await caso('Vendedor: su pedido no lleva envío automático', (r) => Number(r?.envio) === 0,
+      como({ empresa: guds.id, previo: previoVend }, `select row_to_json(t)::text from (select envio from ordenes where id = ${idPend}) t`));
+    const items5 = `'[{"producto_id":"${prod.id}","cantidad":5}]'::jsonb`;
+    await caso('Editar pendiente: el vendedor cambia la cantidad; se recalculan total y stock comprometido', (r) =>
+      Number(r?.comp) === Number(prod.comprometido_guds) + 5 && r?.ediciones === 1 && Number(r?.subtotal) > 0 && Number(r?.envio) === 12.5,
+      como({ empresa: guds.id, previo: `${previoVend} perform public.editar_pedido_pendiente(${idPend}, ${items5}, null, 12.5);` },
+        `select row_to_json(t)::text from (select subtotal, envio, ediciones, (select comprometido_guds from productos where id = '${prod.id}') comp from ordenes where id = ${idPend}) t`));
+    await caso('Editar pendiente: un pedido aprobado ya no se edita', 'Solo se editan pedidos pendientes',
+      como({ uid: vendGuds, empresa: guds.id, previo: `${previoVend} ${comoUsuario(admin)} perform public.aprobar_pedido(${idPend});` },
+        `select row_to_json(t)::text from public.editar_pedido_pendiente(${idPend}, ${items5}) t`));
+    const otroVend = (await sql(`select u.auth_id from usuarios u where u.role = 'vendedor' and u.activo and u.auth_id is not null and u.auth_id <> '${vendGuds}'
+      and not exists (select 1 from clientes c where c.vendedor_asignado_id = u.id and c.id = '${vend.cliente}') limit 1`))[0]?.auth_id;
+    if (otroVend) {
+      await caso('Editar pendiente: otro vendedor no puede editar el pedido', 'No puedes editar este pedido',
+        // El id se toma antes de cambiar de rol: el otro vendedor no ve el pedido (RLS), pero se prueba la validación de la función
+        como({ uid: otroVend, empresa: guds.id, previo: `${previoVend} perform set_config('guds.prueba_orden', ${idPend}::text, true);` },
+          `select row_to_json(t)::text from public.editar_pedido_pendiente(current_setting('guds.prueba_orden')::uuid, ${items5}) t`));
+    }
   }
 }
 
@@ -397,6 +422,75 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
     const [bk] = await sql(`select public from storage.buckets where id = 'evidencias-entrega'`);
     casos.push({ ok: bk && bk.public === false ? '✓' : '✗', caso: 'Evidencias de entrega en bucket privado', resultado: JSON.stringify(bk ?? null) });
   }
+}
+
+// ── Cuentas de pago, funciones internas y reversos (19l, 19o, 19q) ──
+{
+  if (vendGuds) {
+    await caso('Bancos: un vendedor no lee la tabla de bancos (saldos), solo cuentas_pago sin saldos', (r) => r?.bancos === 0 && r?.cuentas > 0 && r?.con_saldo === false,
+      como({ uid: vendGuds, empresa: guds.id }, `select row_to_json(t)::text from (select (select count(*) from bancos) bancos, (select count(*) from cuentas_pago) cuentas,
+        exists (select 1 from information_schema.columns where table_name = 'cuentas_pago' and column_name like 'saldo%') con_saldo) t`));
+  }
+  const oculta = (await sql(`select id from bancos where empresa_id = '${guds.id}' and not visible_portal limit 1`))[0]?.id;
+  if (vendGuds && oculta) {
+    const cliV = (await sql(`select c.id from clientes c join usuarios u on u.id = c.vendedor_asignado_id where u.auth_id = '${vendGuds}' and c.empresa_id = '${guds.id}' limit 1`))[0]?.id;
+    if (cliV) {
+      await caso('Pagos: no se declara un pago a una cuenta no publicada', 'no recibe pagos de clientes',
+        como({ uid: vendGuds, empresa: guds.id }, `select public.registrar_pago('${cliV}', null, '${oculta}', 'transferencia', 10, 'USD', null, 'REF-PRUEBA', null)::text`));
+    }
+  }
+  await caso('Funciones internas: nadie ejecuta crear_auth_user, notif_admins ni aplicar_pago_a_facturas', (r) => r?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace
+      and p.proname in ('crear_auth_user', 'notif_admins', 'notif_crear', 'aplicar_pago_a_facturas', 'liquidar_orden')
+      and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))) t`));
+  await caso('Sin sesión: no se puede aprobar un registro de cliente', 'permission denied',
+    como({ rol: 'anon', uid: null }, `select row_to_json(t)::text from public.aprobar_registro_cliente('00000000-0000-0000-0000-000000000000') t`));
+  if (vendGuds) {
+    await caso('Un vendedor no puede aprobar registros de clientes', 'No tienes permiso para aprobar registros',
+      como({ uid: vendGuds, empresa: guds.id }, `select row_to_json(t)::text from public.aprobar_registro_cliente('00000000-0000-0000-0000-000000000000') t`));
+  }
+  const par = (await sql(`select fa.id, fa.fecha_emision::text f from facturas nc join facturas fa on fa.id = nc.factura_origen_id
+    where nc.tipo = 'nota_credito' and fa.tipo = 'factura' and nc.estado = 'posted' and fa.estado = 'posted' and not fa.es_saldo_inicial
+      and fa.moneda is not distinct from nc.moneda and abs(abs(nc.total) - abs(fa.total)) < 0.01 and fa.empresa_id = '${qrt.id}' limit 1`))[0];
+  if (par) {
+    await caso('Reportes: una factura anulada por completo con su NC no cuenta como venta', (r) => r?.n === 0,
+      como({ rol: 'postgres', empresa: qrt.id }, `select row_to_json(t)::text from (select count(*) n from public.documentos_venta('${par.f}', '${par.f}') d where d.id = '${par.id}') t`));
+  }
+}
+
+// ── Portal del vendedor y delivery (19n): cifras con fuente única, empresa por defecto, entregas ajenas ──
+{
+  if (vendGuds) {
+    const [esp] = await sql(`select count(*) n, (select round(coalesce(sum(f.saldo_usd) filter (where f.saldo_usd > 0.009), 0), 2) from facturas f
+        join clientes c on c.id = f.cliente_id join usuarios u on u.id = c.vendedor_asignado_id
+        where u.auth_id = '${vendGuds}' and c.activo and c.empresa_id = '${guds.id}' and f.estado = 'posted' and (f.empresa_id is null or f.empresa_id = '${guds.id}')) por_cobrar
+      from clientes c join usuarios u on u.id = c.vendedor_asignado_id where u.auth_id = '${vendGuds}' and c.activo and c.empresa_id = '${guds.id}'`);
+    await caso('Resumen vendedor: su cartera y su deuda = facturas de sus clientes (como Cuentas por cobrar)',
+      (r) => r?.clientes === Number(esp.n) && Math.abs(Number(r?.cartera?.por_cobrar) - Number(esp.por_cobrar)) < 0.01,
+      como({ uid: vendGuds, empresa: guds.id }, `select public.resumen_vendedor()::text`));
+  }
+  await caso('Resumen vendedor: sin sesión no se puede consultar', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select public.resumen_vendedor()::text`));
+  const vSin = (await sql(`select u.id from usuarios u where u.role = 'vendedor' and u.activo
+    and (select count(*) from usuario_empresas ue where ue.usuario_id = u.id) = 2
+    and not exists (select 1 from clientes c where c.vendedor_asignado_id = u.id) limit 1`))[0]?.id;
+  const cliQrtLibre = (await sql(`select id from clientes where empresa_id = '${qrt.id}' and activo and vendedor_asignado_id is null limit 1`))[0]?.id;
+  if (vSin && cliQrtLibre) {
+    await caso('Empresa por defecto: al asignarle clientes de Quirutec a un vendedor sin cartera, entra por defecto a Quirutec', (r) => r?.defecto === qrt.id,
+      como({ empresa: guds.id, previo: `update usuario_empresas set por_defecto = (empresa_id = '${guds.id}') where usuario_id = '${vSin}';
+        update clientes set vendedor_asignado_id = '${vSin}' where id = '${cliQrtLibre}';` },
+        `select row_to_json(t)::text from (select empresa_id defecto from usuario_empresas where usuario_id = '${vSin}' and por_defecto) t`));
+  }
+  const repartidor = (await sql(`select u.auth_id from usuarios u where u.role = 'delivery' and u.activo and u.auth_id is not null
+    and not exists (select 1 from entregas e where e.repartidor_id = u.id) limit 1`))[0]?.auth_id;
+  const ordG = (await sql(`select id from ordenes where empresa_id = '${guds.id}' limit 1`))[0].id;
+  const entregaAjena = `insert into entregas (orden_id, repartidor_id, estado) values ('${ordG}', null, 'asignada');`;
+  if (repartidor) {
+    await caso('Repartidor: no ve las entregas de otros (aunque su rol tenga "delivery: ver")', (r) => r?.n === 0,
+      como({ uid: repartidor, empresa: guds.id, previo: entregaAjena }, `select row_to_json(t)::text from (select count(*) n from entregas) t`));
+  }
+  await caso('Admin: ve las entregas del módulo delivery', (r) => r?.n >= 1,
+    como({ empresa: guds.id, previo: entregaAjena }, `select row_to_json(t)::text from (select count(*) n from entregas) t`));
 }
 
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──

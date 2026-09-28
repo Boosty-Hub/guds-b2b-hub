@@ -10,7 +10,8 @@ import {
   Clock,
   Star,
   Zap,
-  Loader2
+  Loader2,
+  Search
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -106,7 +107,7 @@ const PortalDashboard = () => {
       <Link to="/portal/catalogo?focus=search">
         <div className={`${paddingX} mt-4 mb-3`}>
           <div className={`bg-muted rounded-full flex items-center ${gapSize} ${isTablet ? 'px-5 py-4' : 'px-4 py-3'}`}>
-            <span className="text-muted-foreground">🔍</span>
+            <Search className={`text-muted-foreground ${isTablet ? 'h-5 w-5' : 'h-4 w-4'}`} aria-hidden="true" />
             <span className={`text-muted-foreground ${isTablet ? 'text-base' : 'text-sm'}`}>Buscar productos...</span>
           </div>
         </div>
@@ -212,8 +213,9 @@ const PortalDashboard = () => {
               to={`/portal/catalogo?cat=${cat.nombre}`}
               className={`flex flex-col items-center gap-2 ${isTablet ? 'min-w-[90px]' : 'min-w-[70px]'}`}
             >
-              <div className={`rounded-full ${cat.color} flex items-center justify-center ${isTablet ? 'h-16 w-16 text-3xl' : 'h-14 w-14 text-2xl'}`}>
-                {cat.icono}
+              {/* Inicial de la categoría (el ícono guardado es el mismo emoji genérico de caja en todas; F1 define el placeholder de marca) */}
+              <div className={`rounded-full ${cat.color} flex items-center justify-center font-semibold text-white ${isTablet ? 'h-16 w-16 text-2xl' : 'h-14 w-14 text-xl'}`} aria-hidden="true">
+                {cat.nombre.trim().charAt(0).toUpperCase()}
               </div>
               <span className={`text-center text-foreground ${isTablet ? 'text-sm' : 'text-xs'}`}>{cat.nombre}</span>
             </Link>

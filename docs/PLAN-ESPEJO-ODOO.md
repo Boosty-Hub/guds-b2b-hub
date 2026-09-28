@@ -368,3 +368,6 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 36 | **Impuestos**: GUDS aplica IVA 16 % a todo; en Odoo cada producto tiene su impuesto (IVA efectivo ~6,7 % por exentos). El total que ve el vendedor/cliente no coincide con Odoo | Sincronizar el impuesto por producto y calcular totales en el servidor (plan de portales, etapa 2) |
 | 37 | La sincronización escribe sin triggers: los cambios que vienen de Odoo (confirmado, despachado, facturado) no generan notificaciones | Emitir notificaciones desde el sync (plan de portales, etapa 1) |
 | 38 | La cola de delivery son órdenes, no los documentos de entrega de Odoo; dirección fiscal en vez de la de entrega; 0 clientes con coordenadas | Plan de portales, D1–D2 |
+| 39 | ~~Saldos bancarios legibles por cualquier usuario con sesión; funciones internas y aprobación de registros ejecutables sin sesión~~ | ✅ 19l, 19q |
+| 40 | En Odoo, el diario "Banco Banesco USA" de GUDS tiene la cuenta de Banesco en bolívares (mismo número); las cuentas extranjeras llevan ceros a la izquierda (20 dígitos) | Corregir en Odoo; mientras tanto esa cuenta no se publica a clientes |
+| 41 | Correo de Auth: dominio verificado en el proveedor, pero Supabase sin SMTP configurado | Cargar la clave SMTP del proveedor en Supabase |
