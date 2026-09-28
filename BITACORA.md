@@ -10,6 +10,36 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-28 · Fase 9b: aprobación de pedidos en el admin y envío como línea de servicio
+
+Decisiones del dueño (28-sep): el envío que cobra GUDS va a Odoo como **línea de servicio** con el monto de GUDS; el pedido
+llega a Odoo como **cotización en borrador**; **todos los pedidos de clientes y vendedores quedan pendientes de aprobar en el
+admin** y solo al aprobarse se crean en Odoo. Prohibido borrar en Odoo.
+
+- **Aprobación** (migraciones `20260928_fase19g_aprobacion_pedidos.sql` y `…19h_aprobacion_solo_admin.sql`):
+  `ordenes.aprobacion` (pendiente/aprobada/rechazada). Pedidos del portal del cliente y del vendedor → *pendiente*; los que crea
+  el admin → *aprobada* y salen a Odoo al guardarse. `aprobar_pedido()` dispara por pg_net la función edge `sync-odoo?enviar=<id>`
+  (secreto en Vault); `rechazar_pedido(motivo)` cancela, libera el stock comprometido y avisa al cliente y al vendedor con el
+  motivo; `reintentar_envio_pedido()`. Solo personal de administración (rol admin + permiso de editar órdenes): la prueba de base
+  detectó que el rol Vendedor tenía "editar órdenes" y podía aprobar — corregido.
+- **Envío a Odoo**: el envío de GUDS va como línea del servicio cuyo código se configura en Configuración → Políticas de venta →
+  "Producto de servicio de envío en Odoo". En Odoo **no existe hoy** un servicio vendible de envío (los de flete son de gasto:
+  "FLETES EN VENTAS" 610012), y crearlo toca la cuenta de ingresos/impuesto (contabilidad). Mientras no se configure, el monto va
+  como **línea de nota** en la cotización y el pedido guarda un aviso (`odoo_envio_aviso`). Almacén general P-01 fijo.
+- La sincronización periódica **reintenta** los pedidos aprobados que no llegaron a Odoo; si el envío falla (p. ej. cliente que no
+  existe en Odoo, lista de precios en Bs), el motivo se ve en el pedido con "Reintentar".
+- Interfaz: Órdenes con filtro **"Por aprobar (n)"**, insignias Por aprobar / Enviando a Odoo / Error / Rechazado, panel de
+  aprobación en el detalle (Aprobar y enviar a Odoo · Rechazar con motivo · Reintentar); los pedidos del flujo nuevo ya no muestran
+  "Facturar" ni el cambio manual de estado (eso ocurre en Odoo). "Pedidos por aprobar" en acciones pendientes/torre de control.
+  El cliente y el vendedor ven "Por aprobar" / "No aprobado (motivo)" en sus pedidos.
+- Verificado: 6 pruebas nuevas de base (admin nace aprobado y dispara envío; vendedor queda por aprobar y compromete stock;
+  vendedor no puede aprobar; admin aprueba y dispara el envío; rechazo exige motivo; rechazo cancela y libera stock), simulación
+  del envío con nota y con línea de servicio, y e2e vendedor crea → admin ve "Por aprobar" → aprueba → error visible con
+  Reintentar (cliente de prueba inexistente en Odoo: se detiene antes de escribir). **En Odoo sigue existiendo una sola
+  cotización de GUDS (S00927).** Los pedidos de prueba se borraron de GUDS y la numeración quedó en GUDS-ORD-00001.
+
+---
+
 ## 2026-09-27 · Fase 9b: primer pedido de GUDS enviado a Odoo (prueba única)
 
 - Pedido creado en GUDS desde Órdenes → Nueva Orden: **GUDS-ORD-00001** (cliente DISTRIBUIDORA MEDICO QUIRURGICA QUIRUTEC,

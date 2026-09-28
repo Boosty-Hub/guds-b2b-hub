@@ -1,7 +1,11 @@
 // Envío de pedidos de GUDS a Odoo (Fase 9b de docs/PLAN-ESPEJO-ODOO.md).
 //
+// - Solo pedidos APROBADOS en el admin (ordenes.aprobacion = 'aprobada').
 // - Crea el pedido como COTIZACIÓN (borrador) en la empresa del pedido: no reserva stock ni toca la contabilidad;
 //   el equipo de GUDS lo revisa y lo confirma en Odoo.
+// - El envío que cobra GUDS va como línea de servicio con el producto de Odoo configurado en
+//   configuracion.odoo_producto_envio (código interno); si no está configurado o no existe, va como línea de nota con el
+//   monto y queda un aviso en ordenes.odoo_envio_aviso.
 // - Todo lo que GUDS crea en Odoo queda marcado: referencia del cliente "<número GUDS> (GUDS)", origen "GUDS" y una nota.
 // - Nunca borra ni modifica nada en Odoo (el cliente de odoo.js solo permite `create` en sale.order).
 // - Idempotente: si ya existe en Odoo una orden con la referencia del pedido, la vincula en vez de crear otra.
@@ -16,13 +20,19 @@ const escaparHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;'
 
 export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = console.log, nota = '' }) {
   const [o] = await sql(`
-    select o.id, o.numero, o.numero_guds, o.odoo_id, o.estado::text estado, o.total, o.notas, o.empresa_id,
-           e.odoo_company_id, e.nombre_corto, c.id cliente_id, c.odoo_id cliente_odoo_id, c.nombre_negocio
+    select o.id, o.numero, o.numero_guds, o.odoo_id, o.estado::text estado, o.total, o.envio, o.notas, o.empresa_id, o.aprobacion,
+           to_char(o.aprobado_at at time zone 'America/Caracas', 'DD/MM/YYYY HH24:MI') aprobado_el,
+           nullif(trim(concat_ws(' ', ua.nombre, ua.apellido)), '') aprobado_por,
+           e.odoo_company_id, e.nombre_corto, c.id cliente_id, c.odoo_id cliente_odoo_id, c.nombre_negocio,
+           (select valor from configuracion where clave = 'odoo_producto_envio') producto_envio
     from ordenes o join empresas e on e.id = o.empresa_id join clientes c on c.id = o.cliente_id
+    left join usuarios ua on ua.id = o.aprobado_por
     where o.id = ${lit(ordenId)}`);
   if (!o) throw new Error('Pedido no encontrado');
   if (o.odoo_id) throw new Error(`El pedido ${o.numero} ya está en Odoo (id ${o.odoo_id})`);
   if (o.estado === 'cancelado') throw new Error(`El pedido ${o.numero} está cancelado`);
+  // Crear en Odoo exige aprobación; la simulación sirve también para revisar un pedido antes de aprobarlo
+  if (aplicar && o.aprobacion !== 'aprobada') throw new Error(`El pedido ${o.numero} no está aprobado (aprobación: ${o.aprobacion ?? '—'})`);
   if (!o.odoo_company_id) throw new Error('La empresa del pedido no está ligada a Odoo');
   if (!o.cliente_odoo_id) throw new Error(`El cliente ${o.nombre_negocio} no existe en Odoo (primero hay que crearlo)`);
   const items = await sql(`
@@ -73,16 +83,36 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
       discount: Number(i.descuento) || 0,
     };
   });
+  // Envío cobrado en GUDS → línea de servicio (o nota si falta el producto en Odoo)
+  const envio = Math.round(Number(o.envio || 0) * 100) / 100;
+  let aviso = null;
+  const lineasExtra = [];
+  if (envio > 0) {
+    const codigo = String(o.producto_envio || '').trim();
+    const [prodEnvio] = codigo
+      ? await odoo.leer('product.product', 'search_read', [[['default_code', '=', codigo], ['sale_ok', '=', true], ['active', '=', true],
+          '|', ['company_id', '=', cid], ['company_id', '=', false]]], { fields: ['display_name'], limit: 1 }, cid)
+      : [];
+    if (prodEnvio) {
+      lineasExtra.push({ product_id: prodEnvio.id, product_uom_qty: 1, price_unit: envio, name: `Envío (GUDS) · pedido ${o.numero}` });
+    } else {
+      aviso = codigo
+        ? `No existe en Odoo un servicio vendible con código "${codigo}": el envío de $${envio.toFixed(2)} va como nota`
+        : `Falta configurar el producto de servicio de envío en Odoo: el envío de $${envio.toFixed(2)} va como nota`;
+      lineasExtra.push({ display_type: 'line_note', name: `(GUDS) Envío cobrado en GUDS: $${envio.toFixed(2)} (agregar la línea de servicio de envío en Odoo)` });
+    }
+  }
+  const aprobacionTxt = `Aprobado en GUDS${o.aprobado_por ? ` por ${o.aprobado_por}` : ''}${o.aprobado_el ? ` el ${o.aprobado_el}` : ''}.`;
   const vals = {
     company_id: cid,
     partner_id: o.cliente_odoo_id,
     warehouse_id: almacenes[0].id,
     client_order_ref: ref,
     origin: 'GUDS',
-    note: `<p>(GUDS) Pedido creado desde la plataforma GUDS: ${escaparHtml(o.numero)}.${nota ? ` ${escaparHtml(nota)}` : ''}${o.notas ? `<br/>Notas del pedido: ${escaparHtml(o.notas)}` : ''}</p>`,
-    order_line: lineas.map((l) => [0, 0, l]),
+    note: `<p>(GUDS) Pedido creado desde la plataforma GUDS: ${escaparHtml(o.numero)}. ${escaparHtml(aprobacionTxt)}${nota ? ` ${escaparHtml(nota)}` : ''}${o.notas ? `<br/>Notas del pedido: ${escaparHtml(o.notas)}` : ''}</p>`,
+    order_line: [...lineas, ...lineasExtra].map((l) => [0, 0, l]),
   };
-  const resumen = { pedido: o.numero, empresa: o.nombre_corto, cliente: o.nombre_negocio, moneda, almacen: almacenes[0].name, lineas, vals, existente: existentes[0] ?? null };
+  const resumen = { pedido: o.numero, empresa: o.nombre_corto, cliente: o.nombre_negocio, moneda, almacen: almacenes[0].name, lineas, lineasExtra, aviso, vals, existente: existentes[0] ?? null };
   if (!aplicar) { log(`Simulación: se crearía en Odoo (${o.nombre_corto}) la cotización ${ref} con ${lineas.length} línea(s)`); return resumen; }
 
   // 4. Crear (o tomar la existente) y leerla de vuelta
@@ -96,7 +126,7 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
   const [so] = await odoo.leer('sale.order', 'read', [[odooId]],
     { fields: ['name', 'state', 'amount_untaxed', 'amount_tax', 'amount_total', 'currency_id', 'user_id', 'client_order_ref', 'origin', 'order_line', 'warehouse_id'] }, cid);
   const lineasOdoo = await odoo.leer('sale.order.line', 'read', [so.order_line],
-    { fields: ['product_id', 'product_uom_qty', 'price_unit', 'price_subtotal', 'sequence'] }, cid);
+    { fields: ['product_id', 'product_uom_qty', 'price_unit', 'price_subtotal', 'sequence', 'display_type'] }, cid);
   lineasOdoo.sort((a, b) => a.sequence - b.sequence || a.id - b.id);
 
   // 5. Vincular en GUDS (sin triggers, como el importador): pedido y cada línea con su id de Odoo
@@ -113,6 +143,7 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
       where id = ${lit(x.item.id)} and odoo_id is null`).join(';\n');
   await sql(`begin; set local session_replication_role = replica;
     update ordenes set odoo_id = ${odooId}, numero_guds = coalesce(numero_guds, numero), odoo_enviado_at = now(), odoo_envio_error = null,
+      odoo_envio_aviso = ${lit(aviso)},
       estado_odoo = ${lit(so.state)}, stock_descontado = true, updated_at = now()
     where id = ${lit(o.id)} and odoo_id is null;
     ${updLineas};

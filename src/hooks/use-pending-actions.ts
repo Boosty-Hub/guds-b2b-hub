@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Receipt, UserPlus, Boxes, FileMinus2, ListChecks, Package, UserX, CalendarX, CalendarClock, Truck, Landmark,
+  ClipboardCheck,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -28,7 +29,7 @@ export function usePendingActions() {
     const en30 = new Date(hoy.getTime() + 30 * 86400000);
     const [
       pagosRes, registrosRes, consignacionRes, retencionesRes,
-      extractoLineasRes, stockBajoRes, sinVendedorRes, vencidosRes, porVencerRes, despachosRes, porIdentificarRes,
+      extractoLineasRes, stockBajoRes, sinVendedorRes, vencidosRes, porVencerRes, despachosRes, porIdentificarRes, porAprobarRes,
     ] = await Promise.all([
       supabase.from("pagos").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
       supabase.from("registros_clientes").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
@@ -41,9 +42,11 @@ export function usePendingActions() {
       supabase.from("lotes").select("id", { count: "exact", head: true }).gt("cantidad", 0).gte("vencimiento", fecha(hoy)).lte("vencimiento", fecha(en30)),
       supabase.from("transferencias").select("id", { count: "exact", head: true }).eq("tipo", "entrega").eq("estado", "lista"),
       supabase.from("movimientos_bancarios").select("id", { count: "exact", head: true }).eq("origen", "por_identificar"),
+      supabase.from("ordenes").select("id", { count: "exact", head: true }).eq("aprobacion", "pendiente"),
     ]);
 
     const lista: PendingActionItem[] = [
+      { clave: "por-aprobar", label: "Pedidos por aprobar", count: porAprobarRes.count || 0, link: "/admin/ordenes?aprobacion=pendiente", icono: ClipboardCheck },
       { clave: "pagos", label: "Pagos por verificar", count: pagosRes.count || 0, link: "/admin/cuentas-por-cobrar", icono: Receipt },
       { clave: "registros", label: "Registros de clientes pendientes", count: registrosRes.count || 0, link: "/admin/registros", icono: UserPlus },
       { clave: "consignacion", label: "Consignación por revisar", count: consignacionRes.count || 0, link: "/admin/consignacion", icono: Boxes },

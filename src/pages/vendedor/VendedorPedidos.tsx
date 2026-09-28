@@ -24,7 +24,8 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
 
-interface Orden { id: string; numero: string; total: number; estado: string; created_at: string; fecha_pedido: string | null; odoo_id: number | null; cliente?: { nombre_negocio: string } | null; }
+interface Orden { id: string; numero: string; total: number; estado: string; created_at: string; fecha_pedido: string | null; odoo_id: number | null;
+  aprobacion: "pendiente" | "aprobada" | "rechazada" | null; rechazo_motivo: string | null; cliente?: { nombre_negocio: string } | null; }
 interface Cli { id: string; nombre_negocio: string; }
 interface TipoEmpaque { id: string; nombre: string; unidades: number; }
 interface ProductoEmp { id: string; tipo_empaque_id: string; precio_empaque: number; activo: boolean; tipo_empaque: TipoEmpaque | null; }
@@ -63,7 +64,7 @@ const VendedorPedidos = () => {
     if (!user?.id) return;
     setLoading(true);
     const [oRes, cRes, pRes] = await Promise.all([
-      supabase.from("ordenes").select("id, numero, total, estado, created_at, fecha_pedido, odoo_id, cliente:clientes(nombre_negocio)").order("created_at", { ascending: false }),
+      supabase.from("ordenes").select("id, numero, total, estado, created_at, fecha_pedido, odoo_id, aprobacion, rechazo_motivo, cliente:clientes(nombre_negocio)").order("created_at", { ascending: false }),
       // Solo los clientes asignados a este vendedor
       supabase.from("clientes").select("id, nombre_negocio").eq("activo", true).eq("vendedor_asignado_id", user.id).order("nombre_negocio"),
       supabase.from("productos").select("id, nombre, precio_base, en_oferta, precio_oferta, stock_disponible, controla_stock, producto_empaques(id, tipo_empaque_id, precio_empaque, activo, tipo_empaque:tipos_empaque(id, nombre, unidades))").eq("activo", true).order("nombre"),
@@ -184,6 +185,7 @@ const VendedorPedidos = () => {
   const fmt = (s: string) => new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
   const ABIERTOS = ["pendiente", "confirmado", "procesando", "enviado", "en_camino"];
+  const porAprobar = ordenes.filter((o) => o.aprobacion === "pendiente").length;
   const texto = q.trim().toLowerCase();
   const filtradas = ordenes.filter((o) => (estadoFiltro === "todos" || ABIERTOS.includes(o.estado)) &&
     (!texto || o.numero.toLowerCase().includes(texto) || (o.cliente?.nombre_negocio || "").toLowerCase().includes(texto)));
@@ -200,7 +202,7 @@ const VendedorPedidos = () => {
     <VendedorLayout title="Pedidos">
       <KpiStrip items={[
         { label: "Pedidos de mis clientes", valor: ordenes.length, tono: "primario", onClick: () => setEstadoFiltro("todos"), activo: estadoFiltro === "todos" },
-        { label: "En curso", valor: abiertos.length, tono: abiertos.length ? "alerta" : "normal", onClick: () => setEstadoFiltro("abiertos"), activo: estadoFiltro === "abiertos" },
+        { label: "En curso", valor: abiertos.length, detalle: porAprobar ? `${porAprobar} por aprobar` : undefined, tono: abiertos.length ? "alerta" : "normal", onClick: () => setEstadoFiltro("abiertos"), activo: estadoFiltro === "abiertos" },
         { label: "Vendido este mes", valor: formatPrice(delMes.reduce((s, o) => s + Number(o.total || 0), 0)), detalle: `${delMes.length} pedidos`, tono: "positivo" },
       ]} />
 
@@ -228,7 +230,11 @@ const VendedorPedidos = () => {
                   <TableCell><span className="block max-w-[280px] truncate" title={o.cliente?.nombre_negocio || undefined}>{o.cliente?.nombre_negocio || "—"}</span></TableCell>
                   <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">{fmt(fechaDe(o))}</TableCell>
                   <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(Number(o.total))}</TableCell>
-                  <TableCell className="whitespace-nowrap"><Badge variant={estadoConfig[o.estado]?.variant || "outline"}>{estadoConfig[o.estado]?.label || o.estado}</Badge></TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {o.aprobacion === "pendiente" ? <Badge variant="outline" className="border-amber-300 bg-amber-100 text-amber-900">Por aprobar</Badge>
+                      : o.aprobacion === "rechazada" ? <Badge variant="destructive" title={o.rechazo_motivo || undefined}>No aprobado</Badge>
+                      : <Badge variant={estadoConfig[o.estado]?.variant || "outline"}>{estadoConfig[o.estado]?.label || o.estado}</Badge>}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

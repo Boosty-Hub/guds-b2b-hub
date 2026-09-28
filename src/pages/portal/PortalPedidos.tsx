@@ -29,6 +29,8 @@ interface OrdenDB {
   id: string;
   numero: string;
   estado: string;
+  aprobacion?: "pendiente" | "aprobada" | "rechazada" | null;  // pedidos de GUDS: el admin los aprueba antes de prepararlos
+  rechazo_motivo?: string | null;
   total: number;
   subtotal: number;
   created_at: string;
@@ -59,7 +61,13 @@ const statusConfig: Record<string, { label: string; color: string; icon: any }> 
   entregado: { label: "Entregado", color: "bg-green-500", icon: CheckCircle },
   completado: { label: "Entregado", color: "bg-green-500", icon: CheckCircle },
   cancelado: { label: "Cancelado", color: "bg-red-500", icon: Clock },
+  por_aprobar: { label: "Por aprobar", color: "bg-amber-500", icon: Clock },
+  rechazado: { label: "No aprobado", color: "bg-red-500", icon: Clock },
 };
+
+// El pedido recién hecho espera la aprobación de GUDS; si no se aprueba, se muestra con su motivo
+const claveEstado = (o: { estado: string; aprobacion?: string | null }) =>
+  o.aprobacion === "pendiente" ? "por_aprobar" : o.aprobacion === "rechazada" ? "rechazado" : o.estado;
 
 const PortalPedidos = () => {
   const [selectedOrder, setSelectedOrder] = useState<OrdenDB | null>(null);
@@ -155,7 +163,7 @@ const PortalPedidos = () => {
           </div>
         ) : (
           displayOrders.map((order) => {
-            const config = statusConfig[order.estado] || statusConfig.pendiente;
+            const config = statusConfig[claveEstado(order)] || statusConfig.pendiente;
             const StatusIcon = config.icon;
             const itemCount = order.items?.reduce((sum, i) => sum + i.cantidad, 0) || 0;
 
@@ -235,7 +243,7 @@ const PortalPedidos = () => {
       <Sheet open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
         <SheetContent side="bottom" className="h-[90vh] rounded-t-3xl">
           {selectedOrder && (() => {
-            const config = statusConfig[selectedOrder.estado] || statusConfig.pendiente;
+            const config = statusConfig[claveEstado(selectedOrder)] || statusConfig.pendiente;
             return (
               <>
                 <SheetHeader className="text-left">
@@ -248,6 +256,16 @@ const PortalPedidos = () => {
                 </SheetHeader>
 
                 <div className="mt-4 space-y-6 overflow-y-auto pb-6">
+                  {selectedOrder.aprobacion === "pendiente" && (
+                    <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                      Tu pedido está <strong>pendiente de aprobación</strong>. Te avisaremos cuando sea aprobado y pase a preparación.
+                    </p>
+                  )}
+                  {selectedOrder.aprobacion === "rechazada" && (
+                    <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+                      Este pedido no fue aprobado{selectedOrder.rechazo_motivo ? `: ${selectedOrder.rechazo_motivo}` : "."}
+                    </p>
+                  )}
                   {/* Order Info */}
                   <div className="bg-muted rounded-xl p-4">
                     <div className="flex justify-between text-sm mb-2">

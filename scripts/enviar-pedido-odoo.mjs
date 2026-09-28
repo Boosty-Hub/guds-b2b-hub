@@ -24,4 +24,4 @@ const odoo = crearClienteOdoo({ url: ODOO_URL, db: ODOO_DB, usuario: ODOO_USER, 
 const r = await enviarPedido({ odoo, sql, ordenId: orden.id, aplicar, nota });
 console.log(JSON.stringify(aplicar ? { odoo: { id: r.odoo.id, nombre: r.odoo.name, estado: r.odoo.state, total: r.odoo.amount_total, moneda: r.odoo.currency_id?.[1],
   vendedor: r.odoo.user_id?.[1], referencia: r.odoo.client_order_ref, origen: r.odoo.origin, lineas: r.odoo.lineas.map((l) => ({ producto: l.product_id?.[1], cantidad: l.product_uom_qty, precio: l.price_unit, subtotal: l.price_subtotal })) },
-  almacen: r.odoo.warehouse_id?.[1], lineasVinculadas: r.lineasVinculadas } : { pedido: r.pedido, empresa: r.empresa, cliente: r.cliente, moneda: r.moneda, almacen: r.almacen, existente: r.existente, vals: r.vals }, null, 2));
+  almacen: r.odoo.warehouse_id?.[1], aviso: r.aviso, lineasVinculadas: r.lineasVinculadas } : { pedido: r.pedido, empresa: r.empresa, cliente: r.cliente, moneda: r.moneda, almacen: r.almacen, aviso: r.aviso, existente: r.existente, vals: r.vals }, null, 2));

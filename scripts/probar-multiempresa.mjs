@@ -315,6 +315,39 @@ await caso('Reportes: anónimo no puede ejecutarlos', 'permission denied',
 await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
   como({ rol: 'anon', uid: null, empresa: guds.id }, `select count(*)::text from public.estado_sync_odoo()`));
 
+// ── Aprobación de pedidos (19g): cliente/vendedor → por aprobar; admin aprueba (→ Odoo) o rechaza con motivo ──
+{
+  const prod = (await sql(`select id, comprometido_guds from productos where empresa_id = '${guds.id}' and controla_stock and stock_disponible > 100 and activo limit 1`))[0];
+  const vend = vendGuds ? (await sql(`select u.id, c.id cliente from usuarios u join clientes c on c.vendedor_asignado_id = u.id
+    where u.auth_id = '${vendGuds}' and c.activo and c.empresa_id = '${guds.id}' limit 1`))[0] : null;
+  const claims = (uid) => JSON.stringify({ sub: uid, role: 'authenticated' }).replace(/'/g, "''");
+  const hdrG = JSON.stringify({ 'x-empresa-id': guds.id }).replace(/'/g, "''");
+  const comoUsuario = (uid) => `perform set_config('request.jwt.claims', '${claims(uid)}', true); perform set_config('request.headers', '${hdrG}', true);`;
+  const items = `'[{"producto_id":"${prod.id}","cantidad":3}]'::jsonb`;
+  await caso('Aprobación: un pedido creado por el admin nace aprobado (sale a Odoo)', (r) => r?.aprobacion === 'aprobada' && r?.envio > 0,
+    como({ empresa: guds.id, previo: `${comoUsuario(admin)} perform public.crear_orden_admin('${cliGuds}', 'transferencia', 'prueba-aprob', ${items});` },
+      `select row_to_json(t)::text from (select aprobacion, (select count(*) from net.http_request_queue where url like '%sync-odoo?enviar=%') envio
+        from ordenes where notas = 'prueba-aprob' order by created_at desc limit 1) t`));
+  if (vend) {
+    const previoVend = `${comoUsuario(vendGuds)} perform public.crear_orden_vendedor('${vend.cliente}', 'transferencia', 'prueba-aprob-v', ${items});`;
+    const idPend = `(select id from ordenes where notas = 'prueba-aprob-v' order by created_at desc limit 1)`;
+    await caso('Aprobación: el pedido del vendedor queda por aprobar y compromete stock', (r) => r?.aprobacion === 'pendiente' && Number(r?.comp) === Number(prod.comprometido_guds) + 3,
+      como({ empresa: guds.id, previo: previoVend },
+        `select row_to_json(t)::text from (select aprobacion, (select comprometido_guds from productos where id = '${prod.id}') comp from ordenes where id = ${idPend}) t`));
+    await caso('Aprobación: un vendedor no puede aprobar pedidos', 'No tienes permiso para aprobar',
+      como({ uid: vendGuds, empresa: guds.id, previo: previoVend }, `select public.aprobar_pedido(${idPend})::text`));
+    await caso('Aprobación: el admin aprueba y se dispara el envío a Odoo', (r) => r?.aprobacion === 'aprobada' && r?.envio > 0 && r?.por,
+      como({ empresa: guds.id, previo: `${previoVend} ${comoUsuario(admin)} perform public.aprobar_pedido(${idPend});` },
+        `select row_to_json(t)::text from (select o.aprobacion, o.aprobado_por por,
+          (select count(*) from net.http_request_queue where url like '%enviar=' || o.id::text) envio from ordenes o where o.id = ${idPend}) t`));
+    await caso('Aprobación: rechazar exige un motivo', 'Indica el motivo',
+      como({ empresa: guds.id, previo: previoVend }, `select public.rechazar_pedido(${idPend}, '  ')::text`));
+    await caso('Aprobación: rechazar cancela el pedido y libera el stock', (r) => r?.aprobacion === 'rechazada' && r?.estado === 'cancelado' && Number(r?.comp) === Number(prod.comprometido_guds) && r?.motivo === 'Sin disponibilidad',
+      como({ empresa: guds.id, previo: `${previoVend} ${comoUsuario(admin)} perform public.rechazar_pedido(${idPend}, 'Sin disponibilidad');` },
+        `select row_to_json(t)::text from (select aprobacion, estado::text estado, rechazo_motivo motivo, (select comprometido_guds from productos where id = '${prod.id}') comp from ordenes where id = ${idPend}) t`));
+  }
+}
+
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {
   const pol = await sql(String.raw`select tablename || '.' || policyname p, coalesce(qual,'') || ' ' || coalesce(with_check,'') t from pg_policies where schemaname = 'public'`);

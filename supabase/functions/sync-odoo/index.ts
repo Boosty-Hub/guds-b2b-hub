@@ -6,11 +6,14 @@
 // - Responde 202 de inmediato y trabaja en segundo plano (EdgeRuntime.waitUntil): el plan gratuito corta a los 150 s.
 // - No se solapa: si hay una corrida "en_curso" de menos de 10 minutos, no arranca otra.
 // - ?simular=1 lee todo y calcula sin escribir (para probar credenciales y tiempos).
+// - ?enviar=<orden_id> crea en Odoo (cotización en borrador) un pedido APROBADO en GUDS (Fase 9b). Lo dispara
+//   aprobar_pedido() por pg_net. Cada sincronización reintenta los aprobados que no llegaron a enviarse.
 //
 // Secretos: ODOO_URL, ODOO_DB, ODOO_USER, ODOO_API_KEY, SYNC_ODOO_SECRET (+ SUPABASE_DB_URL, que ya trae la plataforma).
 import postgres from "npm:postgres@3.4.5";
 import { crearClienteOdoo } from "../_shared/odoo-sync/odoo.js";
 import { importarOdoo } from "../_shared/odoo-sync/importar.js";
+import { enviarPedido } from "../_shared/odoo-sync/enviar.js";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -49,6 +52,26 @@ function crearSql() {
   return { sql, cerrar: () => db.end({ timeout: 5 }) };
 }
 
+const nuevoOdoo = () => crearClienteOdoo({ url: env("ODOO_URL"), db: env("ODOO_DB"), usuario: env("ODOO_USER"), apiKey: env("ODOO_API_KEY"), timeoutMs: 60000 });
+
+// Envía un pedido aprobado; si falla, deja el error en el pedido (se ve en el admin y se puede reintentar)
+async function enviarUno(sql: (q: string) => Promise<Record<string, unknown>[]>, ordenId: string, odoo = nuevoOdoo()) {
+  try {
+    const r = await enviarPedido({ odoo, sql, ordenId, aplicar: true, log: (m: string) => console.log("sync-odoo enviar:", m) });
+    return { ok: true, nombre: r.odoo?.name };
+  } catch (e) {
+    const msg = String((e as Error).message).slice(0, 500).replace(/'/g, "''");
+    await sql(`update ordenes set odoo_envio_error = '${msg}' where id = '${ordenId.replace(/'/g, "")}' and odoo_id is null`).catch(() => {});
+    console.error("sync-odoo enviar ERROR:", ordenId, msg);
+    return { ok: false, error: msg };
+  }
+}
+
+async function enviarAprobado(ordenId: string) {
+  const { sql, cerrar } = crearSql();
+  try { await enviarUno(sql, ordenId); } finally { await cerrar(); }
+}
+
 async function sincronizar(simular: boolean) {
   const { sql, cerrar } = crearSql();
   const t0 = Date.now();
@@ -71,7 +94,13 @@ async function sincronizar(simular: boolean) {
       return sql(`update sync_corridas set resumen = jsonb_set(resumen, '{etapas}', (resumen->'etapas') || '${e}'::jsonb) where id = '${trazaId}'`).catch(() => {});
     };
     await traza("inicio");
-    const odoo = crearClienteOdoo({ url: env("ODOO_URL"), db: env("ODOO_DB"), usuario: env("ODOO_USER"), apiKey: env("ODOO_API_KEY"), timeoutMs: 60000 });
+    const odoo = nuevoOdoo();
+    // Pedidos aprobados que no llegaron a Odoo (p. ej. si falló el disparo): se reintentan antes de importar
+    if (!simular) {
+      const pendientes = await sql(`select id from ordenes where aprobacion = 'aprobada' and odoo_id is null and odoo_envio_error is null
+        and estado <> 'cancelado' and aprobado_at < now() - interval '2 minutes' order by aprobado_at limit 10`);
+      for (const p of pendientes) { await enviarUno(sql, String(p.id), odoo); await traza(`reintento envío ${p.id}`); }
+    }
     const lineas: string[] = [];
     const resumen = await importarOdoo({
       odoo, sql, aplicar: !simular, origen: "edge-cron",
@@ -118,6 +147,12 @@ Deno.serve(async (req) => {
     } catch (e) {
       return Response.json({ error: (e as Error).message }, { status: 500 });
     } finally { await cerrar(); }
+  }
+  const enviar = url.searchParams.get("enviar");
+  if (enviar) {
+    if (!/^[0-9a-f-]{36}$/i.test(enviar)) return new Response("enviar: id inválido", { status: 400 });
+    EdgeRuntime.waitUntil(enviarAprobado(enviar));
+    return Response.json({ ok: true, enviar, mensaje: "Enviando el pedido a Odoo" }, { status: 202 });
   }
   const simular = url.searchParams.get("simular") === "1";
   EdgeRuntime.waitUntil(sincronizar(simular));

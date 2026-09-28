@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/sheet";
 import { Link, useSearchParams } from "react-router-dom";
 import { EstadoTransferencia, TIPO_TRANSF, fmtFechaHora } from "@/components/inventario/EstadoTransferencia";
-import { Plus, Eye, Loader2, X, Users, ChevronRight, FileText } from "lucide-react";
+import { Plus, Eye, Loader2, X, Users, ChevronRight, FileText, CheckCircle2, XCircle, RotateCw, AlertTriangle, Clock } from "lucide-react";
 import { supabase, Cliente, Producto } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
@@ -51,6 +51,11 @@ interface OrdenDB {
   numero: string;
   odoo_id?: number | null;   // orden de Odoo: estado y facturación se manejan en Odoo
   numero_guds?: string | null;      // pedido creado en GUDS y enviado a Odoo (Fase 9b)
+  aprobacion?: 'pendiente' | 'aprobada' | 'rechazada' | null;  // pedidos de GUDS: se aprueban antes de ir a Odoo
+  rechazo_motivo?: string | null;
+  odoo_envio_error?: string | null;
+  odoo_envio_aviso?: string | null;
+  aprobado_at?: string | null;
   odoo_enviado_at?: string | null;
   cliente_id: string;
   estado: string;
@@ -120,6 +125,11 @@ const Ordenes = () => {
   const [facturando, setFacturando] = useState(false);
   const [despachos, setDespachos] = useState<{ id: string; numero: string; tipo: string; estado: string; fecha_programada: string | null; fecha_realizada: string | null; ubicacion_origen: string | null }[]>([]);
   const [params, setParams] = useSearchParams();
+  // Aprobación de pedidos de clientes y vendedores (Fase 9b): al aprobar se crean en Odoo como cotización
+  const [soloPorAprobar, setSoloPorAprobar] = useState(params.get("aprobacion") === "pendiente");
+  const [rechazo, setRechazo] = useState<{ id: string; numero: string } | null>(null);
+  const [motivoRechazo, setMotivoRechazo] = useState("");
+  const [procesandoAprobacion, setProcesandoAprobacion] = useState(false);
 
   // New order form
   const [newOrder, setNewOrder] = useState({
@@ -318,7 +328,7 @@ const Ordenes = () => {
       orden.numero?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       orden.cliente?.nombre_negocio?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === "all" || orden.estado === statusFilter;
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && (!soloPorAprobar || orden.aprobacion === "pendiente");
   });
 
   const fechaOrden = (o: OrdenDB) => o.fecha_pedido || o.created_at;
@@ -357,6 +367,7 @@ const Ordenes = () => {
           {orden.numero}
           {orden.odoo_id ? <OdooBadge /> : <Badge variant="outline" className="px-1 py-0 text-[10px]" title="Creado en GUDS · pendiente de enviar a Odoo">GUDS</Badge>}
           {orden.numero_guds && <Badge variant="secondary" className="px-1 py-0 text-[10px] font-normal" title={`Creado en GUDS como ${orden.numero_guds} y enviado a Odoo`}>{orden.numero_guds}</Badge>}
+          {estadoEnvio(orden) && <Badge variant="outline" className={cn("px-1.5 py-0 text-[10px] font-medium", estadoEnvio(orden)!.cls)} title={orden.odoo_envio_error || orden.rechazo_motivo || undefined}>{estadoEnvio(orden)!.txt}</Badge>}
         </span>
       </TableCell>
       <TableCell className="font-medium">
@@ -375,6 +386,52 @@ const Ordenes = () => {
   );
 
   const orderTotal = newOrder.items.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
+  const porAprobar = ordenes.filter((o) => o.aprobacion === "pendiente").length;
+
+  // Mantener abierto el detalle con los datos frescos después de aprobar/rechazar (el envío a Odoo tarda unos segundos)
+  useEffect(() => {
+    if (!selectedOrder) return;
+    const fresco = ordenes.find((o) => o.id === selectedOrder.id);
+    if (fresco && fresco !== selectedOrder) setSelectedOrder(fresco);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordenes]);
+
+  const seguirEnvio = () => { [4000, 10000, 20000, 40000, 70000].forEach((ms) => setTimeout(() => fetchOrdenes(), ms)); };
+
+  const aprobarPedido = async (orden: OrdenDB) => {
+    setProcesandoAprobacion(true);
+    const { data, error } = await supabase.rpc("aprobar_pedido", { p_orden_id: orden.id });
+    setProcesandoAprobacion(false);
+    if (error) { toast({ title: "No se pudo aprobar", description: error.message, variant: "destructive" }); return; }
+    toast({ title: `Pedido ${orden.numero} aprobado`, description: (data as { mensaje?: string } | null)?.mensaje });
+    fetchOrdenes(); seguirEnvio();
+  };
+
+  const confirmarRechazo = async () => {
+    if (!rechazo) return;
+    if (!motivoRechazo.trim()) { toast({ title: "Indica el motivo del rechazo", variant: "destructive" }); return; }
+    setProcesandoAprobacion(true);
+    const { error } = await supabase.rpc("rechazar_pedido", { p_orden_id: rechazo.id, p_motivo: motivoRechazo.trim() });
+    setProcesandoAprobacion(false);
+    if (error) { toast({ title: "No se pudo rechazar", description: error.message, variant: "destructive" }); return; }
+    toast({ title: `Pedido ${rechazo.numero} rechazado`, description: "Se avisó al cliente y al vendedor." });
+    setRechazo(null); setMotivoRechazo("");
+    fetchOrdenes();
+  };
+
+  const reintentarEnvio = async (orden: OrdenDB) => {
+    const { error } = await supabase.rpc("reintentar_envio_pedido", { p_orden_id: orden.id });
+    if (error) { toast({ title: "No se pudo reintentar", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Reintentando el envío a Odoo" });
+    fetchOrdenes(); seguirEnvio();
+  };
+
+  // Estado del pedido frente a la aprobación y el envío a Odoo
+  const estadoEnvio = (o: OrdenDB) =>
+    o.aprobacion === "pendiente" ? { txt: "Por aprobar", cls: "border-amber-300 bg-amber-100 text-amber-900" }
+    : o.aprobacion === "rechazada" ? { txt: "Rechazado", cls: "border-destructive/40 bg-destructive/10 text-destructive" }
+    : o.aprobacion === "aprobada" && !o.odoo_id ? (o.odoo_envio_error ? { txt: "Error al enviar a Odoo", cls: "border-destructive/40 bg-destructive/10 text-destructive" } : { txt: "Enviando a Odoo…", cls: "border-sky-300 bg-sky-100 text-sky-900" })
+    : null;
 
   const cols = useColumnas("ordenes", [{ etiqueta: "Orden", fija: true }, { etiqueta: "Cliente" }, { etiqueta: "Items" }, { etiqueta: "Total" }, { etiqueta: "Estado" }, { etiqueta: "Fecha" }, { etiqueta: "Método Pago" }]);
   return (
@@ -385,6 +442,12 @@ const Ordenes = () => {
         onBusqueda={setSearchTerm}
         placeholder="Buscar por ID, cliente..."
         filtros={
+          <>
+          <Button type="button" size="sm" variant={soloPorAprobar ? "default" : "outline"}
+            className={cn("gap-1.5", !soloPorAprobar && porAprobar > 0 && "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100")}
+            onClick={() => setSoloPorAprobar((v) => !v)} title="Pedidos de clientes y vendedores que esperan aprobación antes de ir a Odoo">
+            <Clock className="h-3.5 w-3.5" /> Por aprobar ({porAprobar})
+          </Button>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="h-8 w-40 text-[13px]">
               <SelectValue placeholder="Estado" />
@@ -399,6 +462,7 @@ const Ordenes = () => {
               <SelectItem value="cancelado">Cancelado</SelectItem>
             </SelectContent>
           </Select>
+          </>
         }
         contador={loading ? undefined : `${filteredOrdenes.length} registros`}
         acciones={
@@ -492,7 +556,7 @@ const Ordenes = () => {
                           <FileText className="h-3.5 w-3.5" /> {facturaPorOrden[selectedOrder.id].numero}
                         </Button>
                       </Link>
-                    ) : selectedOrder.odoo_id ? null : (
+                    ) : selectedOrder.odoo_id || selectedOrder.aprobacion ? null : (
                       <Button
                         variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs"
                         disabled={facturando || selectedOrder.estado === "cancelado"}
@@ -619,8 +683,48 @@ const Ordenes = () => {
                 </div>
               )}
 
-              {/* Cambiar estado (las órdenes de Odoo cambian de estado en Odoo) */}
-              {selectedOrder.odoo_id ? (
+              {/* Aprobación y envío a Odoo (pedidos de clientes y vendedores) */}
+              {selectedOrder.aprobacion === "pendiente" && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-[13px] text-amber-950">
+                  <p className="mb-2 flex items-center gap-1.5 font-semibold"><Clock className="h-4 w-4" /> Pedido por aprobar</p>
+                  <p className="mb-2.5 text-xs">Al aprobarlo se crea en Odoo como <strong>cotización en borrador</strong> (con el envío como línea de servicio) y sigue el flujo de Odoo. Si se rechaza, se cancela y se avisa al cliente y al vendedor.</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" className="gap-1.5" disabled={procesandoAprobacion} onClick={() => aprobarPedido(selectedOrder)}>
+                      {procesandoAprobacion ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} Aprobar y enviar a Odoo
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10" disabled={procesandoAprobacion}
+                      onClick={() => { setRechazo({ id: selectedOrder.id, numero: selectedOrder.numero }); setMotivoRechazo(""); }}>
+                      <XCircle className="h-3.5 w-3.5" /> Rechazar
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {selectedOrder.aprobacion === "aprobada" && !selectedOrder.odoo_id && (
+                selectedOrder.odoo_envio_error ? (
+                  <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-[13px]">
+                    <p className="mb-1 flex items-center gap-1.5 font-semibold text-destructive"><AlertTriangle className="h-4 w-4" /> No se pudo crear en Odoo</p>
+                    <p className="mb-2 text-xs">{selectedOrder.odoo_envio_error}</p>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => reintentarEnvio(selectedOrder)}><RotateCw className="h-3.5 w-3.5" /> Reintentar</Button>
+                  </div>
+                ) : (
+                  <p className="flex items-center gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-[13px] text-sky-900">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Aprobado · creando la cotización en Odoo…
+                  </p>
+                )
+              )}
+              {selectedOrder.aprobacion === "rechazada" && (
+                <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[13px]">
+                  <span className="font-semibold text-destructive">Rechazado:</span> {selectedOrder.rechazo_motivo}
+                </p>
+              )}
+              {selectedOrder.odoo_envio_aviso && (
+                <p className="flex items-start gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {selectedOrder.odoo_envio_aviso}
+                </p>
+              )}
+
+              {/* Cambiar estado (las órdenes de Odoo cambian de estado en Odoo; las de GUDS pasan por aprobación) */}
+              {selectedOrder.aprobacion && !selectedOrder.odoo_id ? null : selectedOrder.odoo_id ? (
                 <p className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[13px] text-muted-foreground">
                   <OdooBadge /> El estado y la facturación de esta orden se manejan en Odoo.
                 </p>
@@ -659,6 +763,23 @@ const Ordenes = () => {
       </Sheet>
 
       {/* Create Order Dialog */}
+      {/* Rechazo de pedido con motivo */}
+      <Dialog open={!!rechazo} onOpenChange={(o) => { if (!o) setRechazo(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Rechazar pedido {rechazo?.numero}</DialogTitle></DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="motivo-rechazo">Motivo (lo verán el cliente y el vendedor)</Label>
+            <Input id="motivo-rechazo" value={motivoRechazo} onChange={(e) => setMotivoRechazo(e.target.value)} placeholder="Ej.: sin disponibilidad, crédito excedido, datos incompletos…" autoFocus />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setRechazo(null)}>Cancelar</Button>
+            <Button variant="destructive" disabled={procesandoAprobacion || !motivoRechazo.trim()} onClick={confirmarRechazo}>
+              {procesandoAprobacion && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />} Rechazar pedido
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
