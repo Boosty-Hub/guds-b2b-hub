@@ -29,6 +29,9 @@ export interface LineaCarrito {
 
 // Evento global para mantener el panel sincronizado cuando el carrito cambia desde otras vistas (catálogo, favoritos,
 // "volver a pedir").
+// Columnas del producto que usa el carrito (nunca select=*: el costo solo lo ve administración)
+export const COLUMNAS_PRODUCTO_CARRITO = "id, nombre, sku, unidad, imagen_url, impuesto_pct, impuesto_nombre, controla_stock, stock_disponible, stock_actual, en_oferta, precio_oferta, precio_base";
+
 export const CART_CHANGED = "cart:changed";
 export const notifyCartChanged = () => window.dispatchEvent(new Event(CART_CHANGED));
 
@@ -45,7 +48,7 @@ export const useCarritoPanel = () => {
     if (!user?.id) return;
     const { data } = await supabase
       .from("carrito")
-      .select("id, producto_id, cantidad, precio_unitario, tipo_empaque_id, producto:productos(*), tipo_empaque:tipos_empaque(nombre, unidades)")
+      .select(`id, producto_id, cantidad, precio_unitario, tipo_empaque_id, producto:productos(${COLUMNAS_PRODUCTO_CARRITO}), tipo_empaque:tipos_empaque(nombre, unidades)`)
       .eq("usuario_id", user.id)
       .order("created_at");
     if (data) setItems(data as unknown as LineaCarrito[]);

@@ -117,7 +117,7 @@ const PortalCarrito = () => {
       .from('carrito')
       .select(`
         *,
-        producto:productos(*),
+        producto:productos(id, nombre, sku, unidad, imagen_url, impuesto_pct, impuesto_nombre, controla_stock, stock_disponible, stock_actual, en_oferta, precio_oferta, precio_base),
         tipo_empaque:tipos_empaque(unidades)
       `)
       .eq('usuario_id', user?.id);

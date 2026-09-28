@@ -1,144 +1,176 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Search, SlidersHorizontal, X, PackageSearch, Check } from "lucide-react";
+import { Check, Loader2, PackageSearch, RotateCcw, Search, SlidersHorizontal, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { PortalPagina } from "@/components/portal/PortalPagina";
-import { TarjetaProducto } from "@/components/portal/TarjetaProducto";
+import { TarjetaProducto, empaquePorDefecto } from "@/components/portal/TarjetaProducto";
 import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
-import { EstadoVacio, SkeletonProductos, normalizar } from "@/components/portal/sistema";
-import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
-import { useCarritoPortal, type ProductoConEmpaques } from "@/hooks/useCarritoPortal";
-import { usePreciosListaCliente } from "@/hooks/usePreciosListaCliente";
+import { EstadoVacio, SkeletonProductos } from "@/components/portal/sistema";
+import { useCarritoPortal } from "@/hooks/useCarritoPortal";
+import {
+  ORDENES_CATALOGO, invalidarFicha, useCatalogoPaginado, useCategoriasPortal, type OrdenCatalogo, type ProductoPortal,
+} from "@/hooks/useCatalogoPortal";
 
-// Catálogo del portal. Móvil: buscador y categorías fijos bajo el encabezado, grilla de 2 columnas. Escritorio: columna de
-// categorías a la izquierda y grilla de 3–4 columnas con buscador y orden. La búsqueda encuentra por nombre, código (SKU)
-// o categoría, sin acentos.
+// Catálogo del portal (F2): paginado en el servidor (catalogo_portal) de 24 en 24 con scroll infinito y "Cargar más".
+// Búsqueda con espera de 300 ms, sin acentos, por nombre (incluye la marca), código o categoría. Los filtros viven en la
+// URL (?q=&cat=&orden=&disp=1) y la lista se guarda en memoria: al volver de la ficha se ve igual y en la misma posición.
+// Móvil: buscador y categorías fijos bajo el encabezado, grilla de 2 columnas. Escritorio: categorías a la izquierda.
 
-type Orden = "relevancia" | "precio_asc" | "precio_desc" | "disponibles";
-const ORDENES: { valor: Orden; etiqueta: string }[] = [
-  { valor: "relevancia", etiqueta: "Nombre (A–Z)" },
-  { valor: "precio_asc", etiqueta: "Menor precio" },
-  { valor: "precio_desc", etiqueta: "Mayor precio" },
-  { valor: "disponibles", etiqueta: "Disponibles primero" },
-];
-const TODOS = "Todos";
-const POR_PAGINA = 48;
+const POR_PAGINA = 24;
+const ESPERA_BUSQUEDA = 300;
+const esUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+const ordenValido = (s: string | null): OrdenCatalogo =>
+  (ORDENES_CATALOGO.some((o) => o.valor === s) ? s : "relevancia") as OrdenCatalogo;
 
 const PortalCatalogo = () => {
-  const [searchParams] = useSearchParams();
-  const categoriaUrl = searchParams.get("cat");
-  const qUrl = searchParams.get("q");
-  const enfocar = searchParams.get("focus") === "search";
-  const inputMovil = useRef<HTMLInputElement>(null);
-
-  const [busqueda, setBusqueda] = useState(qUrl ?? "");
-  const [categoria, setCategoria] = useState(categoriaUrl || TODOS);
-  const [orden, setOrden] = useState<Orden>("relevancia");
-  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
-  const [favoritos, setFavoritos] = useState<string[]>([]);
-  const [productos, setProductos] = useState<ProductoConEmpaques[] | null>(null);
-  const [limite, setLimite] = useState(POR_PAGINA);
-
-  const { agregar, agregarConEmpaque, cambiarCantidad, cantidadDe, disponibleDe, empaqueProducto, empaquePrecios, cerrarEmpaque } = useCarritoPortal();
-  const { precioDe } = usePreciosListaCliente();
   const { user } = useAuth();
+  const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const qUrl = searchParams.get("q") ?? "";
+  const catUrl = searchParams.get("cat");
+  const orden = ordenValido(searchParams.get("orden"));
+  const soloDisponibles = searchParams.get("disp") === "1";
+  const enfocar = searchParams.get("focus") === "search";
 
+  const categorias = useCategoriasPortal();
+  // ?cat= admite el id o (enlaces viejos) el nombre de la categoría
+  const categoria = useMemo(() => {
+    if (!catUrl) return null;
+    if (esUuid(catUrl)) return catUrl;
+    const n = catUrl.trim().toLowerCase();
+    return categorias?.find((c) => c.nombre.trim().toLowerCase() === n)?.id ?? null;
+  }, [catUrl, categorias]);
+  const categoriaActual = categorias?.find((c) => c.id === categoria) ?? null;
 
-  useEffect(() => { if (categoriaUrl) setCategoria(categoriaUrl); }, [categoriaUrl]);
-  useEffect(() => { if (qUrl != null) setBusqueda(qUrl); }, [qUrl]);
+  const [texto, setTexto] = useState(qUrl);
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  const inputMovil = useRef<HTMLInputElement>(null);
+  const contenedor = useRef<HTMLDivElement>(null);
+  const centinela = useRef<HTMLDivElement>(null);
+
+  const cambiarParams = useCallback((cambios: Record<string, string | null>) => {
+    setSearchParams((prev) => {
+      const sp = new URLSearchParams(prev);
+      Object.entries(cambios).forEach(([k, v]) => (v ? sp.set(k, v) : sp.delete(k)));
+      sp.delete("focus");
+      return sp;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  // La URL manda (buscador del encabezado, atrás/adelante); el campo sigue a la URL si cambia desde fuera
+  const ultimoEnviado = useRef(qUrl);
   useEffect(() => {
-    if (enfocar) setTimeout(() => inputMovil.current?.focus(), 100);
-  }, [enfocar]);
-
-  // Refresco silencioso: tras la primera carga no se vuelve al esqueleto ni se pierde la posición
-  const cargarProductos = async () => {
-    const { data } = await supabase
-      .from("productos")
-      .select("*, categoria:categorias(*), producto_empaques(*, tipo_empaque:tipos_empaque(*))")
-      .eq("activo", true)
-      .order("nombre");
-    if (data) setProductos(data as ProductoConEmpaques[]);
-  };
-  useEffect(() => { cargarProductos(); }, []);
-  useRealtimeRefetch("productos", cargarProductos);
-
+    if (qUrl !== ultimoEnviado.current) { ultimoEnviado.current = qUrl; setTexto(qUrl); }
+  }, [qUrl]);
   useEffect(() => {
-    if (!user?.id) return;
-    supabase.from("favoritos").select("producto_id").eq("usuario_id", user.id)
-      .then(({ data }) => { if (data) setFavoritos(data.map((f) => f.producto_id)); });
-  }, [user?.id]);
+    if (texto.trim() === qUrl.trim()) return;
+    const t = setTimeout(() => { ultimoEnviado.current = texto.trim(); cambiarParams({ q: texto.trim() || null }); }, ESPERA_BUSQUEDA);
+    return () => clearTimeout(t);
+  }, [texto, qUrl, cambiarParams]);
+  useEffect(() => { if (enfocar) setTimeout(() => inputMovil.current?.focus(), 100); }, [enfocar]);
 
-  const alternarFavorito = async (id: string) => {
+  const filtros = useMemo(() => ({ busqueda: qUrl, categoria, orden, soloDisponibles }), [qUrl, categoria, orden, soloDisponibles]);
+  const lista = useCatalogoPaginado(filtros, POR_PAGINA);
+  const { productos, total, aproximado, cargando, desactualizada, cargandoMas, hayMas, error, cargarMas, actualizar, guardarScroll, scrollRestaurar, consumirScroll } = lista;
+
+  const { agregar, agregarConEmpaque, cambiarCantidad, cantidadDe, empaqueProducto, empaquePrecios, cerrarEmpaque } = useCarritoPortal();
+
+  // Volver de la ficha: misma posición. Cambiar de filtros: arriba.
+  useLayoutEffect(() => {
+    if (scrollRestaurar != null && productos?.length) {
+      window.scrollTo(0, scrollRestaurar);
+      consumirScroll();
+    }
+  }, [scrollRestaurar, productos, consumirScroll]);
+  const claveFiltros = JSON.stringify(filtros);
+  const primeraClave = useRef(claveFiltros);
+  useEffect(() => {
+    if (claveFiltros !== primeraClave.current) { primeraClave.current = claveFiltros; window.scrollTo({ top: 0 }); }
+  }, [claveFiltros]);
+  useEffect(() => {
+    let raf = 0;
+    const alDesplazar = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => { if (contenedor.current?.isConnected) guardarScroll(window.scrollY); });
+    };
+    window.addEventListener("scroll", alDesplazar, { passive: true });
+    return () => { window.removeEventListener("scroll", alDesplazar); cancelAnimationFrame(raf); };
+  }, [guardarScroll]);
+
+  // Scroll infinito: al acercarse al final se pide la página siguiente (el botón "Cargar más" queda como respaldo)
+  useEffect(() => {
+    const el = centinela.current;
+    if (!el || !hayMas) return;
+    const obs = new IntersectionObserver((e) => { if (e[0]?.isIntersecting) cargarMas(); }, { rootMargin: "800px 0px" });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hayMas, cargarMas, productos?.length]);
+
+  const alternarFavorito = async (p: ProductoPortal) => {
     if (!user?.id) return;
-    if (favoritos.includes(id)) {
-      setFavoritos((prev) => prev.filter((x) => x !== id));
-      await supabase.from("favoritos").delete().eq("usuario_id", user.id).eq("producto_id", id);
-    } else {
-      setFavoritos((prev) => [...prev, id]);
-      await supabase.from("favoritos").insert({ usuario_id: user.id, producto_id: id });
+    const nuevo = !p.favorito;
+    actualizar(p.id, { favorito: nuevo });
+    invalidarFicha(p.id);
+    const { error: e } = nuevo
+      ? await supabase.from("favoritos").insert({ usuario_id: user.id, producto_id: p.id })
+      : await supabase.from("favoritos").delete().eq("usuario_id", user.id).eq("producto_id", p.id);
+    if (e) {
+      actualizar(p.id, { favorito: !nuevo });
+      toast({ title: "No se pudo guardar el favorito", description: e.message, variant: "destructive" });
     }
   };
 
-  const filtrados = useMemo(() => {
-    const q = normalizar(busqueda.trim());
-    const lista = (productos ?? []).filter((p) => {
-      const coincideCat = categoria === TODOS || p.categoria?.nombre === categoria;
-      if (!coincideCat) return false;
-      if (!q) return true;
-      return normalizar(p.nombre).includes(q) || normalizar(p.sku).includes(q) || normalizar(p.categoria?.nombre).includes(q);
-    });
-    const conDisp = (p: ProductoConEmpaques) => (disponibleDe(p) > 0 ? 0 : 1);
-    return lista.sort((a, b) => {
-      if (orden === "precio_asc") return precioDe(a) - precioDe(b);
-      if (orden === "precio_desc") return precioDe(b) - precioDe(a);
-      if (orden === "disponibles") return conDisp(a) - conDisp(b) || a.nombre.localeCompare(b.nombre, "es");
-      return a.nombre.localeCompare(b.nombre, "es");
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productos, busqueda, categoria, orden, precioDe]);
-
-  useEffect(() => { setLimite(POR_PAGINA); }, [busqueda, categoria, orden]);
-  const visibles = filtrados.slice(0, limite);
-
-  // Categorías con productos a la venta en la empresa activa (las vacías o de uso interno, como gastos de importación, no se
-  // muestran). Se ordenan por nombre; el nombre guardado se usa como clave y se muestra sin espacios sobrantes.
-  const conteoPorCategoria = useMemo(() => {
-    const m = new Map<string, number>();
-    (productos ?? []).forEach((p) => { const n = p.categoria?.nombre; if (n) m.set(n, (m.get(n) ?? 0) + 1); });
-    return m;
-  }, [productos]);
-  const categorias = useMemo(
-    () => [TODOS, ...Array.from(conteoPorCategoria.keys()).sort((a, b) => a.trim().localeCompare(b.trim(), "es"))],
-    [conteoPorCategoria],
-  );
+  const limpiar = () => { setTexto(""); ultimoEnviado.current = ""; cambiarParams({ q: null, cat: null, disp: null }); };
+  const hayFiltros = !!(qUrl || catUrl || soloDisponibles);
+  const nTodos = categorias?.reduce((s, c) => s + (c.n ?? 0), 0);
 
   const buscador = (ref?: React.Ref<HTMLInputElement>, id = "buscar-catalogo") => (
-    <div className="relative flex-1">
+    <div className="relative flex-1" role="search">
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         id={id}
         ref={ref}
         type="search"
-        placeholder="Buscar por nombre o código"
+        inputMode="search"
+        enterKeyHint="search"
+        placeholder="Buscar por nombre, marca o código"
         aria-label="Buscar productos"
         className="h-10 bg-card pl-9 pr-9"
-        value={busqueda}
-        onChange={(e) => setBusqueda(e.target.value)}
+        value={texto}
+        onChange={(e) => setTexto(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { ultimoEnviado.current = texto.trim(); cambiarParams({ q: texto.trim() || null }); (e.target as HTMLInputElement).blur(); } }}
         autoFocus={enfocar}
       />
-      {busqueda && (
-        <button type="button" onClick={() => setBusqueda("")} className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Borrar búsqueda">
+      {texto && (
+        <button type="button" onClick={() => { setTexto(""); ultimoEnviado.current = ""; cambiarParams({ q: null }); }}
+          className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Borrar búsqueda">
           <X className="h-4 w-4" />
         </button>
       )}
     </div>
   );
+
+  const chipCategoria = (id: string | null, etiqueta: string, titulo?: string) => {
+    const activa = (id ?? null) === (categoria ?? null);
+    return (
+      <button key={id ?? "todas"} type="button" onClick={() => cambiarParams({ cat: id })} aria-pressed={activa} title={titulo}
+        className={cn("shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+          activa ? "border-foreground bg-foreground text-background" : "border-border bg-card text-foreground hover:border-foreground/30")}>
+        {etiqueta}
+      </button>
+    );
+  };
+
+  const resumen = productos === null || (cargando && desactualizada && !productos.length) ? "Cargando productos…"
+    : `${total.toLocaleString("es-VE")} ${total === 1 ? "producto" : "productos"}`;
 
   return (
     <PortalPagina
@@ -148,47 +180,46 @@ const PortalCatalogo = () => {
         <div className="space-y-2.5">
           <div className="flex gap-2">
             {buscador(inputMovil, "buscar-catalogo-movil")}
-            <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" onClick={() => setFiltrosAbiertos(true)} aria-label="Filtros y orden">
+            <Button variant="outline" size="icon" className="relative h-10 w-10 shrink-0" onClick={() => setFiltrosAbiertos(true)} aria-label="Filtros y orden">
               <SlidersHorizontal className="h-4 w-4" />
+              {(soloDisponibles || orden !== "relevancia") && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" aria-hidden />}
             </Button>
           </div>
-          <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] md:-mx-6 md:px-6 [&::-webkit-scrollbar]:hidden">
-            {categorias.map((c) => (
-              <button key={c} type="button" onClick={() => setCategoria(c)} aria-pressed={categoria === c}
-                className={cn("shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                  categoria === c ? "border-foreground bg-foreground text-background" : "border-border bg-card text-foreground")}>
-                {c.trim()}
-              </button>
-            ))}
+          <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] md:-mx-6 md:px-6 [&::-webkit-scrollbar]:hidden" aria-label="Categorías">
+            {chipCategoria(null, "Todos")}
+            {(categorias ?? []).map((c) => chipCategoria(c.id, c.etiqueta, c.nombre))}
           </div>
         </div>
       }
     >
-      <div className="lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
+      <div ref={contenedor} className="lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8" data-catalogo>
         {/* Categorías (escritorio) */}
         <aside className="hidden lg:block">
           <div className="sticky top-[5.5rem]">
             <h1 className="text-2xl font-semibold tracking-tight">Catálogo</h1>
-            <p className="mt-1 text-sm text-muted-foreground tabular-nums">{productos ? `${productos.length} productos` : "Cargando…"}</p>
+            <p className="mt-1 text-sm text-muted-foreground tabular-nums">{nTodos != null ? `${nTodos} productos a la venta` : "Cargando…"}</p>
             <nav className="mt-6" aria-label="Categorías">
-              <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Categorías</p>
-              <ul className="max-h-[calc(100vh-14rem)] space-y-0.5 overflow-y-auto pr-1">
-                {categorias.map((c) => {
-                  const activa = categoria === c;
-                  const n = c === TODOS ? productos?.length : conteoPorCategoria.get(c);
+              <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Categorías</p>
+              <ul className="max-h-[calc(100vh-18rem)] space-y-0.5 overflow-y-auto pr-1">
+                {[{ id: null as string | null, etiqueta: "Todos", nombre: "Todos", n: nTodos }, ...(categorias ?? [])].map((c) => {
+                  const activa = (c.id ?? null) === (categoria ?? null);
                   return (
-                    <li key={c}>
-                      <button type="button" onClick={() => setCategoria(c)} aria-pressed={activa}
+                    <li key={c.id ?? "todas"}>
+                      <button type="button" onClick={() => cambiarParams({ cat: c.id })} aria-pressed={activa} title={c.nombre}
                         className={cn("flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
                           activa ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground")}>
-                        <span className="truncate">{c.trim()}</span>
-                        {n != null && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{n}</span>}
+                        <span className="truncate">{c.etiqueta}</span>
+                        {c.n != null && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{c.n}</span>}
                       </button>
                     </li>
                   );
                 })}
               </ul>
             </nav>
+            <label className="mt-5 flex cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2.5 text-sm">
+              <span>Solo disponibles</span>
+              <Switch checked={soloDisponibles} onCheckedChange={(v) => cambiarParams({ disp: v ? "1" : null })} aria-label="Mostrar solo productos disponibles" />
+            </label>
           </div>
         </aside>
 
@@ -196,75 +227,107 @@ const PortalCatalogo = () => {
           {/* Barra de herramientas (escritorio) */}
           <div className="mb-4 hidden items-center gap-3 lg:flex">
             {buscador()}
-            <Select value={orden} onValueChange={(v) => setOrden(v as Orden)}>
+            <Select value={orden} onValueChange={(v) => cambiarParams({ orden: v === "relevancia" ? null : v })}>
               <SelectTrigger className="h-10 w-52 bg-card" aria-label="Ordenar"><SelectValue /></SelectTrigger>
-              <SelectContent>{ORDENES.map((o) => <SelectItem key={o.valor} value={o.valor}>{o.etiqueta}</SelectItem>)}</SelectContent>
+              <SelectContent>{ORDENES_CATALOGO.map((o) => <SelectItem key={o.valor} value={o.valor}>{o.etiqueta}</SelectItem>)}</SelectContent>
             </Select>
           </div>
 
-          <p className="mb-3 text-sm text-muted-foreground tabular-nums" aria-live="polite">
-            {productos === null ? "Cargando productos…" : `${filtrados.length} ${filtrados.length === 1 ? "producto" : "productos"}`}
-            {categoria !== TODOS && <> en <span className="font-medium text-foreground">{categoria.trim()}</span></>}
-            {busqueda.trim() && <> para «{busqueda.trim()}»</>}
-          </p>
+          <div className="mb-3 flex min-h-[1.5rem] flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground" aria-live="polite">
+            <span className="tabular-nums" data-testid="catalogo-total">{resumen}</span>
+            {categoriaActual && <span>en <span className="font-medium text-foreground">{categoriaActual.etiqueta}</span></span>}
+            {qUrl.trim() && <span>{aproximado ? "parecidos a" : "para"} «{qUrl.trim()}»</span>}
+            {soloDisponibles && <span>· solo disponibles</span>}
+            {(cargando && productos !== null) && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-label="Actualizando" />}
+          </div>
+          {aproximado && total > 0 && !desactualizada && (
+            <p className="mb-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground" data-testid="catalogo-aproximado">
+              No encontramos «{qUrl.trim()}» tal cual; te mostramos productos con nombres parecidos.
+            </p>
+          )}
 
-          {productos === null ? (
-            <SkeletonProductos n={8} className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:gap-4 xl:grid-cols-4" />
-          ) : filtrados.length === 0 ? (
+          {error && !productos?.length ? (
             <div className="rounded-xl border border-border bg-card">
-              <EstadoVacio icono={PackageSearch} titulo="No encontramos productos" descripcion="Prueba con otro nombre o código, o cambia de categoría."
-                accion={(busqueda || categoria !== TODOS) ? <Button variant="outline" onClick={() => { setBusqueda(""); setCategoria(TODOS); }}>Ver todo el catálogo</Button> : undefined} />
+              <EstadoVacio icono={PackageSearch} titulo="No pudimos cargar el catálogo" descripcion={error}
+                accion={<Button variant="outline" className="gap-2" onClick={lista.reintentar}><RotateCcw className="h-4 w-4" />Reintentar</Button>} />
+            </div>
+          ) : productos === null || (cargando && !productos.length) ? (
+            <SkeletonProductos n={8} className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:gap-4 xl:grid-cols-4" />
+          ) : productos.length === 0 && !cargando ? (
+            <div className="rounded-xl border border-border bg-card">
+              <EstadoVacio icono={PackageSearch} titulo="No encontramos productos" descripcion="Prueba con otro nombre, marca o código, o cambia de categoría."
+                accion={hayFiltros ? <Button variant="outline" onClick={limpiar}>Ver todo el catálogo</Button> : undefined} />
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:gap-4 xl:grid-cols-4">
-                {visibles.map((p) => (
-                  <TarjetaProducto key={p.id} producto={p} precio={precioDe(p)} disponible={disponibleDe(p)} cantidad={cantidadDe(p.id)}
-                    favorito={favoritos.includes(p.id)} onFavorito={() => alternarFavorito(p.id)}
-                    onAgregar={() => agregar(p)} onCambiar={(d) => cambiarCantidad(p, d)} />
+              <div className={cn("grid grid-cols-2 gap-3 transition-opacity md:grid-cols-3 lg:gap-4 xl:grid-cols-4", desactualizada && "opacity-60")}
+                aria-busy={desactualizada || undefined} data-testid="catalogo-grilla">
+                {productos.map((p, i) => {
+                  const tipo = empaquePorDefecto(p);
+                  return (
+                    <TarjetaProducto key={p.id} producto={p} prioridad={i < 4} cantidad={cantidadDe(p.id, tipo)}
+                      favorito={p.favorito} onFavorito={() => alternarFavorito(p)} onAbrir={() => guardarScroll(window.scrollY)}
+                      onAgregar={() => agregar(p)} onCambiar={(d) => cambiarCantidad(p, d, tipo)} />
+                  );
+                })}
+                {cargandoMas && Array.from({ length: 4 }).map((_, i) => (
+                  <div key={`s${i}`} className="h-[19rem] animate-pulse rounded-xl border border-border bg-muted/40" aria-hidden />
                 ))}
               </div>
-              {filtrados.length > visibles.length && (
-                <div className="mt-6 flex justify-center">
-                  <Button variant="outline" onClick={() => setLimite((l) => l + POR_PAGINA)}>Mostrar más ({filtrados.length - visibles.length})</Button>
-                </div>
-              )}
+              <div ref={centinela} aria-hidden className="h-px" />
+              <div className="mt-6 flex flex-col items-center gap-2">
+                <p className="text-xs tabular-nums text-muted-foreground" data-testid="catalogo-mostrando">
+                  Mostrando {productos.length.toLocaleString("es-VE")} de {total.toLocaleString("es-VE")}
+                </p>
+                {hayMas && (
+                  <Button variant="outline" onClick={cargarMas} disabled={cargandoMas} className="gap-2" data-testid="catalogo-cargar-mas">
+                    {cargandoMas && <Loader2 className="h-4 w-4 animate-spin" />}Cargar más
+                  </Button>
+                )}
+                {error && productos.length > 0 && <p className="text-sm text-destructive">{error}</p>}
+              </div>
             </>
           )}
         </div>
       </div>
 
-      {/* Filtros y orden (móvil) */}
+      {/* Filtros y orden (móvil y tableta) */}
       <Sheet open={filtrosAbiertos} onOpenChange={setFiltrosAbiertos}>
         <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto rounded-t-2xl pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <SheetHeader className="text-left">
             <SheetTitle>Filtros y orden</SheetTitle>
-            <SheetDescription className="sr-only">Elige la categoría y el orden del catálogo.</SheetDescription>
+            <SheetDescription className="sr-only">Elige el orden, la categoría y si ver solo productos disponibles.</SheetDescription>
           </SheetHeader>
           <div className="space-y-5 py-4">
             <div>
               <p className="mb-2 text-sm font-medium">Ordenar por</p>
               <div className="grid grid-cols-2 gap-2">
-                {ORDENES.map((o) => (
-                  <button key={o.valor} type="button" onClick={() => setOrden(o.valor)} aria-pressed={orden === o.valor}
-                    className={cn("flex h-11 items-center justify-between rounded-lg border px-3 text-sm font-medium",
+                {ORDENES_CATALOGO.map((o) => (
+                  <button key={o.valor} type="button" onClick={() => cambiarParams({ orden: o.valor === "relevancia" ? null : o.valor })} aria-pressed={orden === o.valor}
+                    className={cn("flex h-11 items-center justify-between rounded-lg border px-3 text-left text-sm font-medium",
                       orden === o.valor ? "border-foreground bg-muted" : "border-border")}>
-                    {o.etiqueta}{orden === o.valor && <Check className="h-4 w-4" />}
+                    {o.etiqueta}{orden === o.valor && <Check className="h-4 w-4 shrink-0" />}
                   </button>
                 ))}
               </div>
             </div>
+            <label className="flex h-11 cursor-pointer items-center justify-between gap-3 rounded-lg border border-border px-3 text-sm font-medium">
+              <span>Solo disponibles</span>
+              <Switch checked={soloDisponibles} onCheckedChange={(v) => cambiarParams({ disp: v ? "1" : null })} aria-label="Mostrar solo productos disponibles" />
+            </label>
             <div>
               <p className="mb-2 text-sm font-medium">Categoría</p>
               <div className="flex flex-wrap gap-2">
-                {categorias.map((c) => (
-                  <button key={c} type="button" onClick={() => { setCategoria(c); setFiltrosAbiertos(false); }} aria-pressed={categoria === c}
-                    className={cn("rounded-full border px-3 py-1.5 text-sm", categoria === c ? "border-foreground bg-foreground text-background" : "border-border")}>
-                    {c.trim()}
+                {[{ id: null as string | null, etiqueta: "Todos", nombre: "Todos" }, ...(categorias ?? [])].map((c) => (
+                  <button key={c.id ?? "todas"} type="button" onClick={() => { cambiarParams({ cat: c.id }); setFiltrosAbiertos(false); }} aria-pressed={(c.id ?? null) === (categoria ?? null)}
+                    title={c.nombre}
+                    className={cn("rounded-full border px-3 py-1.5 text-sm", (c.id ?? null) === (categoria ?? null) ? "border-foreground bg-foreground text-background" : "border-border")}>
+                    {c.etiqueta}
                   </button>
                 ))}
               </div>
             </div>
+            <Button className="h-11 w-full" onClick={() => setFiltrosAbiertos(false)}>Ver {total.toLocaleString("es-VE")} {total === 1 ? "producto" : "productos"}</Button>
           </div>
         </SheetContent>
       </Sheet>

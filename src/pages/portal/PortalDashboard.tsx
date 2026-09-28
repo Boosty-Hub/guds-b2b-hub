@@ -22,11 +22,11 @@ import { BannerVisual } from "@/components/BannerVisual";
 import { estadoVisible } from "@/components/pedidos/estadoPedido";
 import { PortalPagina } from "@/components/portal/PortalPagina";
 import { usePortal } from "@/components/portal/contextoPortal";
-import { TarjetaProducto } from "@/components/portal/TarjetaProducto";
+import { TarjetaProducto, empaquePorDefecto } from "@/components/portal/TarjetaProducto";
 import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
 import { EstadoPill, EstadoVacio, Kpi, NumeroPedido, Panel, SkeletonFilas, SkeletonProductos, fechaCorta } from "@/components/portal/sistema";
-import { useCarritoPortal, type ProductoConEmpaques } from "@/hooks/useCarritoPortal";
-import { usePreciosListaCliente } from "@/hooks/usePreciosListaCliente";
+import { useCarritoPortal } from "@/hooks/useCarritoPortal";
+import { pedirCatalogo, useCategoriasPortal, type ProductoPortal } from "@/hooks/useCatalogoPortal";
 
 // Inicio del portal: lo que un comprador B2B necesita al entrar (saldo, crédito, pedidos en curso), sus pedidos recientes,
 // accesos rápidos y productos destacados para recomprar.
@@ -53,16 +53,16 @@ const PortalDashboard = () => {
   const { formatPrice } = useCurrency();
   const { getActiveBanners } = useStoreConfig();
   const portal = usePortal();
-  const { precioDe } = usePreciosListaCliente();
-  const { agregar, agregarConEmpaque, cambiarCantidad, cantidadDe, disponibleDe, empaqueProducto, empaquePrecios, cerrarEmpaque } = useCarritoPortal();
+  const { agregar, agregarConEmpaque, cambiarCantidad, cantidadDe, empaqueProducto, empaquePrecios, cerrarEmpaque } = useCarritoPortal();
 
   const [cargando, setCargando] = useState(true);
   const [ordenes, setOrdenes] = useState<OrdenResumen[]>([]);
   const [facturas, setFacturas] = useState<{ saldo_usd: number; fecha_vencimiento: string | null }[]>([]);
   const [credito, setCredito] = useState<Credito | null>(null);
-  const [destacados, setDestacados] = useState<ProductoConEmpaques[] | null>(null);
-  // Categorías con productos a la venta en la empresa activa (las vacías o internas no se muestran)
-  const [categorias, setCategorias] = useState<{ nombre: string; n: number }[]>([]);
+  // Destacados con el precio del servidor (catalogo_portal) y categorías con productos a la venta en la empresa activa
+  const [destacados, setDestacados] = useState<ProductoPortal[] | null>(null);
+  const categoriasPortal = useCategoriasPortal();
+  const categorias = [...(categoriasPortal ?? [])].sort((a, b) => (b.n ?? 0) - (a.n ?? 0));
 
   const banners = getActiveBanners();
 
@@ -84,17 +84,9 @@ const PortalDashboard = () => {
       setCredito(((c.data as Credito[] | null) ?? [])[0] ?? null);
       setCargando(false);
     });
-    supabase.from("productos").select("*, producto_empaques(*, tipo_empaque:tipos_empaque(*))").eq("activo", true).eq("destacado", true).order("nombre").limit(8)
-      .then(({ data }) => { if (activo) setDestacados((data as ProductoConEmpaques[] | null) ?? []); });
-    supabase.from("productos").select("categoria:categorias(nombre)").eq("activo", true)
-      .then(({ data }) => {
-        if (!activo) return;
-        const m = new Map<string, number>();
-        ((data as unknown as { categoria: { nombre: string } | null }[] | null) ?? []).forEach((r) => {
-          const n = r.categoria?.nombre; if (n) m.set(n, (m.get(n) ?? 0) + 1);
-        });
-        setCategorias(Array.from(m, ([nombre, n]) => ({ nombre, n })).sort((a, b) => b.n - a.n));
-      });
+    pedirCatalogo({ soloDestacados: true, orden: "nombre", limite: 8 })
+      .then((r) => { if (activo) setDestacados(r.productos); })
+      .catch(() => { if (activo) setDestacados([]); });
     return () => { activo = false; };
   }, [user?.cliente_id]);
 
@@ -211,9 +203,9 @@ const PortalDashboard = () => {
               <Panel titulo="Categorías" accion={<Link to="/portal/catalogo" className="text-sm font-medium text-primary hover:underline">Ver catálogo</Link>}>
                 <div className="flex flex-wrap gap-2">
                   {categorias.slice(0, 12).map((c) => (
-                    <Link key={c.nombre} to={`/portal/catalogo?cat=${encodeURIComponent(c.nombre)}`}
+                    <Link key={c.id} to={`/portal/catalogo?cat=${c.id}`} title={c.nombre}
                       className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:border-foreground/30 hover:bg-muted/50">
-                      {c.nombre.trim()}<span className="tabular-nums text-muted-foreground">{c.n}</span>
+                      {c.etiqueta}<span className="tabular-nums text-muted-foreground">{c.n}</span>
                     </Link>
                   ))}
                 </div>
@@ -233,10 +225,13 @@ const PortalDashboard = () => {
               <SkeletonProductos n={4} className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 lg:gap-4" />
             ) : (
               <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 lg:gap-4">
-                {destacados.map((p) => (
-                  <TarjetaProducto key={p.id} producto={p} precio={precioDe(p)} disponible={disponibleDe(p)} cantidad={cantidadDe(p.id)}
-                    onAgregar={() => agregar(p)} onCambiar={(d) => cambiarCantidad(p, d)} />
-                ))}
+                {destacados.map((p) => {
+                  const tipo = empaquePorDefecto(p);
+                  return (
+                    <TarjetaProducto key={p.id} producto={p} cantidad={cantidadDe(p.id, tipo)}
+                      onAgregar={() => agregar(p)} onCambiar={(d) => cambiarCantidad(p, d, tipo)} />
+                  );
+                })}
               </div>
             )}
           </section>

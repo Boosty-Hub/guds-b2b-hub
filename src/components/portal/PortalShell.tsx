@@ -1,8 +1,8 @@
-import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as EventoTeclado } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  Boxes, ChevronDown, ClipboardList, Heart, Home, Landmark, LayoutGrid, LifeBuoy, LogOut, Receipt, Search, TicketPercent,
-  UserRound, Wallet, type LucideIcon,
+  ArrowRight, Boxes, ChevronDown, ClipboardList, Heart, Home, Landmark, LayoutGrid, LifeBuoy, Loader2, LogOut, Receipt, Search,
+  TicketPercent, UserRound, Wallet, type LucideIcon,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,8 @@ import { BarraCarrito, BotonCarrito, CarritoHoja, useCarritoPanel } from "@/comp
 import { ContextoPortal, type ClientePortal } from "@/components/portal/contextoPortal";
 import { SelectorMoneda } from "@/components/portal/sistema";
 import { PaginaCargando } from "@/components/portal/PortalPagina";
+import { ProductImage } from "@/components/portal/ProductImage";
+import { pedirCatalogo, sembrarFicha, useAlcanceCatalogo, type PaginaCatalogo, type ProductoPortal } from "@/hooks/useCatalogoPortal";
 
 // Shell responsive del portal del cliente (F1). Es una ruta de diseño: se monta una vez y las páginas cambian dentro.
 //  · Móvil y tableta (< 1024 px): encabezado compacto (lo pone cada página), barra inferior con 5 destinos y barra de
@@ -255,10 +257,19 @@ export default function PortalShell() {
   );
 }
 
-/** Buscador del catálogo en la barra superior (atajo "/"). */
+/** Buscador del catálogo en la barra superior (atajo "/"): sugiere productos que abren su ficha; Enter busca en el catálogo. */
 function BuscadorSuperior() {
+  useAlcanceCatalogo();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { formatPrice } = useCurrency();
   const [q, setQ] = useState("");
+  const [abierto, setAbierto] = useState(false);
+  const [resultado, setResultado] = useState<(PaginaCatalogo & { q: string }) | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [activo, setActivo] = useState(-1);
+  const caja = useRef<HTMLFormElement>(null);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -270,24 +281,109 @@ function BuscadorSuperior() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Sugerencias con espera de 200 ms (desde 2 letras); se descartan las respuestas viejas
+  useEffect(() => {
+    const t = q.trim();
+    if (t.length < 2) { setResultado(null); setCargando(false); return; }
+    let vivo = true;
+    setCargando(true);
+    const id = setTimeout(() => {
+      pedirCatalogo({ busqueda: t, limite: 6 })
+        .then((r) => { if (vivo) { setResultado({ ...r, q: t }); setActivo(-1); } })
+        .catch(() => { if (vivo) setResultado(null); })
+        .finally(() => { if (vivo) setCargando(false); });
+    }, 200);
+    return () => { vivo = false; clearTimeout(id); };
+  }, [q]);
+
+  // Cerrar al hacer clic fuera
+  useEffect(() => {
+    if (!abierto) return;
+    const fuera = (e: MouseEvent) => { if (!caja.current?.contains(e.target as Node)) setAbierto(false); };
+    document.addEventListener("mousedown", fuera);
+    return () => document.removeEventListener("mousedown", fuera);
+  }, [abierto]);
+
+  const productos = resultado?.productos ?? [];
+  const mostrar = abierto && q.trim().length >= 2 && (resultado != null || cargando);
+
+  const abrirFicha = (p: ProductoPortal) => {
+    sembrarFicha(p);
+    setAbierto(false);
+    setQ("");
+    navigate(`/portal/producto/${p.id}`, { state: { desde: location.pathname + location.search } });
+  };
+  const verTodo = () => {
+    const t = q.trim();
+    setAbierto(false);
+    navigate(t ? `/portal/catalogo?q=${encodeURIComponent(t)}` : "/portal/catalogo");
+    setQ("");
+  };
   const enviar = (e: FormEvent) => {
     e.preventDefault();
-    const t = q.trim();
-    navigate(t ? `/portal/catalogo?q=${encodeURIComponent(t)}` : "/portal/catalogo");
+    if (activo >= 0 && productos[activo]) abrirFicha(productos[activo]);
+    else verTodo();
   };
+  const teclas = (e: EventoTeclado<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setAbierto(true); setActivo((i) => Math.min(productos.length - 1, i + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActivo((i) => Math.max(-1, i - 1)); }
+    else if (e.key === "Escape") { setAbierto(false); setActivo(-1); }
+  };
+
   return (
-    <form onSubmit={enviar} className="relative w-full max-w-md" role="search">
+    <form ref={caja} onSubmit={enviar} className="relative w-full max-w-md" role="search">
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <input
         id="buscador-superior"
         type="search"
         value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Buscar productos por nombre o código"
+        onChange={(e) => { setQ(e.target.value); setAbierto(true); }}
+        onFocus={() => setAbierto(true)}
+        onKeyDown={teclas}
+        placeholder="Buscar productos por nombre, marca o código"
         aria-label="Buscar productos"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={mostrar}
+        aria-controls="sugerencias-busqueda"
+        aria-activedescendant={activo >= 0 ? `sugerencia-${activo}` : undefined}
+        autoComplete="off"
         className="h-9 w-full rounded-md border border-border bg-muted/40 pl-9 pr-10 text-sm outline-none placeholder:text-muted-foreground focus:border-ring focus:bg-card focus:ring-2 focus:ring-ring/20"
       />
-      <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border border-border bg-card px-1.5 text-[11px] text-muted-foreground xl:block">/</kbd>
+      {cargando ? (
+        <Loader2 className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" aria-hidden />
+      ) : (
+        <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border border-border bg-card px-1.5 text-[11px] text-muted-foreground xl:block">/</kbd>
+      )}
+      {mostrar && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg" data-testid="buscador-sugerencias">
+          <ul id="sugerencias-busqueda" role="listbox" aria-label="Productos sugeridos" className="max-h-[60vh] overflow-y-auto py-1">
+            {productos.map((p, i) => (
+              <li key={p.id} id={`sugerencia-${i}`} role="option" aria-selected={i === activo}
+                onMouseDown={(e) => e.preventDefault()} onClick={() => abrirFicha(p)} onMouseEnter={() => setActivo(i)}
+                className={cn("flex cursor-pointer items-center gap-3 px-3 py-2", i === activo && "bg-muted")} data-testid="sugerencia-producto">
+                <ProductImage imageUrl={p.imagenes?.[0] ?? p.imagen_url} alt={p.nombre} size="sm" className="h-10 w-10 border border-border/60 bg-white" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-foreground">{p.nombre}</span>
+                  <span className="block truncate text-xs text-muted-foreground tabular-nums">{[p.sku, p.categoria?.etiqueta].filter(Boolean).join(" · ")}</span>
+                </span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums">{formatPrice(Number(p.precio))}</span>
+              </li>
+            ))}
+            {resultado && productos.length === 0 && !cargando && (
+              <li className="px-3 py-3 text-sm text-muted-foreground" role="presentation">No encontramos productos para «{resultado.q}».</li>
+            )}
+          </ul>
+          {resultado && resultado.total > 0 && (
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={verTodo}
+              className="flex w-full items-center justify-between gap-2 border-t border-border px-3 py-2.5 text-left text-sm font-medium text-primary hover:bg-muted/60">
+              <span>{resultado.aproximado ? "Ver resultados parecidos" : `Ver los ${resultado.total.toLocaleString("es-VE")} resultados`} en el catálogo</span>
+              <ArrowRight className="h-4 w-4 shrink-0" />
+            </button>
+          )}
+        </div>
+      )}
     </form>
   );
 }

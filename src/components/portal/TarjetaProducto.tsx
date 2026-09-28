@@ -1,53 +1,66 @@
 import { Heart, Minus, Plus } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { ProductImage } from "@/components/portal/ProductImage";
 import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
-import type { ProductoConEmpaques } from "@/hooks/useCarritoPortal";
 import { unidadTexto } from "@/components/portal/sistema";
+import { disponibleProducto, precargarFicha, sembrarFicha, type ProductoPortal } from "@/hooks/useCatalogoPortal";
 
 // Tarjeta de producto del portal: foto sobre blanco (o placeholder de marca), código, nombre, empaque y disponible,
-// precio con cifras tabulares y control de cantidad a todo el ancho (táctil de 40 px).
+// precio del servidor (el que cobra el carrito) y control de cantidad a todo el ancho. Toda la tarjeta abre la ficha;
+// el corazón y el control de cantidad quedan por encima del enlace.
 
 interface Props {
-  producto: ProductoConEmpaques;
-  precio: number;
-  disponible: number;          // unidades (Infinity si no controla existencias)
-  cantidad: number;            // en el carrito
+  producto: ProductoPortal;
+  cantidad: number;            // en el carrito (de la opción que se agrega por defecto)
   favorito?: boolean;
   onFavorito?: () => void;
   onAgregar: () => void;
   onCambiar: (delta: number) => void;
+  /** Antes de abrir la ficha (p. ej. guardar la posición del catálogo). */
+  onAbrir?: () => void;
+  /** Primera fila visible: la foto se pide de inmediato. */
+  prioridad?: boolean;
   className?: string;
 }
 
-const empaqueTexto = (p: ProductoConEmpaques) => {
+/** Texto de la opción por defecto: "Caja ×12", "2 empaques" o la unidad de medida. */
+export const empaqueTexto = (p: Pick<ProductoPortal, "producto_empaques" | "unidad">) => {
   const emp = p.producto_empaques ?? [];
   if (emp.length > 1) return `${emp.length} empaques`;
   if (emp.length === 1) {
     const t = emp[0].tipo_empaque;
-    return t ? `${t.nombre}${Number(t.unidades) > 1 ? ` ×${t.unidades}` : ""}` : unidadTexto(p.unidad);
+    return `${t.nombre}${Number(t.unidades) > 1 ? ` ×${t.unidades}` : ""}`;
   }
-  return unidadTexto(p.unidad);
+  return unidadTexto(p.unidad) || "Unidad";
 };
 
-export const TarjetaProducto = ({ producto: p, precio, disponible, cantidad, favorito, onFavorito, onAgregar, onCambiar, className }: Props) => {
+export const rutaFicha = (id: string) => `/portal/producto/${id}`;
+
+export const TarjetaProducto = ({ producto: p, cantidad, favorito, onFavorito, onAgregar, onCambiar, onAbrir, prioridad, className }: Props) => {
   const { formatPrice } = useCurrency();
-  const hay = disponible > 0;
+  const location = useLocation();
+  const disponible = disponibleProducto(p);
+  const unidades = Math.max(1, Number(p.precio_unidades) || 1);
+  const hay = disponible >= unidades || (!Number.isFinite(disponible));
   const pocas = Number.isFinite(disponible) && hay && disponible < 20;
-  // Un solo empaque de varias unidades (p. ej. "Caja ×12"): se muestra el precio del empaque, que es lo que se cobra al
-  // agregarlo (precio propio del empaque o unidad × unidades, como precio_efectivo), y el de la unidad debajo
-  const empUnico = (p.producto_empaques ?? []).length === 1 ? p.producto_empaques![0] as { tipo_empaque?: { unidades?: number } | null; precio_empaque?: number | null } : null;
-  const unidadesEmp = Number(empUnico?.tipo_empaque?.unidades ?? 1);
-  const precioEmpaque = empUnico && unidadesEmp > 1 ? Number(empUnico.precio_empaque ?? precio * unidadesEmp) : null;
+  const varios = (p.producto_empaques ?? []).length > 1;
+  const precio = Number(p.precio);
+  const tachado = p.en_oferta && p.precio_oferta && Number(p.precio_base) * unidades > precio ? Number(p.precio_base) * unidades : null;
+  const foto = p.imagenes?.[0] ?? p.imagen_url;
+
+  const abrir = () => { sembrarFicha(p); onAbrir?.(); };
 
   return (
-    <article className={cn("flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-sm", className)} data-testid="producto-card">
+    <article className={cn("relative flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-sm focus-within:ring-2 focus-within:ring-ring/40", className)}
+      data-testid="producto-card" data-producto-id={p.id}
+      onMouseEnter={() => precargarFicha(p.id)}>
       <div className="relative aspect-[16/10] overflow-hidden border-b border-border/60 bg-white">
-        <ProductImage imageUrl={p.imagen_url} images={p.imagenes} alt={p.nombre} size="xl" className="absolute inset-0 h-full w-full rounded-none border-0" />
+        <ProductImage imageUrl={foto} alt={p.nombre} size="xl" prioridad={prioridad} className="absolute inset-0 h-full w-full rounded-none border-0" />
         {p.en_oferta && p.porcentaje_descuento ? (
-          <span className="absolute left-2 top-2 rounded bg-primary px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-primary-foreground">−{p.porcentaje_descuento}%</span>
+          <span className="absolute left-2 top-2 rounded bg-primary px-1.5 py-0.5 text-xs font-semibold tabular-nums text-primary-foreground">−{p.porcentaje_descuento}%</span>
         ) : null}
         {onFavorito && (
           <button
@@ -55,7 +68,7 @@ export const TarjetaProducto = ({ producto: p, precio, disponible, cantidad, fav
             onClick={onFavorito}
             aria-pressed={!!favorito}
             aria-label={favorito ? `Quitar ${p.nombre} de favoritos` : `Agregar ${p.nombre} a favoritos`}
-            className="absolute right-1.5 top-1.5 flex h-9 w-9 items-center justify-center rounded-full bg-card/90 text-muted-foreground shadow-sm hover:text-foreground"
+            className="absolute right-1.5 top-1.5 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-card/90 text-muted-foreground shadow-sm hover:text-foreground"
           >
             <Heart className={cn("h-4 w-4", favorito && "fill-primary text-primary")} />
           </button>
@@ -63,27 +76,31 @@ export const TarjetaProducto = ({ producto: p, precio, disponible, cantidad, fav
       </div>
 
       <div className="flex flex-1 flex-col p-3">
-        {p.sku && <p className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground tabular-nums">{p.sku}</p>}
-        <h3 className="mt-0.5 line-clamp-2 min-h-[2.5rem] text-sm font-medium leading-5 text-foreground" title={p.nombre}>{p.nombre}</h3>
+        {p.sku && <p className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground tabular-nums">{p.sku}</p>}
+        <h3 className="mt-0.5 line-clamp-2 min-h-[2.5rem] text-sm font-medium leading-5 text-foreground" title={p.nombre}>
+          {/* Enlace extendido: el área de toda la tarjeta abre la ficha */}
+          <Link to={rutaFicha(p.id)} state={{ desde: location.pathname + location.search }} onClick={abrir} onFocus={() => precargarFicha(p.id)}
+            className="outline-none after:absolute after:inset-0 after:content-['']" data-testid="producto-enlace">
+            {p.nombre}
+          </Link>
+        </h3>
         <p className="mt-1 truncate text-xs text-muted-foreground">
           {empaqueTexto(p)}
           {!hay ? null : pocas ? <span className="text-amber-700"> · quedan {Math.floor(disponible).toLocaleString("es-VE")}</span>
-            : Number.isFinite(disponible) ? <span> · {Math.floor(disponible).toLocaleString("es-VE")} {unidadesEmp > 1 ? "und. " : ""}disp.</span> : null}
+            : Number.isFinite(disponible) ? <span> · {Math.floor(disponible).toLocaleString("es-VE")} {unidades > 1 ? "und. " : ""}disp.</span> : null}
         </p>
 
         <div className="mt-auto pt-3">
           <div className="flex items-baseline gap-2">
-            <p className="text-base font-semibold tabular-nums text-foreground">{formatPrice(precioEmpaque ?? precio)}</p>
-            {p.en_oferta && p.precio_oferta && Number(p.precio_base) > precio && (
-              <p className="text-xs tabular-nums text-muted-foreground line-through">{formatPrice(Number(p.precio_base) * (precioEmpaque ? unidadesEmp : 1))}</p>
-            )}
+            <p className="text-base font-semibold tabular-nums text-foreground" data-testid="producto-precio" data-precio={precio}>
+              {varios && <span className="mr-1 text-xs font-normal text-muted-foreground">desde</span>}{formatPrice(precio)}
+            </p>
+            {tachado != null && <p className="text-xs tabular-nums text-muted-foreground line-through">{formatPrice(tachado)}</p>}
           </div>
-          {precioEmpaque != null && (
-            <p className="text-xs tabular-nums text-muted-foreground">{formatPrice(precioEmpaque / unidadesEmp)} c/u</p>
-          )}
+          {unidades > 1 && <p className="text-xs tabular-nums text-muted-foreground">{formatPrice(precio / unidades)} c/u</p>}
           <EtiquetaIva pct={p.impuesto_pct} nombre={p.impuesto_nombre} className="block text-xs" />
 
-          <div className="mt-2.5">
+          <div className="relative z-10 mt-2.5">
             {!hay ? (
               <p className="flex h-10 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">Agotado</p>
             ) : cantidad === 0 ? (
@@ -104,4 +121,10 @@ export const TarjetaProducto = ({ producto: p, precio, disponible, cantidad, fav
       </div>
     </article>
   );
+};
+
+/** Tipo de empaque de la opción por defecto (undefined con varios empaques: el control suma en la primera línea). */
+export const empaquePorDefecto = (p: ProductoPortal) => {
+  const emp = p.producto_empaques ?? [];
+  return emp.length > 1 ? undefined : emp[0]?.tipo_empaque_id ?? null;
 };

@@ -16,6 +16,38 @@ export interface ProductoConEmpaques extends Producto {
   }[];
 }
 
+/** Empaque mínimo que necesita el carrito. */
+export interface EmpaqueCarrito {
+  id: string;
+  nombre: string;
+  unidades: number;
+}
+
+/** Lo mínimo de un producto que usa el carrito (lo cumplen el producto de la tabla y el del catálogo del portal). */
+export interface ProductoCarrito {
+  id: string;
+  nombre: string;
+  precio_base: number;
+  en_oferta?: boolean | null;
+  precio_oferta?: number | null;
+  controla_stock?: boolean | null;
+  stock_disponible?: number | null;
+  stock_actual?: number | null;
+  imagen_url?: string | null;
+  imagenes?: string[] | null;
+  imagen_emoji?: string | null;
+  producto_empaques?: {
+    id: string;
+    tipo_empaque_id: string;
+    /** Precio del empaque para el cliente, si ya lo trae el catálogo (precio_efectivo). */
+    precio?: number | null;
+    tipo_empaque: EmpaqueCarrito;
+  }[];
+}
+
+// Columnas del producto que lee el portal (nunca select=*: el costo solo lo ve administración)
+const COLUMNAS_PRODUCTO = "id, nombre, sku, activo, vendible, oculto_tienda, controla_stock, stock_disponible, stock_actual, en_oferta, precio_oferta, precio_base, producto_empaques(id, tipo_empaque_id, activo, tipo_empaque:tipos_empaque(id, nombre, unidades))";
+
 export interface ItemCarrito {
   id: string;
   producto_id: string;
@@ -43,7 +75,7 @@ export const useCarritoPortal = () => {
   const { toast } = useToast();
   const [cart, setCart] = useState<ItemCarrito[]>([]);
   // Diálogo para elegir empaque cuando el producto tiene más de uno
-  const [empaqueProducto, setEmpaqueProducto] = useState<ProductoConEmpaques | null>(null);
+  const [empaqueProducto, setEmpaqueProducto] = useState<ProductoCarrito | null>(null);
   // Precio real por empaque (mismo que cobra el checkout) para el diálogo: { tipo_empaque_id: precio }
   const [empaquePrecios, setEmpaquePrecios] = useState<Record<string, number>>({});
 
@@ -66,21 +98,28 @@ export const useCarritoPortal = () => {
   }, [cargarCarrito]);
 
   // Disponible para vender (unidades): existencia − lo comprometido en pedidos y entregas. Sin control de stock: sin tope.
-  const disponibleDe = (p: ProductoConEmpaques) => (p.controla_stock === false ? Infinity : Number(p.stock_disponible ?? p.stock_actual ?? 0));
-  const unidadesEmpaque = (p: ProductoConEmpaques, tipoId: string | null) =>
+  const disponibleDe = (p: ProductoCarrito) => (p.controla_stock === false ? Infinity : Number(p.stock_disponible ?? p.stock_actual ?? 0));
+  const unidadesEmpaque = (p: ProductoCarrito, tipoId: string | null) =>
     Math.max(1, Number(p.producto_empaques?.find((pe) => pe.tipo_empaque_id === tipoId)?.tipo_empaque?.unidades ?? 1));
-  const unidadesEnCarrito = (p: ProductoConEmpaques) =>
+  const unidadesEnCarrito = (p: ProductoCarrito) =>
     cart.filter((i) => i.producto_id === p.id).reduce((s, i) => s + i.cantidad * unidadesEmpaque(p, i.tipo_empaque_id), 0);
-  const cabeEnStock = (p: ProductoConEmpaques, unidadesExtra: number) => {
+  /** Cuántos empaques (o unidades, sin empaque) más caben en el disponible, contando lo que ya está en el carrito. */
+  const maximoAgregable = (p: ProductoCarrito, tipoId: string | null) => {
+    const libre = disponibleDe(p) - unidadesEnCarrito(p);
+    return Number.isFinite(libre) ? Math.max(0, Math.floor(libre / unidadesEmpaque(p, tipoId))) : Infinity;
+  };
+  const cabeEnStock = (p: ProductoCarrito, unidadesExtra: number) => {
     const disp = disponibleDe(p);
     if (unidadesEnCarrito(p) + unidadesExtra <= disp) return true;
     toast({ title: "Sin disponible suficiente", description: `De ${p.nombre} quedan ${Math.max(0, Math.floor(disp))} unidades disponibles (el resto está comprometido en pedidos).`, variant: "destructive" });
     return false;
   };
 
-  const agregarConEmpaque = async (product: ProductoConEmpaques, empaque: TipoEmpaque | null) => {
+  /** Agrega `cantidad` empaques (o unidades si no hay empaque) con el precio del servidor. */
+  const agregarConEmpaque = async (product: ProductoCarrito, empaque: EmpaqueCarrito | null, cantidad = 1) => {
     if (!user?.id) return false;
-    if (!cabeEnStock(product, unidadesEmpaque(product, empaque?.id || null))) return false;
+    cantidad = Math.max(1, Math.floor(cantidad));
+    if (!cabeEnStock(product, unidadesEmpaque(product, empaque?.id || null) * cantidad)) return false;
 
     // Precio efectivo autoritativo (lista de cliente / empaque / oferta / base).
     // Es la misma función que usa el checkout, así el carrito nunca miente.
@@ -103,7 +142,7 @@ export const useCarritoPortal = () => {
     );
 
     if (existing) {
-      const newCantidad = existing.cantidad + 1;
+      const newCantidad = existing.cantidad + cantidad;
       const { error } = await supabase
         .from("carrito")
         .update({ cantidad: newCantidad, updated_at: new Date().toISOString() })
@@ -120,7 +159,7 @@ export const useCarritoPortal = () => {
           usuario_id: user.id,
           producto_id: product.id,
           tipo_empaque_id: empaque?.id || null,
-          cantidad: 1,
+          cantidad,
           precio_unitario: precioUnitario,
         })
         .select("id, producto_id, tipo_empaque_id, cantidad, precio_unitario")
@@ -133,18 +172,23 @@ export const useCarritoPortal = () => {
     }
 
     setEmpaqueProducto(null);
-    const empaqueNombre = empaque ? ` (${empaque.nombre})` : "";
+    const empaqueNombre = empaque ? ` (${cantidad > 1 ? `${cantidad} × ` : ""}${empaque.nombre})` : cantidad > 1 ? ` (${cantidad})` : "";
     toast({ title: "Agregado al carrito", description: `${product.nombre}${empaqueNombre}` });
     notifyCartChanged();
     return true;
   };
 
   // Punto de entrada del botón "+": con más de un empaque pide elegir; con uno o ninguno agrega directo.
-  const agregar = async (product: ProductoConEmpaques) => {
+  const agregar = async (product: ProductoCarrito) => {
     if (!user?.id) return;
     const empaques = product.producto_empaques || [];
     if (empaques.length > 1) {
       setEmpaqueProducto(product);
+      // El catálogo del portal ya trae el precio de cada empaque (el mismo que cobra el servidor)
+      if (empaques.every((pe) => pe.precio != null)) {
+        setEmpaquePrecios(Object.fromEntries(empaques.map((pe) => [pe.tipo_empaque_id, Number(pe.precio)])));
+        return;
+      }
       setEmpaquePrecios({});
       const entries = await Promise.all(empaques.map(async (pe) => {
         const { data } = await supabase.rpc("precio_efectivo", {
@@ -161,8 +205,9 @@ export const useCarritoPortal = () => {
     }
   };
 
-  const cambiarCantidad = async (product: ProductoConEmpaques, delta: number) => {
-    const item = cart.find((i) => i.producto_id === product.id);
+  /** Suma o resta en la línea del producto con ese empaque (sin empaque indicado: la primera línea del producto). */
+  const cambiarCantidad = async (product: ProductoCarrito, delta: number, tipoEmpaqueId?: string | null) => {
+    const item = cart.find((i) => i.producto_id === product.id && (tipoEmpaqueId === undefined || i.tipo_empaque_id === tipoEmpaqueId));
     if (!item) return;
     const newCantidad = Math.max(0, item.cantidad + delta);
     if (delta > 0 && !cabeEnStock(product, delta * unidadesEmpaque(product, item.tipo_empaque_id))) return;
@@ -177,8 +222,10 @@ export const useCarritoPortal = () => {
     notifyCartChanged();
   };
 
-  const cantidadDe = (productId: string) =>
-    cart.filter((i) => i.producto_id === productId).reduce((s, i) => s + i.cantidad, 0);
+  /** Cantidad en el carrito del producto (con ese empaque, si se indica). */
+  const cantidadDe = (productId: string, tipoEmpaqueId?: string | null) =>
+    cart.filter((i) => i.producto_id === productId && (tipoEmpaqueId === undefined || i.tipo_empaque_id === tipoEmpaqueId))
+      .reduce((s, i) => s + i.cantidad, 0);
 
   // "Volver a pedir": agrega las líneas de un pedido anterior al carrito, con el mismo empaque, sin pasar del disponible
   // (lo que ya está en el carrito cuenta) y con el precio de hoy (precio_efectivo). Informa lo que se ajustó o se omitió.
@@ -187,14 +234,15 @@ export const useCarritoPortal = () => {
     if (!user?.id || lineas.length === 0) return res;
     const ids = Array.from(new Set(lineas.map((l) => l.producto_id)));
     const [{ data: prods }, { data: actual }] = await Promise.all([
-      supabase.from("productos").select("*, producto_empaques(*, tipo_empaque:tipos_empaque(*))").in("id", ids),
+      supabase.from("productos").select(COLUMNAS_PRODUCTO).in("id", ids),
       supabase.from("carrito").select("id, producto_id, tipo_empaque_id, cantidad, precio_unitario").eq("usuario_id", user.id),
     ]);
-    const porId = new Map(((prods as ProductoConEmpaques[] | null) ?? []).map((p) => [p.id, p]));
+    type ProductoRepetir = ProductoCarrito & { activo?: boolean; vendible?: boolean | null; oculto_tienda?: boolean | null };
+    const porId = new Map(((prods as unknown as ProductoRepetir[] | null) ?? []).map((p) => [p.id, p]));
     let carrito = ((actual as ItemCarrito[] | null) ?? []).slice();
-    const unidadesDe = (p: ProductoConEmpaques, tipoId: string | null) =>
+    const unidadesDe = (p: ProductoCarrito, tipoId: string | null) =>
       tipoId ? Math.max(1, Number(p.producto_empaques?.find((pe) => pe.tipo_empaque_id === tipoId)?.tipo_empaque?.unidades ?? 1)) : 1;
-    const enCarrito = (p: ProductoConEmpaques) =>
+    const enCarrito = (p: ProductoCarrito) =>
       carrito.filter((i) => i.producto_id === p.id).reduce((s, i) => s + i.cantidad * unidadesDe(p, i.tipo_empaque_id), 0);
 
     for (const l of lineas) {
@@ -249,6 +297,7 @@ export const useCarritoPortal = () => {
     cambiarCantidad,
     cantidadDe,
     disponibleDe,
+    maximoAgregable,
     empaqueProducto,
     empaquePrecios,
     cerrarEmpaque: () => setEmpaqueProducto(null),

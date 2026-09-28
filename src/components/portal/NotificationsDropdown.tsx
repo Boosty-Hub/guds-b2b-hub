@@ -55,6 +55,7 @@ export const NotificationsDropdown = ({ variant = "default" }: NotificationsDrop
         <Button
           variant="ghost"
           size="icon"
+          aria-label={unreadCount > 0 ? `Avisos (${unreadCount} sin leer)` : "Avisos"}
           className={`relative ${
             isHeader
               ? "text-primary-foreground hover:bg-white/20"

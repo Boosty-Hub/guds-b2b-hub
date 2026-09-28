@@ -75,6 +75,7 @@ const ConfigIconos = lazy(() => import("./pages/configuracion/ConfigIconos"));
 const PortalShell = lazy(() => import("./components/portal/PortalShell"));
 const PortalDashboard = lazy(() => import("./pages/portal/PortalDashboard"));
 const PortalCatalogo = lazy(() => import("./pages/portal/PortalCatalogo"));
+const PortalProducto = lazy(() => import("./pages/portal/PortalProducto"));
 const PortalCarrito = lazy(() => import("./pages/portal/PortalCarrito"));
 const PortalPedidos = lazy(() => import("./pages/portal/PortalPedidos"));
 const PortalPagos = lazy(() => import("./pages/portal/PortalPagos"));
@@ -227,6 +228,7 @@ const App = () => (
                 <Route element={<ProtectedRoute allowedRoles={["cliente"]}><PortalShell /></ProtectedRoute>}>
                   <Route path="/portal" element={<PortalDashboard />} />
                   <Route path="/portal/catalogo" element={<PortalCatalogo />} />
+                  <Route path="/portal/producto/:id" element={<PortalProducto />} />
                   <Route path="/portal/carrito" element={<PortalCarrito />} />
                   <Route path="/portal/pedidos" element={<PortalPedidos />} />
                   <Route path="/portal/pagos" element={<PortalPagos />} />

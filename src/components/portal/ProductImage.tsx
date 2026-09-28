@@ -17,6 +17,8 @@ interface ProductImageProps {
   alt?: string;
   className?: string;
   size?: "sm" | "md" | "lg" | "xl";
+  /** Imagen visible al cargar (primera fila): se pide de inmediato y con prioridad alta en vez de diferida. */
+  prioridad?: boolean;
 }
 
 const sizeClasses = {
@@ -41,6 +43,7 @@ export const ProductImage = ({
   alt = "Producto",
   className = "",
   size = "md",
+  prioridad = false,
 }: ProductImageProps) => {
   const [imageError, setImageError] = useState(false);
 
@@ -68,7 +71,8 @@ export const ProductImage = ({
   if (url && !imageError) {
     return (
       <div className={cn(base, "bg-white")}>
-        <img src={url} alt={alt} loading="lazy" decoding="async" className="h-full w-full object-contain" onError={() => setImageError(true)} />
+        <img src={url} alt={alt} loading={prioridad ? "eager" : "lazy"} decoding="async" {...(prioridad ? { fetchpriority: "high" } : {})}
+          className="h-full w-full object-contain" onError={() => setImageError(true)} />
       </div>
     );
   }
