@@ -10,6 +10,25 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-29 · Fotos y descripciones bidireccionales con Odoo (decisión 15) y portales a 90+ en Lighthouse móvil
+
+- **Fotos y descripciones** (`…20r_fotos_descripciones_odoo.sql`): lo que administración cambia en la foto principal o la
+  descripción de un producto se encola y se escribe en Odoo (`product.template`: `image_1920`, `description_sale`; la lista blanca
+  de `odoo.js` solo se amplió con eso); lo que cambie en Odoo llega en cada sincronización (detección por checksum del adjunto,
+  solo se descargan las fotos cambiadas, con tope por corrida; la descripción se lee en es_VE y ahora también se actualiza tras
+  crear el producto). Gana el cambio más reciente por campo, sin bucles (huellas de lo último visto o escrito en Odoo). Nunca se
+  manda una imagen vacía (borraría el adjunto). Recuadro «Se sincroniza con Odoo» en Productos con origen y estado del envío.
+  Modo `odoo_escritura_productos` = activo tras una única escritura real verificada (una foto que ya estaba en GUDS).
+- **Rendimiento** (portal y vendedor, sin PWA): Lighthouse móvil 90–95 en las 6 rutas medidas (antes 82–87), accesibilidad 100.
+  Paquete principal 176 → 127 KB gz; la app se monta una sola vez al resolver la empresa (antes se montaba dos veces y duplicaba
+  consultas); banners, categorías y registros solo cuando una pantalla los usa; perfil y empresas en paralelo; menús, diálogos y
+  el widget de soporte cargan aparte con disparadores idénticos; rutas del admin en su propio módulo. Consultas del arranque sin
+  repetidas (p. ej. /portal 24 → 17).
+- Verificado: pruebas de base (351 casos, todos pasan), `tsc`, `vite build`, Playwright en admin, portal, vendedor y delivery
+  (390 y 1440), cambio de empresa GUDS ↔ Quirutec con recarga de datos y cambio de sesión admin → vendedor.
+- Pendiente: nombres traducibles de Odoo se leen sin idioma (2 plantillas difieren en español); el historial "(GUDS)" en Odoo
+  requeriría publicar mensajes allí (fuera de lo permitido; la traza queda en la cola de GUDS).
+
 ## 2026-09-28 · Seguimiento de entregas y cuadre con Odoo (D6/D8), clasificación, metas y calidad de datos (R2/R7/R8b), accesibilidad (F7)
 
 - **Delivery D6** (`…20p_delivery_seguimiento.sql`): la app del repartidor manda su posición mientras tiene reparto en curso

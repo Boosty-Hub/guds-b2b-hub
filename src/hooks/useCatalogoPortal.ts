@@ -148,10 +148,13 @@ export function useAlcanceCatalogo() {
 }
 
 /** Categorías con productos a la venta en la empresa activa. */
-export function useCategoriasPortal() {
+/** Categorías con productos a la venta en la empresa activa. `activo = false` pospone la consulta (p. ej. el inicio del
+ *  portal, que las muestra debajo de su resumen y las pide cuando el resumen ya está en pantalla). */
+export function useCategoriasPortal(activo = true) {
   useAlcanceCatalogo();
   const [lista, setLista] = useState<CategoriaPortal[] | null>(() => categoriasCache);
   useEffect(() => {
+    if (!activo) return;
     let vivo = true;
     supabase.rpc("categorias_portal").then(({ data, error }) => {
       if (!vivo || error) return;
@@ -160,7 +163,7 @@ export function useCategoriasPortal() {
       setLista(l);
     });
     return () => { vivo = false; };
-  }, []);
+  }, [activo]);
   return lista;
 }
 

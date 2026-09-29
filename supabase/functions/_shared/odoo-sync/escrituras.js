@@ -3,16 +3,19 @@
 // reintentos de cada sincronización) y se puede correr desde scripts/.
 import { escribirEntrega } from './escribir-entrega.js';
 import { escribirCliente } from './escribir-cliente.js';
+import { escribirProducto } from './escribir-producto.js';
 
 const ESCRITORES = {
   entrega_estado: { fn: escribirEntrega, modo: 'odoo_escritura_entregas' },
   cliente_contacto: { fn: escribirCliente, modo: 'odoo_escritura_clientes' },
   cliente_direccion: { fn: escribirCliente, modo: 'odoo_escritura_clientes' },
+  producto: { fn: escribirProducto, modo: 'odoo_escritura_productos' },   // foto y descripción (20r)
 };
 
 const lit = (v) => `'${String(v).replace(/'/g, "''")}'`;
 
-export async function procesarEscritura({ odoo, sql, id, log = () => {}, forzarSimulacion = false }) {
+// `storage` (storage.js): lo necesita el escritor de productos para leer la foto del bucket de GUDS.
+export async function procesarEscritura({ odoo, sql, id, log = () => {}, forzarSimulacion = false, storage = null }) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error('escritura: id inválido');
   // Se toma la fila (evita que dos procesos la escriban a la vez)
   const [fila] = await sql(`update odoo_escrituras set estado = 'procesando', intentos = intentos + 1
@@ -23,7 +26,7 @@ export async function procesarEscritura({ odoo, sql, id, log = () => {}, forzarS
     if (!escritor) throw new Error(`Tipo de escritura desconocido: ${fila.tipo}`);
     const [cfg] = await sql(`select valor from configuracion where clave = ${lit(escritor.modo)}`);
     const aplicar = !forzarSimulacion && (cfg?.valor ?? 'simular') === 'activo';
-    const resultado = await escritor.fn({ odoo, sql, fila, aplicar, log });
+    const resultado = await escritor.fn({ odoo, sql, fila, aplicar, log, storage });
     await sql(`update odoo_escrituras set estado = ${lit(aplicar ? 'hecha' : 'simulada')}, error = null, procesado_at = now(),
       resultado = ${lit(JSON.stringify(resultado ?? {}))}::jsonb where id = ${lit(id)}`);
     return { aplicar, resultado };

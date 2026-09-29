@@ -3,9 +3,22 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
 import { cn } from "@/lib/utils";
 
-const TooltipProvider = TooltipPrimitive.Provider;
+// El proveedor ya no envuelve toda la app (así Radix Tooltip y su motor de posicionamiento no pesan en el arranque de
+// los portales): lo ponen los layouts que usan tooltips (MainLayout, Sidebar) para compartir los retardos entre ellos,
+// y un Tooltip fuera de cualquier proveedor crea el suyo en vez de fallar.
+const HayProveedor = React.createContext(false);
 
-const Tooltip = TooltipPrimitive.Root;
+const TooltipProvider = ({ children, ...props }: React.ComponentProps<typeof TooltipPrimitive.Provider>) => (
+  <TooltipPrimitive.Provider {...props}>
+    <HayProveedor.Provider value={true}>{children}</HayProveedor.Provider>
+  </TooltipPrimitive.Provider>
+);
+
+const Tooltip = (props: React.ComponentProps<typeof TooltipPrimitive.Root>) => {
+  const hayProveedor = React.useContext(HayProveedor);
+  const raiz = <TooltipPrimitive.Root {...props} />;
+  return hayProveedor ? raiz : <TooltipPrimitive.Provider>{raiz}</TooltipPrimitive.Provider>;
+};
 
 const TooltipTrigger = TooltipPrimitive.Trigger;
 

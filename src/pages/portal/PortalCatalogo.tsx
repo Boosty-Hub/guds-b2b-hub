@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Check, Loader2, PackageSearch, RotateCcw, Search, SlidersHorizontal, X } from "lucide-react";
+import { ChevronDown, Loader2, PackageSearch, RotateCcw, Search, SlidersHorizontal, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -8,8 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { cargaDiferida } from "@/lib/cargaDiferida";
 import { PortalPagina } from "@/components/portal/PortalPagina";
 import { TarjetaProducto, empaquePorDefecto } from "@/components/portal/TarjetaProducto";
 import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
@@ -23,6 +22,11 @@ import {
 // Búsqueda con espera de 300 ms, sin acentos, por nombre (incluye la marca), código o categoría. Los filtros viven en la
 // URL (?q=&cat=&orden=&disp=1) y la lista se guarda en memoria: al volver de la ficha se ve igual y en la misma posición.
 // Móvil: buscador y categorías fijos bajo el encabezado, grilla de 2 columnas. Escritorio: categorías a la izquierda.
+
+// Orden (Radix Select, escritorio) y hoja de filtros (Radix Sheet, teléfono): se descargan aparte, cuando el navegador
+// queda libre o al tocarlos. Mientras tanto el orden se ve con un botón idéntico al del Select.
+const controles = cargaDiferida(() => import("@/components/portal/CatalogoControles"));
+const CLASE_DISPARADOR_SELECT = "flex h-10 w-52 items-center justify-between rounded-md border border-input bg-card px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 [&>span]:line-clamp-1";
 
 const POR_PAGINA = 24;
 const ESPERA_BUSQUEDA = 300;
@@ -52,6 +56,10 @@ const PortalCatalogo = () => {
 
   const [texto, setTexto] = useState(qUrl);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  const modControles = controles.useModulo();
+  useEffect(() => { if (filtrosAbiertos) controles.pedir(); }, [filtrosAbiertos]);
+  const [abrirOrden, setAbrirOrden] = useState(false);
+  const focoOrden = useRef(false);
   const inputMovil = useRef<HTMLInputElement>(null);
   const contenedor = useRef<HTMLDivElement>(null);
   const centinela = useRef<HTMLDivElement>(null);
@@ -227,10 +235,17 @@ const PortalCatalogo = () => {
           {/* Barra de herramientas (escritorio) */}
           <div className="mb-4 hidden items-center gap-3 lg:flex">
             {buscador()}
-            <Select value={orden} onValueChange={(v) => cambiarParams({ orden: v === "relevancia" ? null : v })}>
-              <SelectTrigger className="h-10 w-52 bg-card" aria-label="Ordenar"><SelectValue /></SelectTrigger>
-              <SelectContent>{ORDENES_CATALOGO.map((o) => <SelectItem key={o.valor} value={o.valor}>{o.etiqueta}</SelectItem>)}</SelectContent>
-            </Select>
+            {modControles ? (
+              <modControles.OrdenSelect orden={orden} onCambiar={(v) => cambiarParams({ orden: v === "relevancia" ? null : v })}
+                abrirAlMontar={abrirOrden} enfocar={focoOrden.current} />
+            ) : (
+              <button type="button" role="combobox" aria-expanded={false} aria-label="Ordenar" className={CLASE_DISPARADOR_SELECT}
+                onPointerEnter={controles.pedir} onFocus={() => { focoOrden.current = true; controles.pedir(); }} onBlur={() => { focoOrden.current = false; }}
+                onClick={() => { setAbrirOrden(true); controles.pedir(); }}>
+                <span style={{ pointerEvents: "none" }}>{ORDENES_CATALOGO.find((o) => o.valor === orden)?.etiqueta}</span>
+                <ChevronDown className="h-4 w-4 opacity-50" aria-hidden />
+              </button>
+            )}
           </div>
 
           <div className="mb-3 flex min-h-[1.5rem] flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground" aria-live="polite">
@@ -294,45 +309,10 @@ const PortalCatalogo = () => {
       </div>
 
       {/* Filtros y orden (móvil y tableta) */}
-      <Sheet open={filtrosAbiertos} onOpenChange={setFiltrosAbiertos}>
-        <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto rounded-t-2xl pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-          <SheetHeader className="text-left">
-            <SheetTitle>Filtros y orden</SheetTitle>
-            <SheetDescription className="sr-only">Elige el orden, la categoría y si ver solo productos disponibles.</SheetDescription>
-          </SheetHeader>
-          <div className="space-y-5 py-4">
-            <div>
-              <p className="mb-2 text-sm font-medium">Ordenar por</p>
-              <div className="grid grid-cols-2 gap-2">
-                {ORDENES_CATALOGO.map((o) => (
-                  <button key={o.valor} type="button" onClick={() => cambiarParams({ orden: o.valor === "relevancia" ? null : o.valor })} aria-pressed={orden === o.valor}
-                    className={cn("flex h-11 items-center justify-between rounded-lg border px-3 text-left text-sm font-medium",
-                      orden === o.valor ? "border-foreground bg-muted" : "border-border")}>
-                    {o.etiqueta}{orden === o.valor && <Check className="h-4 w-4 shrink-0" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <label className="flex h-11 cursor-pointer items-center justify-between gap-3 rounded-lg border border-border px-3 text-sm font-medium">
-              <span>Solo disponibles</span>
-              <Switch checked={soloDisponibles} onCheckedChange={(v) => cambiarParams({ disp: v ? "1" : null })} aria-label="Mostrar solo productos disponibles" />
-            </label>
-            <div>
-              <p className="mb-2 text-sm font-medium">Categoría</p>
-              <div className="flex flex-wrap gap-2">
-                {[{ id: null as string | null, etiqueta: "Todos", nombre: "Todos" }, ...(categorias ?? [])].map((c) => (
-                  <button key={c.id ?? "todas"} type="button" onClick={() => { cambiarParams({ cat: c.id }); setFiltrosAbiertos(false); }} aria-pressed={(c.id ?? null) === (categoria ?? null)}
-                    title={c.nombre}
-                    className={cn("rounded-full border px-3 py-1.5 text-sm", (c.id ?? null) === (categoria ?? null) ? "border-foreground bg-foreground text-background" : "border-border")}>
-                    {c.etiqueta}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <Button className="h-11 w-full" onClick={() => setFiltrosAbiertos(false)}>Ver {total.toLocaleString("es-VE")} {total === 1 ? "producto" : "productos"}</Button>
-          </div>
-        </SheetContent>
-      </Sheet>
+      {modControles && (
+        <modControles.FiltrosHoja abierto={filtrosAbiertos} setAbierto={setFiltrosAbiertos} orden={orden} soloDisponibles={soloDisponibles}
+          categorias={categorias} categoria={categoria} total={total} cambiarParams={cambiarParams} />
+      )}
 
       {/* Elegir empaque (productos con más de un empaque) */}
       <SelectorEmpaqueDialog producto={empaqueProducto} precios={empaquePrecios} onElegir={agregarConEmpaque} onCerrar={cerrarEmpaque} />

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { despuesDePintar } from "@/lib/diferir";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useStoreConfig } from "@/contexts/StoreConfigContext";
@@ -22,15 +23,15 @@ import { BannerVisual } from "@/components/BannerVisual";
 import { estadoVisible } from "@/components/pedidos/estadoPedido";
 import { PortalPagina } from "@/components/portal/PortalPagina";
 import { usePortal } from "@/components/portal/contextoPortal";
-import { TarjetaProducto, empaquePorDefecto } from "@/components/portal/TarjetaProducto";
-import { SelectorEmpaqueDialog } from "@/components/portal/SelectorEmpaqueDialog";
-import { EstadoPill, EstadoVacio, Kpi, NumeroPedido, Panel, SkeletonFilas, SkeletonProductos, fechaCorta } from "@/components/portal/sistema";
-import { useCarritoPortal } from "@/hooks/useCarritoPortal";
-import { pedirCatalogo, useCategoriasPortal, type ProductoPortal } from "@/hooks/useCatalogoPortal";
+import { EncabezadoDestacados, EstadoPill, EstadoVacio, Kpi, NumeroPedido, Panel, SkeletonDestacados, SkeletonFilas, fechaCorta } from "@/components/portal/sistema";
+import { useCategoriasPortal } from "@/hooks/useCatalogoPortal";
 import { pedirEstadoCuenta, type CreditoCuenta, type ResumenCuenta } from "@/hooks/useFinanzasPortal";
 
 // Inicio del portal: lo que un comprador B2B necesita al entrar (saldo, crédito, pedidos en curso), sus pedidos recientes,
 // accesos rápidos y productos destacados para recomprar.
+
+// Destacados (tarjetas de producto con su carrito): código y datos llegan cuando el resumen ya está en pantalla
+const DestacadosInicio = lazy(() => import("@/components/portal/DestacadosInicio"));
 
 interface OrdenResumen {
   id: string; numero: string; numero_guds: string | null; estado: string; estado_odoo: string | null; aprobacion: string | null;
@@ -50,43 +51,48 @@ const ACCESOS: { etiqueta: string; ruta: string; icono: LucideIcon }[] = [
 const PortalDashboard = () => {
   const { user } = useAuth();
   const { formatPrice } = useCurrency();
-  const { getActiveBanners } = useStoreConfig();
+  const { getActiveBanners } = useStoreConfig({ banners: true });
   const portal = usePortal();
-  const { agregar, agregarConEmpaque, cambiarCantidad, cantidadDe, empaqueProducto, empaquePrecios, cerrarEmpaque } = useCarritoPortal();
 
-  const [cargando, setCargando] = useState(true);
+  // Pedidos y estado de cuenta llegan por separado: cada parte se muestra en cuanto llega su dato
+  const [cargandoOrdenes, setCargandoOrdenes] = useState(true);
+  const [cargandoCuenta, setCargandoCuenta] = useState(true);
+  const cargando = cargandoOrdenes || cargandoCuenta;
   const [ordenes, setOrdenes] = useState<OrdenResumen[]>([]);
   // Saldo, vencido y crédito: el mismo resumen del estado de cuenta (regla de Cuentas por Cobrar del admin)
   const [resumen, setResumen] = useState<ResumenCuenta | null>(null);
   const [credito, setCredito] = useState<CreditoCuenta | null>(null);
-  // Destacados con el precio del servidor (catalogo_portal) y categorías con productos a la venta en la empresa activa
-  const [destacados, setDestacados] = useState<ProductoPortal[] | null>(null);
-  const categoriasPortal = useCategoriasPortal();
+  // Categorías con productos a la venta en la empresa activa y destacados (DestacadosInicio): se muestran debajo del
+  // resumen, solo cuando el resumen ya cargó, y se piden cuando el resumen ya está en pantalla; así el resumen (saldo,
+  // crédito y pedidos) no comparte la conexión con ellos al entrar.
+  const [secundario, setSecundario] = useState(false);
+  useEffect(() => (cargando ? undefined : despuesDePintar(() => setSecundario(true))), [cargando]);
+  const categoriasPortal = useCategoriasPortal(secundario);
   const categorias = [...(categoriasPortal ?? [])].sort((a, b) => (b.n ?? 0) - (a.n ?? 0));
 
   const banners = getActiveBanners();
 
   useEffect(() => {
     const cid = user?.cliente_id;
-    if (!cid) { setCargando(false); return; }
+    if (!cid) { setCargandoOrdenes(false); setCargandoCuenta(false); return; }
     let activo = true;
-    Promise.all([
-      supabase.from("ordenes").select("id, numero, numero_guds, estado, estado_odoo, aprobacion, odoo_id, total, created_at, fecha_pedido")
-        .eq("cliente_id", cid).order("created_at", { ascending: false }).limit(200),
-      pedirEstadoCuenta({ desde: null, hasta: null }, false).catch(() => null),
-    ]).then(([o, ec]) => {
+    supabase.from("ordenes").select("id, numero, numero_guds, estado, estado_odoo, aprobacion, odoo_id, total, created_at, fecha_pedido")
+      .eq("cliente_id", cid).order("created_at", { ascending: false }).limit(200)
+      .then((o) => {
+        if (!activo) return;
+        const filas = ((o.data as OrdenResumen[] | null) ?? []).sort((a, b) => (b.fecha_pedido ?? b.created_at).localeCompare(a.fecha_pedido ?? a.created_at));
+        setOrdenes(filas);
+        setCargandoOrdenes(false);
+      });
+    pedirEstadoCuenta({ desde: null, hasta: null }, false).catch(() => null).then((ec) => {
       if (!activo) return;
-      const filas = ((o.data as OrdenResumen[] | null) ?? []).sort((a, b) => (b.fecha_pedido ?? b.created_at).localeCompare(a.fecha_pedido ?? a.created_at));
-      setOrdenes(filas);
       setResumen(ec?.resumen ?? null);
       setCredito(ec?.credito ?? null);
-      setCargando(false);
+      setCargandoCuenta(false);
     });
-    pedirCatalogo({ soloDestacados: true, orden: "nombre", limite: 8 })
-      .then((r) => { if (activo) setDestacados(r.productos); })
-      .catch(() => { if (activo) setDestacados([]); });
     return () => { activo = false; };
   }, [user?.cliente_id]);
+
 
   const porPagar = Number(resumen?.saldo ?? 0);
   const vencido = Number(resumen?.vencido ?? 0);
@@ -140,19 +146,19 @@ const PortalDashboard = () => {
 
         {/* Indicadores */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-          <Kpi etiqueta="Por pagar" icono={FileText} href="/portal/finanzas" cargando={cargando} testId="kpi-por-pagar"
+          <Kpi etiqueta="Por pagar" icono={FileText} href="/portal/finanzas" cargando={cargandoCuenta} testId="kpi-por-pagar"
             valor={resumen ? formatPrice(porPagar) : "—"} alerta={vencido > TOLERANCIA}
             detalle={!resumen ? "No disponible" : abiertas === 0 ? "Sin facturas pendientes" : vencido > TOLERANCIA ? `${formatPrice(vencido)} vencido` : `${abiertas} ${abiertas === 1 ? "factura" : "facturas"}`} />
-          <Kpi etiqueta="Crédito disponible" icono={CreditCard} cargando={cargando} valor={creditoValor} detalle={creditoDetalle}>
+          <Kpi etiqueta="Crédito disponible" icono={CreditCard} cargando={cargandoCuenta} valor={creditoValor} detalle={creditoDetalle}>
             {usoCredito != null && (
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
                 <div className="h-full rounded-full bg-foreground/70" style={{ width: `${usoCredito}%` }} />
               </div>
             )}
           </Kpi>
-          <Kpi etiqueta="Pedidos en curso" icono={ClipboardList} href="/portal/pedidos" cargando={cargando}
+          <Kpi etiqueta="Pedidos en curso" icono={ClipboardList} href="/portal/pedidos" cargando={cargandoOrdenes}
             valor={enCurso.length} detalle={porAprobar > 0 ? `${porAprobar} por aprobar` : "Ninguno por aprobar"} />
-          <Kpi etiqueta="Último pedido" icono={Receipt} cargando={cargando} href={ultimo ? `/portal/pedidos?pedido=${ultimo.o.id}` : "/portal/catalogo"}
+          <Kpi etiqueta="Último pedido" icono={Receipt} cargando={cargandoOrdenes} href={ultimo ? `/portal/pedidos?pedido=${ultimo.o.id}` : "/portal/catalogo"}
             valor={ultimo ? <span className="text-lg sm:text-xl">{ultimo.o.numero}</span> : "—"}
             detalle={ultimo ? `${fechaCorta(ultimo.o.fecha_pedido ?? ultimo.o.created_at)} · ${ultimo.ev.etiqueta}` : "Aún no tienes pedidos"} />
         </div>
@@ -161,7 +167,7 @@ const PortalDashboard = () => {
           {/* Pedidos recientes */}
           <Panel titulo="Pedidos recientes" className="lg:col-span-2" cuerpoClassName="p-0 sm:p-0"
             accion={<Link to="/portal/pedidos" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">Ver todos<ArrowRight className="h-3.5 w-3.5" /></Link>}>
-            {cargando ? <SkeletonFilas n={4} alto="h-12" className="p-4" /> : ordenes.length === 0 ? (
+            {cargandoOrdenes ? <SkeletonFilas n={4} alto="h-12" className="p-4" /> : ordenes.length === 0 ? (
               <EstadoVacio icono={ClipboardList} titulo="Aún no tienes pedidos" descripcion="Explora el catálogo y haz tu primer pedido."
                 accion={<Button asChild><Link to="/portal/catalogo">Ir al catálogo</Link></Button>} />
             ) : (
@@ -213,30 +219,22 @@ const PortalDashboard = () => {
         </div>
 
         {/* Destacados */}
-        {!cargando && (destacados === null || destacados.length > 0) && (
-          <section>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-foreground">Productos destacados</h2>
+        {!cargando && (secundario ? (
+          <Suspense fallback={<section>
+            <EncabezadoDestacados>
               <Link to="/portal/catalogo" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">Ver todo<ArrowRight className="h-3.5 w-3.5" /></Link>
-            </div>
-            {destacados === null ? (
-              <SkeletonProductos n={4} className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 lg:gap-4" />
-            ) : (
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 lg:gap-4">
-                {destacados.map((p) => {
-                  const tipo = empaquePorDefecto(p);
-                  return (
-                    <TarjetaProducto key={p.id} producto={p} cantidad={cantidadDe(p.id, tipo)}
-                      onAgregar={() => agregar(p)} onCambiar={(d) => cambiarCantidad(p, d, tipo)} />
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        )}
+            </EncabezadoDestacados>
+            <SkeletonDestacados />
+          </section>}>
+            <DestacadosInicio />
+          </Suspense>
+        ) : <section>
+            <EncabezadoDestacados>
+              <Link to="/portal/catalogo" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">Ver todo<ArrowRight className="h-3.5 w-3.5" /></Link>
+            </EncabezadoDestacados>
+            <SkeletonDestacados />
+          </section>)}
       </div>
-
-      <SelectorEmpaqueDialog producto={empaqueProducto} precios={empaquePrecios} onElegir={agregarConEmpaque} onCerrar={cerrarEmpaque} />
     </PortalPagina>
   );
 };

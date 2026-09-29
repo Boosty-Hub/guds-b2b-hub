@@ -1,19 +1,12 @@
-import { useRef, useState } from "react";
-import { Check, ChevronDown, Layers } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { forwardRef, useRef, useState, type ButtonHTMLAttributes } from "react";
+import { ChevronDown, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TODAS, useEmpresa } from "@/contexts/EmpresaContext";
+import { useEmpresa } from "@/contexts/EmpresaContext";
+import { cargaDiferida } from "@/lib/cargaDiferida";
 import type { Empresa } from "@/lib/supabase";
 
-interface EmpresaSelectorProps {
+export interface EmpresaSelectorProps {
   // "default": header claro (desktop) · "header": barra de color (móvil)
   variant?: "default" | "header";
   // Solo el distintivo (barras móviles con poco espacio)
@@ -43,82 +36,61 @@ export function EmpresaDistintivo({ empresa, className }: { empresa: Empresa | n
   );
 }
 
-export function EmpresaSelector({ variant = "default", compacto = false, className }: EmpresaSelectorProps) {
-  const { empresas, seleccion, empresaActiva, puedeElegirAmbas, cambiarEmpresa } = useEmpresa();
-  const [abierto, setAbierto] = useState(false);
-  const punteroTactil = useRef(false);
-  if (empresas.length === 0) return null;
+// El menú (Radix DropdownMenu y su motor de posicionamiento) se descarga aparte: hasta que llega se muestra el mismo
+// botón; si se toca antes, el menú se abre en cuanto llega.
+const menu = cargaDiferida(() => import("@/components/EmpresaMenu"));
 
-  const isHeader = variant === "header";
-  const etiqueta = empresaActiva?.nombre_corto ?? "Ambas empresas";
-  const unaSola = empresas.length === 1;
-
-  const trigger = (
-    <Button
-      variant={isHeader ? "secondary" : "outline"}
-      size="sm"
-      disabled={unaSola}
-      className={cn(
-        "gap-2 disabled:opacity-100",
-        compacto && "h-8 gap-1 px-1.5",
-        isHeader && "bg-white/20 text-white border-white/30 hover:bg-white/30",
-        className,
-      )}
-      title={empresaActiva?.nombre ?? "Consultando ambas empresas"}
-      aria-label={`Cambiar empresa (actual: ${etiqueta})`}
-    >
-      <EmpresaDistintivo empresa={empresaActiva} className="h-5 w-5" />
-      {!compacto && <span className="max-w-[9rem] truncate font-medium">{etiqueta}</span>}
-      {!unaSola && <ChevronDown className="h-3.5 w-3.5 opacity-70" />}
-    </Button>
-  );
-
-  if (unaSola) return trigger;
-
-  return (
-    <DropdownMenu open={abierto} onOpenChange={setAbierto}>
-      {/* En táctil Radix abre al apoyar el dedo; el clic de levantarlo caía en el botón vecino (Ticket).
-          Ahí se abre con el clic completo. */}
-      <DropdownMenuTrigger
-        asChild
-        onPointerDown={(e) => {
-          punteroTactil.current = e.pointerType === "touch" || e.pointerType === "pen";
-          if (punteroTactil.current) e.preventDefault();
-        }}
-        onClick={() => {
-          if (punteroTactil.current) setAbierto((v) => !v);
-          punteroTactil.current = false;
-        }}
-      >
-        {trigger}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72">
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Empresa</DropdownMenuLabel>
-        {empresas.map((e) => (
-          <DropdownMenuItem key={e.id} onClick={() => cambiarEmpresa(e.id)} className="gap-3 py-2">
-            <EmpresaDistintivo empresa={e} />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{e.nombre_corto}</p>
-              <p className="truncate text-xs text-muted-foreground">{e.nombre}</p>
-            </div>
-            {seleccion === e.id && <Check className="h-4 w-4 text-primary" />}
-          </DropdownMenuItem>
-        ))}
-        {puedeElegirAmbas && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => cambiarEmpresa(TODAS)} className="gap-3 py-2">
-              <EmpresaDistintivo empresa={null} />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">Ambas empresas</p>
-                <p className="text-xs text-muted-foreground">Solo consulta: dashboard, reportes y listados</p>
-              </div>
-              {seleccion === TODAS && <Check className="h-4 w-4 text-primary" />}
-            </DropdownMenuItem>
-          </>
+/** Botón de la empresa activa: el mismo antes y después de cargar el menú. */
+export const BotonEmpresa = forwardRef<HTMLButtonElement, EmpresaSelectorProps & ButtonHTMLAttributes<HTMLButtonElement>>(
+  ({ variant = "default", compacto = false, className, ...props }, ref) => {
+    const { empresas, empresaActiva } = useEmpresa();
+    const isHeader = variant === "header";
+    const etiqueta = empresaActiva?.nombre_corto ?? "Ambas empresas";
+    const unaSola = empresas.length === 1;
+    return (
+      <Button
+        ref={ref}
+        variant={isHeader ? "secondary" : "outline"}
+        size="sm"
+        disabled={unaSola}
+        className={cn(
+          "gap-2 disabled:opacity-100",
+          compacto && "h-8 gap-1 px-1.5",
+          isHeader && "bg-white/20 text-white border-white/30 hover:bg-white/30",
+          className,
         )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        title={empresaActiva?.nombre ?? "Consultando ambas empresas"}
+        aria-label={`Cambiar empresa (actual: ${etiqueta})`}
+        {...props}
+      >
+        <EmpresaDistintivo empresa={empresaActiva} className="h-5 w-5" />
+        {!compacto && <span className="max-w-[9rem] truncate font-medium">{etiqueta}</span>}
+        {!unaSola && <ChevronDown className="h-3.5 w-3.5 opacity-70" />}
+      </Button>
+    );
+  },
+);
+BotonEmpresa.displayName = "BotonEmpresa";
+
+export function EmpresaSelector(props: EmpresaSelectorProps) {
+  const { empresas } = useEmpresa();
+  const variasEmpresas = empresas.length > 1;
+  const modulo = menu.useModulo(variasEmpresas);
+  const [abrir, setAbrir] = useState(false);
+  const foco = useRef(false);
+  if (empresas.length === 0) return null;
+  if (!variasEmpresas) return <BotonEmpresa {...props} />;
+  if (modulo) return <modulo.EmpresaMenu {...props} abrirAlMontar={abrir} enfocar={foco.current} />;
+  return (
+    <BotonEmpresa
+      {...props}
+      aria-haspopup="menu"
+      aria-expanded={false}
+      onPointerEnter={menu.pedir}
+      onFocus={() => { foco.current = true; menu.pedir(); }}
+      onBlur={() => { foco.current = false; }}
+      onClick={() => { setAbrir(true); menu.pedir(); }}
+    />
   );
 }
 

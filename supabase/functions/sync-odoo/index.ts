@@ -8,15 +8,20 @@
 // - ?simular=1 lee todo y calcula sin escribir (para probar credenciales y tiempos).
 // - ?enviar=<orden_id> crea en Odoo (cotización en borrador) un pedido APROBADO en GUDS (Fase 9b). Lo dispara
 //   aprobar_pedido() por pg_net. Cada sincronización reintenta los aprobados que no llegaron a enviarse.
-// - ?escritura=<id> procesa una fila de odoo_escrituras (estado de entregas, contacto y direcciones de clientes; 19u).
-//   La disparan las funciones que encolan por pg_net; cada sincronización reintenta las pendientes o con error.
+// - ?escritura=<id> procesa una fila de odoo_escrituras (estado de entregas, contacto y direcciones de clientes, foto y
+//   descripción de productos; 19u/20r). La disparan las funciones que encolan por pg_net; cada sincronización reintenta las
+//   pendientes o con error.
+// - Fotos de producto (20r): la sincronización sube al bucket `imagenes` las que cambian en Odoo y el escritor lee de allí las
+//   que se envían a Odoo (almacenamiento con la secret key del proyecto, que la plataforma inyecta).
 //
-// Secretos: ODOO_URL, ODOO_DB, ODOO_USER, ODOO_API_KEY, SYNC_ODOO_SECRET (+ SUPABASE_DB_URL, que ya trae la plataforma).
+// Secretos: ODOO_URL, ODOO_DB, ODOO_USER, ODOO_API_KEY, SYNC_ODOO_SECRET (+ SUPABASE_DB_URL, SUPABASE_URL y
+// SUPABASE_SECRET_KEYS, que ya trae la plataforma).
 import postgres from "npm:postgres@3.4.5";
 import { crearClienteOdoo } from "../_shared/odoo-sync/odoo.js";
 import { importarOdoo } from "../_shared/odoo-sync/importar.js";
 import { enviarPedido } from "../_shared/odoo-sync/enviar.js";
 import { procesarEscritura } from "../_shared/odoo-sync/escrituras.js";
+import { crearStorage } from "../_shared/odoo-sync/storage.js";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -57,6 +62,16 @@ function crearSql() {
 
 const nuevoOdoo = () => crearClienteOdoo({ url: env("ODOO_URL"), db: env("ODOO_DB"), usuario: env("ODOO_USER"), apiKey: env("ODOO_API_KEY"), timeoutMs: 60000 });
 
+// Almacenamiento de fotos: secret key nueva (SUPABASE_SECRET_KEYS, JSON por nombre) con la legacy como respaldo
+function nuevoStorage() {
+  const clave = (() => {
+    try { return JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}")["default"]; } catch { return undefined; }
+  })() ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const url = Deno.env.get("SUPABASE_URL");
+  if (!url || !clave) { console.error("sync-odoo: sin SUPABASE_URL o secret key; las fotos de producto no se sincronizan"); return null; }
+  return crearStorage({ url, clave });
+}
+
 // Envía un pedido aprobado; si falla, deja el error en el pedido (se ve en el admin y se puede reintentar)
 async function enviarUno(sql: (q: string) => Promise<Record<string, unknown>[]>, ordenId: string, odoo = nuevoOdoo()) {
   try {
@@ -78,7 +93,7 @@ async function enviarAprobado(ordenId: string) {
 async function escribirUna(id: string) {
   const { sql, cerrar } = crearSql();
   try {
-    await procesarEscritura({ odoo: nuevoOdoo(), sql, id, log: (m: string) => console.log("sync-odoo escritura:", m) });
+    await procesarEscritura({ odoo: nuevoOdoo(), sql, id, storage: nuevoStorage(), log: (m: string) => console.log("sync-odoo escritura:", m) });
   } finally { await cerrar(); }
 }
 
@@ -106,6 +121,7 @@ async function sincronizar(simular: boolean) {
     };
     await traza("inicio");
     const odoo = nuevoOdoo();
+    const storage = nuevoStorage();
     // Pedidos aprobados que no llegaron a Odoo (p. ej. si falló el disparo): se reintentan antes de importar
     if (!simular) {
       const pendientes = await sql(`select id from ordenes where aprobacion = 'aprobada' and aprobado_por is not null and odoo_id is null and odoo_envio_error is null
@@ -117,13 +133,13 @@ async function sincronizar(simular: boolean) {
         and created_at < now() - interval '2 minutes' order by created_at limit 20`);
       for (const e of escrituras) {
         await sql(`update odoo_escrituras set estado = 'pendiente' where id = '${e.id}' and estado = 'procesando'`);
-        await procesarEscritura({ odoo, sql, id: String(e.id), log: (m: string) => console.log("sync-odoo escritura:", m) });
+        await procesarEscritura({ odoo, sql, id: String(e.id), storage, log: (m: string) => console.log("sync-odoo escritura:", m) });
         await traza(`reintento escritura ${e.id}`);
       }
     }
     const lineas: string[] = [];
     const resumen = await importarOdoo({
-      odoo, sql, aplicar: !simular, origen: "edge-cron",
+      odoo, sql, aplicar: !simular, origen: "edge-cron", storage,
       log: (m: string) => { if (/⚠|✓|Escribiendo|Leyendo|Recalculando|\[\d\]/.test(m)) { lineas.push(m.trim()); traza(m.trim()); } },
     });
     await traza("fin");

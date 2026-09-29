@@ -47,8 +47,9 @@ columnas de "Base datos"; migraciones 20j) y **F2** (catálogo paginado y ficha 
 ficha y cartera, cobro con comprobante y propuesta, "Hoy" y metas), **D6/D8** (seguimiento del repartidor, incidencias,
 devoluciones por almacén, indicadores y cuadre con Odoo), **R2/R7/R8b** (clasificación comercial, comparativos, metas y
 calidad y cuadre) y **F7** (accesibilidad WCAG 2.2 AA; rendimiento móvil 82–87). Descartado por decisión: instalar como aplicación
-(PWA de V6) y el modo sin señal (D5); todo queda en línea. Siguiente: piloto de entregas en Odoo, fotos y descripciones bidireccionales con Odoo y
-rendimiento ≥ 90.
+(PWA de V6) y el modo sin señal (D5); todo queda en línea. Fotos y descripciones de producto bidireccionales con Odoo (decisión 15,
+migración 20r) también están hechas, y el rendimiento móvil de los portales quedó en 90–95 (29-sep).
+Siguiente: piloto de entregas en Odoo.
 
 ## 2. Principios comunes (los tres portales)
 
@@ -216,7 +217,7 @@ el detalle. "Facturado" y "NC" están inflados por facturas erróneas revertidas
 | 12 | **Precio por empaque** = precio por unidad × unidades (19k) | Confirmado |
 | 13 | **Pago después de aprobado**; **crédito abierto** con aviso por deuda vencida > 30 días; aprobación el mismo día hábil | F3/F5, V2 |
 | 14 | **Pedidos pendientes se pueden editar** (cliente y vendedor) mientras no estén aprobados | F4/V1: editar líneas y cantidades recalculando totales y stock comprometido en el servidor; el admin ve que fue editado |
-| 15 | **Fotos y descripciones bidireccionales**: se editan en GUDS y se escriben en Odoo (y lo que cambie en Odoo llega a GUDS) | F2: escritura en Odoo acotada a `product.template` (imagen y descripción de venta), gana el cambio más reciente (`write_date`), marcado "(GUDS)" en el historial; requiere el usuario de API dedicado |
+| 15 | **Fotos y descripciones bidireccionales**: se editan en GUDS y se escriben en Odoo (y lo que cambie en Odoo llega a GUDS) | ✅ 20r: escritura en Odoo acotada a `product.template` (`image_1920` y `description_sale`) por la cola `odoo_escrituras` (tipo `producto`, modo `odoo_escritura_productos` = activo); el sync detecta cambios por el checksum del adjunto de la imagen y el md5 de la descripción y solo descarga las fotos que cambiaron; gana el cambio más reciente (fecha del cambio en GUDS contra el `write_date` de Odoo). Quitar la foto en GUDS no se envía (en Odoo borraría el adjunto). El historial "(GUDS)" queda en la cola de GUDS (en el chatter de Odoo haría falta `message_post`, fuera del alcance permitido). Se usa la API key actual, no un usuario dedicado |
 | 16 | **Multiempresa del cliente**: el selector GUDS / Quirutec solo aparece si el cliente tiene habilitadas ambas empresas; se habilita desde la ficha del cliente en el admin | F1/F6 |
 | 17 | **Mapas** con el token de Mapbox de la cuenta de GUDS (en variables de entorno, no en el código) | D0/D2; restringir el token por URL (`portal.guds-supply.com`) en Mapbox |
 | 18 | Vendedor con efectivo, soporte por WhatsApp y ejecutivo de cuenta, cola de delivery (ventas + reposiciones a consignación, rutas mixtas), evidencia por resultado (24 meses), el cliente y el vendedor ven la evidencia, reportes (venta neta sin ND cambiarias, reversos neteados, NC financieras aparte, costo promedio solo para administración, clasificación en Odoo, mapeo de vendedores propuesto por GUDS, históricos solo con nombre y RIF, metas por vendedor y mes en USD) | Según la propuesta por defecto |
@@ -225,8 +226,8 @@ el detalle. "Facturado" y "NC" están inflados por facturas erróneas revertidas
 
 - **Limpieza de datos en Odoo antes de activar delivery** (explicada al dueño el 28-sep): documentos de entrega abiertos y
   viejos (24 "listos" y 45 "en espera" de más de 30 días, 6 borradores vacíos), direcciones de sucursal, 39 direcciones con
-  basura `_x000D_` y 132 clientes sin teléfono válido. Falta decidir si se corrige en Odoo con una lista que prepara GUDS o si
-  GUDS también escribe direcciones y teléfonos en Odoo.
+  basura `_x000D_` y 132 clientes sin teléfono válido. Decidido (28-sep): GUDS escribe direcciones y teléfonos en Odoo (activo),
+  así que esas se corrigen desde la ficha del cliente; los documentos de entrega viejos se limpian en Odoo antes del piloto.
 - **Cuenta "Banco Banesco USA" de GUDS en Odoo**: tiene el mismo número que Banesco en bolívares (configuración de Odoo); se
   dejó sin publicar hasta corregirla en Odoo.
 

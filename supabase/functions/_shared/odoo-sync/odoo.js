@@ -4,6 +4,8 @@
 // - `escribir`: solo `write`, solo en los modelos y CAMPOS de ESCRITURA_PERMITIDA (decisiones del dueño, 28-sep):
 //     · res.partner: dirección y teléfonos del cliente, editados en GUDS.
 //     · stock.move / stock.move.line: cantidades entregadas de un documento de entrega asignado a un repartidor.
+//     · product.template: imagen y descripción de venta editadas en GUDS (decisión 15, migración 20r). La imagen solo se
+//       reemplaza: escribir image_1920 = false borraría su adjunto en Odoo y está bloqueado.
 // - `accion`: solo los métodos de ACCIONES_PERMITIDAS (validar el documento de entrega cuando el repartidor lo cierra).
 // Está PROHIBIDO borrar registros de Odoo desde GUDS: unlink y cualquier otro método no existen aquí.
 
@@ -13,13 +15,24 @@ const ESCRITURA_PERMITIDA = {
   'res.partner': new Set(['street', 'street2', 'city', 'zip', 'state_id', 'country_id', 'phone', 'mobile']),
   'stock.move': new Set(['quantity', 'picked']),
   'stock.move.line': new Set(['quantity', 'picked']),
+  'product.template': new Set(['image_1920', 'description_sale']),
 };
+// Valores que no se aceptan aunque el campo esté permitido (lo que en Odoo equivale a borrar algo)
+const VALOR_PROHIBIDO = {
+  'product.template': {
+    image_1920: (v) => typeof v !== 'string' || v.length < 100 || !/^[A-Za-z0-9+/]+={0,2}$/.test(v.slice(-64))
+      ? 'image_1920 solo acepta una imagen en base64 (quitar la imagen borraría su adjunto en Odoo)' : null,
+    description_sale: (v) => (v !== false && typeof v !== 'string' ? 'description_sale debe ser texto' : null),
+  },
+};
+const RE_IDIOMA = /^[a-z]{2,3}_[A-Z]{2}$/;
 const ACCIONES_PERMITIDAS = { 'stock.picking': new Set(['button_validate']) };
 const TIPOS_DIRECCION = new Set(['delivery', 'other']);
 
 export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 }) {
   let uid = null;
   let empresasPermitidas = null;
+  let idioma = null;
 
   async function rpc(service, method, args) {
     const res = await fetch(`${url}/jsonrpc`, {
@@ -48,16 +61,18 @@ export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 
   async function autenticar() {
     uid = await rpc('common', 'authenticate', [db, usuario, apiKey, {}]);
     if (!uid) throw new Error(`Odoo rechazó la API key de ${usuario}`);
-    const [yo] = await rpc('object', 'execute_kw', [db, uid, apiKey, 'res.users', 'read', [[uid]], { fields: ['company_ids'] }]);
+    const [yo] = await rpc('object', 'execute_kw', [db, uid, apiKey, 'res.users', 'read', [[uid]], { fields: ['company_ids', 'lang'] }]);
     empresasPermitidas = yo.company_ids;
+    // Idioma del usuario de la API: los campos traducibles (descripción de venta) se leen y escriben en ese idioma
+    idioma = RE_IDIOMA.test(yo.lang || '') ? yo.lang : null;
     return { uid, empresas: empresasPermitidas };
   }
 
   // Lee todos los registros de un dominio en páginas (orden estable por id).
-  async function leerTodo(model, domain, fields, { empresa = null, pagina = 2000 } = {}) {
+  async function leerTodo(model, domain, fields, { empresa = null, pagina = 2000, contexto = null } = {}) {
     const out = [];
     for (let offset = 0; ; offset += pagina) {
-      const lote = await leer(model, 'search_read', [domain], { fields, limit: pagina, offset, order: 'id' }, empresa);
+      const lote = await leer(model, 'search_read', [domain], { fields, limit: pagina, offset, order: 'id', ...(contexto ? { context: contexto } : {}) }, empresa);
       out.push(...lote);
       if (lote.length < pagina) break;
     }
@@ -81,16 +96,21 @@ export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 
     return rpc('object', 'execute_kw', [db, uid, apiKey, model, 'create', [vals], { context: contextoEmpresa(empresaActiva) }]);
   }
 
-  // Modifica campos permitidos de registros existentes. Nunca borra.
-  async function escribir(model, ids, vals, empresaActiva) {
+  // Modifica campos permitidos de registros existentes. Nunca borra. `lang`: idioma en que se escriben los campos traducibles.
+  async function escribir(model, ids, vals, empresaActiva, { lang = null } = {}) {
     const campos = ESCRITURA_PERMITIDA[model];
     if (!campos) throw new Error(`Bloqueado: GUDS no modifica registros de "${model}" en Odoo`);
     if (!Array.isArray(ids) || !ids.length || ids.length > 100 || !ids.every(Number.isInteger)) throw new Error('escribir: ids inválidos');
     if (!vals || typeof vals !== 'object' || Array.isArray(vals) || !Object.keys(vals).length) throw new Error('escribir: valores vacíos');
     const ajenos = Object.keys(vals).filter((k) => !campos.has(k));
     if (ajenos.length) throw new Error(`Bloqueado: campos no permitidos en ${model}: ${ajenos.join(', ')}`);
+    for (const [k, v] of Object.entries(vals)) {
+      const motivo = VALOR_PROHIBIDO[model]?.[k]?.(v);
+      if (motivo) throw new Error(`Bloqueado: ${motivo}`);
+    }
+    if (lang !== null && !RE_IDIOMA.test(lang)) throw new Error('escribir: idioma inválido');
     if (!uid) await autenticar();
-    return rpc('object', 'execute_kw', [db, uid, apiKey, model, 'write', [ids, vals], { context: contextoEmpresa(empresaActiva) }]);
+    return rpc('object', 'execute_kw', [db, uid, apiKey, model, 'write', [ids, vals], { context: contextoEmpresa(empresaActiva, lang ? { lang } : {}) }]);
   }
 
   // Ejecuta un método de negocio permitido sobre registros existentes (p. ej. validar un documento de entrega).
@@ -101,7 +121,7 @@ export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 
     return rpc('object', 'execute_kw', [db, uid, apiKey, model, metodo, [ids], { context: contextoEmpresa(empresaActiva, contexto) }]);
   }
 
-  return { autenticar, leer, leerTodo, crear, escribir, accion, get empresas() { return empresasPermitidas; } };
+  return { autenticar, leer, leerTodo, crear, escribir, accion, get empresas() { return empresasPermitidas; }, get idioma() { return idioma; } };
 }
 
 // Many2one de Odoo: [id, "nombre"] o false

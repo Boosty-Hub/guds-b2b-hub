@@ -2,6 +2,7 @@ import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, u
 import { Loader2 } from "lucide-react";
 import { supabase, setEmpresaHeader, type Empresa } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { guardarPista, tomarAsignadas, tomarEmpresas, tomarMiClienteId } from "@/lib/arranque";
 
 // Empresa activa de la sesión (multiempresa GUDS / Quirutec).
 // La selección viaja a la base en el header x-empresa-id; 'todas' = modo consulta.
@@ -32,6 +33,7 @@ export const EmpresaProvider = ({ children }: { children: ReactNode }) => {
   const { user, loading: authLoading, updateUser } = useAuth();
   // Solo id y rol: editar el perfil (updateUser) no debe recargar las empresas ni remontar nada.
   const usuarioId = user?.id;
+  const authId = user?.auth_id;
   const rol = user?.role;
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [seleccion, setSeleccion] = useState<string>(TODAS);
@@ -56,26 +58,28 @@ export const EmpresaProvider = ({ children }: { children: ReactNode }) => {
       setLista(true);
       return;
     }
-    const [{ data: permitidas }, { data: todas }, { data: asignadas }] = await Promise.all([
-      supabase.rpc("empresas_permitidas"),
-      supabase.from("empresas").select("*").eq("activo", true).order("orden"),
-      supabase.from("usuario_empresas").select("empresa_id, por_defecto").eq("usuario_id", usuarioId),
-    ]);
-    const ids = new Set<string>((permitidas as string[] | null) ?? []);
-    const mias = ((todas as Empresa[] | null) ?? []).filter((e) => ids.has(e.id));
+    // Empresas permitidas, catálogo y asignadas: normalmente ya vienen en camino desde el arranque (lib/arranque.ts)
+    const [{ permitidas, todas }, asignadas] = await Promise.all([tomarEmpresas(authId), tomarAsignadas(usuarioId)]);
+    const ids = new Set<string>(permitidas);
+    const mias = todas.filter((e) => ids.has(e.id));
     setEmpresas(mias);
 
     const guardada = leerGuardada(usuarioId);
     const valida = (v: string | null) =>
       !!v && (mias.some((e) => e.id === v) || (v === TODAS && rol !== "cliente" && mias.length > 1));
-    const porDefecto = (asignadas as { empresa_id: string; por_defecto: boolean }[] | null)?.find((a) => a.por_defecto)?.empresa_id;
+    const porDefecto = asignadas.find((a) => a.por_defecto)?.empresa_id;
     const inicial = valida(guardada) ? guardada! : valida(porDefecto ?? null) ? porDefecto! : mias[0]?.id ?? TODAS;
 
     setEmpresaHeader(inicial);
-    await resolverCliente();
+    guardarPista(authId, rol, inicial);
+    if (rol === "cliente") {
+      // Ficha del cliente en la empresa activa (adelantada en el arranque si la empresa es la de la última vez)
+      const clienteId = await tomarMiClienteId(authId, inicial);
+      if (clienteId) updateUser({ cliente_id: clienteId });
+    }
     setSeleccion(inicial);
     setLista(true);
-  }, [usuarioId, rol, resolverCliente]);
+  }, [usuarioId, authId, rol, updateUser]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -88,10 +92,11 @@ export const EmpresaProvider = ({ children }: { children: ReactNode }) => {
     // El header se cambia ANTES de re-renderizar: las pantallas remontadas ya piden con la empresa nueva.
     setEmpresaHeader(id);
     guardar(usuarioId, id);
+    guardarPista(authId, rol, id);
     await resolverCliente();
     setSeleccion(id);
     setVersion((v) => v + 1);
-  }, [usuarioId, seleccion, resolverCliente]);
+  }, [usuarioId, authId, rol, seleccion, resolverCliente]);
 
   const value = useMemo<EmpresaContextType>(() => ({
     empresas,
@@ -104,8 +109,10 @@ export const EmpresaProvider = ({ children }: { children: ReactNode }) => {
     recargarEmpresas: cargar,
   }), [empresas, seleccion, puedeElegirAmbas, cambiarEmpresa, version, cargar]);
 
-  // Hasta saber la empresa no se renderiza nada que consulte datos (evita pedir con la empresa equivocada).
-  if (!authLoading && usuarioId && !lista) {
+  // Hasta saber la sesión y la empresa no se renderiza nada que consulte datos: evita pedir con la empresa equivocada y
+  // que los proveedores y la ruta se monten dos veces (antes se montaban durante la verificación de la sesión, se
+  // desmontaban al esperar la empresa y se volvían a montar, repitiendo banners, configuración y categorías).
+  if (authLoading || (usuarioId && !lista)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

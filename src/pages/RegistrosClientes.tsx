@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -55,7 +55,9 @@ const statusConfig = {
 };
 
 const RegistrosClientes = () => {
-  const { registros, aprobarRegistro, rechazarRegistro, getPendingRegistros } = useAuth();
+  const { registros, aprobarRegistro, rechazarRegistro, getPendingRegistros, refreshRegistros } = useAuth();
+  // Las solicitudes se cargan al abrir esta pantalla (ya no en cada arranque de la app)
+  useEffect(() => { refreshRegistros(); }, [refreshRegistros]);
   const { empresas } = useEmpresa();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");

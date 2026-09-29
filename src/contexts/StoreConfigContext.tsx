@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useCallback, useContext, useState, useEffect, ReactNode } from "react";
 import { useEmpresa } from "@/contexts/EmpresaContext";
 import { supabase } from "@/lib/supabase";
 import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
@@ -43,6 +43,13 @@ interface StoreConfigContextType {
   
   getActiveBanners: () => Banner[];
   getActiveCategories: () => Categoria[];
+  /** Pide que se carguen (y se mantengan al día) banners y/o categorías. Lo llama useStoreConfig. */
+  solicitar: (partes: PartesTienda) => void;
+}
+
+export interface PartesTienda {
+  banners?: boolean;
+  categorias?: boolean;
 }
 
 const StoreConfigContext = createContext<StoreConfigContextType | undefined>(undefined);
@@ -50,18 +57,28 @@ const StoreConfigContext = createContext<StoreConfigContextType | undefined>(und
 export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
   const [banners, setBanners] = useState<Banner[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Banners y categorías se cargan solo cuando alguna pantalla los usa (landing, inicio del portal, banners y
+  // categorías del admin). Antes se pedían en cada arranque para todos los usuarios, dos veces.
+  const [pedidas, setPedidas] = useState<{ banners: boolean; categorias: boolean }>({ banners: false, categorias: false });
+  const solicitar = useCallback((partes: PartesTienda) => {
+    setPedidas((prev) => {
+      const sig = { banners: prev.banners || !!partes.banners, categorias: prev.categorias || !!partes.categorias };
+      return sig.banners === prev.banners && sig.categorias === prev.categorias ? prev : sig;
+    });
+  }, []);
 
   // Banners son por empresa: se recargan al cambiar de empresa.
   const { version: versionEmpresa } = useEmpresa();
   useEffect(() => {
     fetchData();
-  }, [versionEmpresa]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [versionEmpresa, pedidas]);
 
   const fetchData = async () => {
-    setLoading(true);
-    
-    // Cargar banners
+    await Promise.all([pedidas.banners && cargarBanners(), pedidas.categorias && cargarCategorias()]);
+  };
+
+  const cargarBanners = async () => {
     const { data: bannersData } = await supabase
       .from('banners')
       .select('*')
@@ -82,8 +99,10 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
         fechaFin: b.fecha_fin || '',
       })));
     }
+  };
 
-    // Cargar categorías con conteo de productos
+  const cargarCategorias = async () => {
+    // Categorías con conteo de productos
     const { data: categoriasData } = await supabase
       .from('categorias')
       .select('*, productos:productos(count)')
@@ -101,12 +120,10 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
         odooId: c.odoo_id ?? null,
       })));
     }
-    
-    setLoading(false);
   };
 
-  useRealtimeRefetch('banners', fetchData);
-  useRealtimeRefetch('categorias', fetchData);
+  useRealtimeRefetch('banners', fetchData, pedidas.banners || pedidas.categorias);
+  useRealtimeRefetch('categorias', fetchData, pedidas.banners || pedidas.categorias);
 
   const addBanner = async (banner: Omit<Banner, "id">) => {
     const { error } = await supabase
@@ -220,6 +237,7 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
         deleteCategoria,
         getActiveBanners,
         getActiveCategories,
+        solicitar,
       }}
     >
       {children}
@@ -227,10 +245,14 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
-export const useStoreConfig = () => {
+/** Banners y categorías de la tienda. Por defecto pide ambos; una pantalla puede pedir solo lo que muestra. */
+export const useStoreConfig = (partes: PartesTienda = { banners: true, categorias: true }) => {
   const context = useContext(StoreConfigContext);
   if (context === undefined) {
     throw new Error("useStoreConfig must be used within a StoreConfigProvider");
   }
+  const { solicitar } = context;
+  const { banners = false, categorias = false } = partes;
+  useEffect(() => { solicitar({ banners, categorias }); }, [solicitar, banners, categorias]);
   return context;
 };

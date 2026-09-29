@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { alQuedarLibre } from "@/lib/diferir";
 import { BOOSTY_SLOT_CLASS } from "./BoostySupportSlot";
 
 const SCRIPT_SRC = "https://portal.boosty.digital/boosty-support.js";
@@ -27,6 +28,10 @@ declare global {
  * It also waits for a header slot to exist before loading: the widget falls back
  * to a floating button when its mount target is missing for 10s, and a number of
  * portal screens render with no header at all.
+ *
+ * Rendimiento: el script (de otro dominio, con su propia conexión) se inyecta cuando
+ * la primera pantalla ya se pintó y el navegador quedó libre, para no competir con el
+ * código y los datos de la ruta.
  */
 export function BoostySupport() {
   const { user, isAuthenticated } = useAuth();
@@ -49,6 +54,7 @@ export function BoostySupport() {
     if (document.querySelector(`script[src="${SCRIPT_SRC}"]`)) return;
 
     let observer: MutationObserver | null = null;
+    let cancelarEspera: (() => void) | null = null;
 
     const injectScript = () => {
       const script = document.createElement("script");
@@ -63,19 +69,22 @@ export function BoostySupport() {
 
     const hasSlot = () => document.querySelector(`.${BOOSTY_SLOT_CLASS}`) !== null;
 
-    if (hasSlot()) {
-      injectScript();
-    } else {
-      observer = new MutationObserver(() => {
-        if (!hasSlot()) return;
-        observer?.disconnect();
-        observer = null;
+    const esperarSlot = () => {
+      if (hasSlot()) {
         injectScript();
-      });
-      observer.observe(document.body, { childList: true, subtree: true });
-    }
+      } else {
+        observer = new MutationObserver(() => {
+          if (!hasSlot()) return;
+          observer?.disconnect();
+          observer = null;
+          injectScript();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      }
+    };
+    cancelarEspera = alQuedarLibre(esperarSlot, 1500);
 
-    return () => observer?.disconnect();
+    return () => { cancelarEspera?.(); observer?.disconnect(); };
   }, [isAuthenticated, userName, userEmail]);
 
   return null;

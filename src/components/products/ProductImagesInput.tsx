@@ -3,6 +3,7 @@ import { Package, ImagePlus, X, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
 import { compressImage } from "@/lib/image";
+import { urlImagenAncho } from "@/components/portal/ProductImage";
 import { useToast } from "@/hooks/use-toast";
 
 const MAX_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
@@ -12,6 +13,18 @@ function pathFromPublicUrl(url: string): string | null {
   const marker = "/object/public/imagenes/";
   const idx = url.indexOf(marker);
   return idx === -1 ? null : url.slice(idx + marker.length);
+}
+
+/**
+ * Borra del bucket las fotos de producto que estaban en `antes` y ya no están en `despues`. Se llama al GUARDAR (fotos
+ * quitadas) o al CANCELAR (fotos subidas y no guardadas): quitar una foto del formulario ya no la borra al instante, porque
+ * si se cancelaba el producto quedaba apuntando a un archivo inexistente.
+ */
+export async function borrarFotosQuitadas(antes: string[], despues: string[]) {
+  const quedan = new Set(despues);
+  const rutas = antes.filter((u) => u && !quedan.has(u)).map(pathFromPublicUrl)
+    .filter((r): r is string => !!r && r.startsWith("productos/"));
+  if (rutas.length) await supabase.storage.from("imagenes").remove(rutas);
 }
 
 interface ProductImagesInputProps {
@@ -67,15 +80,9 @@ export function ProductImagesInput({ images, onChange }: ProductImagesInputProps
     }
   };
 
-  const removeAt = async (slot: number) => {
-    const url = images[slot];
-    const next = images.filter((_, i) => i !== slot);
-    onChange(next);
-
-    const path = pathFromPublicUrl(url);
-    if (path) {
-      await supabase.storage.from("imagenes").remove([path]);
-    }
+  // Solo la quita del formulario: el archivo se borra al guardar (borrarFotosQuitadas)
+  const removeAt = (slot: number) => {
+    onChange(images.filter((_, i) => i !== slot));
   };
 
   const makePrincipal = (slot: number) => {
@@ -99,7 +106,8 @@ export function ProductImagesInput({ images, onChange }: ProductImagesInputProps
           >
             {url ? (
               <>
-                <img src={url} alt={`Imagen ${slot + 1}`} className="h-full w-full object-cover" />
+                <img src={urlImagenAncho(url, 160)} alt={`Imagen ${slot + 1}`} className="h-full w-full object-cover"
+                  onError={(e) => { if (e.currentTarget.src !== url) e.currentTarget.src = url; }} />
                 {slot === 0 ? (
                   <span className="absolute top-1 left-1 h-5 w-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center" title="Principal">
                     <Star className="h-3 w-3" />
@@ -117,6 +125,8 @@ export function ProductImagesInput({ images, onChange }: ProductImagesInputProps
                 <button
                   type="button"
                   onClick={() => removeAt(slot)}
+                  title="Quitar foto"
+                  aria-label="Quitar foto"
                   className="absolute top-1 right-1 h-5 w-5 rounded-full bg-destructive text-white flex items-center justify-center"
                 >
                   <X className="h-3 w-3" />

@@ -60,7 +60,9 @@ import {
 import { supabase, Producto, Categoria, TipoEmpaque, ProductoEmpaque } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
-import { ProductImagesInput } from "@/components/products/ProductImagesInput";
+import { ProductImagesInput, borrarFotosQuitadas } from "@/components/products/ProductImagesInput";
+import { SyncOdooProducto } from "@/components/products/SyncOdooProducto";
+import { urlImagenAncho } from "@/components/portal/ProductImage";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { OdooBadge } from "@/components/OdooBadge";
@@ -153,6 +155,10 @@ const Productos = () => {
     destacado: false,
   });
   const [imagenes, setImagenes] = useState<string[]>([]);
+  // Fotos con que se abrió el formulario: al guardar se borran del bucket las quitadas; al cancelar, las subidas sin guardar
+  const [imagenesIniciales, setImagenesIniciales] = useState<string[]>([]);
+  // Versión del indicador de sincronización con Odoo (se recarga tras guardar o enviar)
+  const [versionSync, setVersionSync] = useState(0);
 
   useEffect(() => {
     fetchData();
@@ -242,6 +248,7 @@ const Productos = () => {
     await supabase.from('producto_empaques').insert(empaquesInsert);
 
     toast({ title: "Producto Creado", description: `"${formData.nombre}" ha sido creado exitosamente` });
+    setImagenesIniciales(imagenes);
     resetForm();
     setIsCreateOpen(false);
     fetchData();
@@ -257,6 +264,11 @@ const Productos = () => {
 
     // Producto de Odoo: SKU, nombre, categoría, unidad y stock vienen de Odoo; el precio también si tuvo ventas.
     const esOdoo = !!selectedProducto.odoo_id;
+    // La foto principal (a otra, no quitarla) y la descripción se escriben en Odoo (20r): la ficha queda abierta con el estado
+    const principalNueva = imagenes[0] || null;
+    const cambioOdoo = esOdoo && (
+      (!!principalNueva && principalNueva !== (selectedProducto.imagen_url || null)) ||
+      (formData.descripcion.trim() || null) !== (selectedProducto.descripcion?.trim() || null));
     const propios = {
       descripcion: formData.descripcion || null,
       costo: formData.costo || null,
@@ -293,11 +305,36 @@ const Productos = () => {
     }));
     await supabase.from('producto_empaques').insert(empaquesInsert);
 
+    // Fotos quitadas del formulario: se borran del bucket ahora que el cambio quedó guardado
+    await borrarFotosQuitadas(imagenesIniciales, imagenes);
+    setImagenesIniciales(imagenes);
+
+    if (cambioOdoo) {
+      toast({ title: "Producto Actualizado", description: "La foto y la descripción se envían a Odoo; el estado se ve en la ficha." });
+      await recargarSeleccionado(selectedProducto.id);
+      setVersionSync((v) => v + 1);
+      document.querySelector('[data-testid="sync-odoo-producto"]')?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      fetchData();
+      return;
+    }
     toast({ title: "Producto Actualizado", description: `"${formData.nombre}" ha sido actualizado` });
     resetForm();
     setIsEditOpen(false);
     setSelectedProducto(null);
     fetchData();
+  };
+
+  const recargarSeleccionado = async (id: string) => {
+    const { data } = await supabase.from('productos')
+      .select('*, categoria:categorias(*), tipo_empaque:tipos_empaque(*), producto_empaques(*, tipo_empaque:tipos_empaque(*))')
+      .eq('id', id).single();
+    if (data) setSelectedProducto(data as ProductoConRelaciones);
+  };
+
+  // Cerrar un formulario sin guardar: las fotos que se subieron en él no quedan huérfanas en el bucket
+  const cerrarFormulario = (abrir: boolean, setAbierto: (v: boolean) => void) => {
+    if (!abrir) borrarFotosQuitadas(imagenes, imagenesIniciales);
+    setAbierto(abrir);
   };
 
   const handleDelete = async () => {
@@ -454,7 +491,9 @@ const Productos = () => {
       destacado: producto.destacado,
     });
     const existentes = Array.isArray(producto.imagenes) ? (producto.imagenes as string[]) : [];
-    setImagenes(existentes.length > 0 ? existentes : (producto.imagen_url ? [producto.imagen_url] : []));
+    const iniciales = existentes.length > 0 ? existentes : (producto.imagen_url ? [producto.imagen_url] : []);
+    setImagenes(iniciales);
+    setImagenesIniciales(iniciales);
     setIsEditOpen(true);
   };
 
@@ -937,7 +976,10 @@ const Productos = () => {
         <TableCell className="font-medium">
           <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
             {producto.imagen_url ? (
-              <img src={producto.imagen_url} alt={producto.nombre} className="h-5 w-5 shrink-0 rounded object-cover" />
+              // Miniatura al tamaño en que se pinta: las fotos que llegan de Odoo pueden medir hasta 1920 px
+              <img src={urlImagenAncho(producto.imagen_url, 40)} alt={producto.nombre} loading="lazy" decoding="async"
+                className="h-5 w-5 shrink-0 rounded object-cover"
+                onError={(e) => { const u = producto.imagen_url!; if (e.currentTarget.src !== u) e.currentTarget.src = u; }} />
             ) : (
               <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
             )}
@@ -1064,7 +1106,7 @@ const Productos = () => {
                 onChange={handleFileUpload}
               />
             </DropdownMenu>
-            <Button size="sm" className="gap-1.5" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
+            <Button size="sm" className="gap-1.5" onClick={() => { resetForm(); setImagenesIniciales([]); setIsCreateOpen(true); }}>
               <Plus className="h-3.5 w-3.5" />
               Nuevo Producto
             </Button>
@@ -1187,7 +1229,7 @@ const Productos = () => {
       </div>
 
       {/* Create Product Sheet */}
-      <Sheet open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+      <Sheet open={isCreateOpen} onOpenChange={(v) => cerrarFormulario(v, setIsCreateOpen)}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Crear Producto</SheetTitle>
@@ -1320,7 +1362,7 @@ const Productos = () => {
             </div>
 
             <div className="flex gap-2 pt-4">
-              <Button variant="outline" className="flex-1" onClick={() => setIsCreateOpen(false)}>
+              <Button variant="outline" className="flex-1" onClick={() => cerrarFormulario(false, setIsCreateOpen)}>
                 Cancelar
               </Button>
               <Button className="flex-1" onClick={handleCreate}>
@@ -1332,7 +1374,7 @@ const Productos = () => {
       </Sheet>
 
       {/* Edit Product Sheet */}
-      <Sheet open={isEditOpen} onOpenChange={setIsEditOpen}>
+      <Sheet open={isEditOpen} onOpenChange={(v) => cerrarFormulario(v, setIsEditOpen)}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">Editar Producto {selectedProducto?.odoo_id && <OdooBadge />}</SheetTitle>
@@ -1343,10 +1385,18 @@ const Productos = () => {
             )}
           </SheetHeader>
           <div className="grid gap-4 py-4">
+            {selectedProducto?.odoo_id && (
+              <SyncOdooProducto producto={selectedProducto} version={versionSync} onEnviado={() => recargarSeleccionado(selectedProducto.id)} />
+            )}
             {/* Image Upload */}
             <div className="space-y-2">
               <Label>Imágenes del Producto</Label>
               <ProductImagesInput images={imagenes} onChange={setImagenes} />
+              {selectedProducto?.odoo_id && (
+                <p className="text-xs text-muted-foreground">
+                  La principal se envía a Odoo. Quitarla solo la quita en GUDS: en Odoo se conserva la suya (GUDS no borra nada en Odoo).
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -1369,9 +1419,15 @@ const Productos = () => {
             </div>
 
             <div className="space-y-2">
-              <Label>Descripción</Label>
+              <Label htmlFor="edit-descripcion" className="flex items-center gap-1.5">
+                Descripción {selectedProducto?.odoo_id && <OdooBadge titulo="Descripción de venta: se sincroniza con Odoo en los dos sentidos (gana el cambio más reciente)" />}
+              </Label>
               <Textarea
+                id="edit-descripcion"
                 value={formData.descripcion}
+                maxLength={5000}
+                rows={4}
+                placeholder={selectedProducto?.odoo_id ? "Descripción de venta: la ven los clientes en la ficha del producto y se escribe en Odoo" : undefined}
                 onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
               />
             </div>
@@ -1485,7 +1541,7 @@ const Productos = () => {
             )}
 
             <div className="flex gap-2 pt-4">
-              <Button variant="outline" className="flex-1" onClick={() => setIsEditOpen(false)}>
+              <Button variant="outline" className="flex-1" onClick={() => cerrarFormulario(false, setIsEditOpen)}>
                 Cancelar
               </Button>
               <Button className="flex-1" onClick={handleEdit}>

@@ -30,6 +30,7 @@ import { useControlTower } from "@/contexts/ControlTowerContext";
 import { useNotifications } from "@/contexts/NotificationsContext";
 import { usePendingActions } from "@/hooks/use-pending-actions";
 import { EmpresaSelector, ModoConsultaBanner } from "@/components/EmpresaSelector";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -73,6 +74,7 @@ export function MainLayout({ children, title }: MainLayoutProps) {
   };
 
   return (
+    <TooltipProvider>
     <div className="min-h-screen bg-background">
       {/* Desktop Sidebar */}
       <div className="hidden lg:block">
@@ -223,5 +225,6 @@ export function MainLayout({ children, title }: MainLayoutProps) {
         </SheetContent>
       </Sheet>
     </div>
+    </TooltipProvider>
   );
 }

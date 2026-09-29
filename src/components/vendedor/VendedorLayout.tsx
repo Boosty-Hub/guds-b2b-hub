@@ -1,33 +1,20 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { VendedorSidebar } from "./VendedorSidebar";
 import { navItems as navVendedor, accionesRapidas } from "./navegacion";
 import { BuscadorGlobal, type ModuloBuscador } from "@/components/BuscadorGlobal";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
   Menu,
   Sun,
   Wallet,
   ShoppingCart,
   CreditCard,
-  LogOut,
-  Plus,
   ArrowLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { CurrencySwitch } from "@/components/CurrencySwitch";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { Logo } from "@/components/Logo";
+import { cargaDiferida } from "@/lib/cargaDiferida";
+import { BotonAccionRapida } from "./BotonAccionRapida";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -53,8 +40,9 @@ const mobileNavDer = [
   { icon: CreditCard, label: "Cobros", path: "/vendedor/pagos" },
 ];
 
-// Menú hamburguesa = el mismo menú del sidebar (navegacion.ts), para que ninguna entrada quede fuera en el teléfono
-const sheetNavItems = navVendedor;
+// Menú hamburguesa (el mismo menú del sidebar, navegacion.ts) y acciones rápidas: Radix Sheet / DropdownMenu se descargan
+// aparte (MenusVendedor), cuando el navegador queda libre o al tocarlos por primera vez.
+const menus = cargaDiferida(() => import("./MenusVendedor"));
 
 // Accesos "Ir a" del buscador del vendedor
 const modulosVendedor: ModuloBuscador[] = [...accionesRapidas, ...navVendedor].map((i) => ({ label: i.label, path: i.path, seccion: "Portal vendedor" }));
@@ -67,6 +55,8 @@ export const VendedorLayout = ({ children, title, pantallaCompletaMovil = false 
   const navigate = useNavigate();
   const { user } = useAuth();
   useAccesibilidadPortal();
+  const menusVendedor = menus.useModulo();
+  useEffect(() => { if (isMobileMenuOpen) menus.pedir(); }, [isMobileMenuOpen]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -152,21 +142,7 @@ export const VendedorLayout = ({ children, title, pantallaCompletaMovil = false 
             </NavLink>
           ))}
           <div className="flex flex-1 justify-center">
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger asChild>
-                <button type="button" aria-label="Nuevo pedido o cobro" data-testid="boton-accion-rapida"
-                  className="-mt-5 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-700 text-white shadow-lg ring-4 ring-background active:bg-emerald-800">
-                  <Plus className="h-6 w-6" aria-hidden />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="center" sideOffset={10} className="w-52">
-                {accionesRapidas.map((a) => (
-                  <DropdownMenuItem key={a.path} asChild className="h-11 gap-2.5 text-sm">
-                    <Link to={a.path}><a.icon className="h-4 w-4 text-emerald-700" aria-hidden />{a.label}</Link>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <AccionesRapidas modulo={menusVendedor} />
           </div>
           {mobileNavDer.map((item) => (
             <NavLink key={item.path} to={item.path} className={claseNavMovil}>
@@ -179,68 +155,27 @@ export const VendedorLayout = ({ children, title, pantallaCompletaMovil = false 
       </nav>
 
       {/* Mobile Menu Sheet */}
-      <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-        <SheetContent side="left" className="flex w-80 flex-col gap-0 p-0">
-          <SheetHeader className="p-4 border-b border-border">
-            <SheetTitle className="flex items-center gap-3">
-              <Logo className="h-8 text-primary" />
-            </SheetTitle>
-          </SheetHeader>
-          
-          {/* User Info */}
-          <div className="p-4 border-b border-border">
-            <div className="rounded-xl bg-emerald-500/10 p-4">
-              <div className="flex items-center gap-3">
-                <div className="h-12 w-12 rounded-full bg-emerald-500/20 flex items-center justify-center" aria-hidden>
-                  <span className="text-lg font-semibold text-emerald-800">
-                    {user ? getInitials(user.nombre, user.apellido) : 'V'}
-                  </span>
-                </div>
-                <div>
-                  <p className="font-semibold">{user?.nombre} {user?.apellido}</p>
-                  <p className="text-sm text-muted-foreground">{user?.email}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Navigation: todas las secciones de navegacion.ts; se desplaza si la pantalla es baja */}
-          <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-4" aria-label="Secciones del portal">
-            {sheetNavItems.map((item) => (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                end={item.path === "/vendedor"}
-                onClick={() => setIsMobileMenuOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
-                    isActive
-                      ? "bg-emerald-700 text-white"
-                      : "text-muted-foreground hover:bg-muted"
-                  }`
-                }
-              >
-                <item.icon className="h-5 w-5" aria-hidden />
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-
-          {/* Logout */}
-          <div className="shrink-0 border-t border-border p-4">
-            <button 
-              onClick={handleLogout}
-              className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-destructive hover:bg-destructive/10"
-            >
-              <LogOut className="h-5 w-5" aria-hidden />
-              Cerrar Sesión
-            </button>
-          </div>
-        </SheetContent>
-      </Sheet>
+      {menusVendedor && <menusVendedor.MenuMovilVendedor abierto={isMobileMenuOpen} setAbierto={setIsMobileMenuOpen} onLogout={handleLogout} />}
     </div>
   );
 };
+
+/** Botón central de la barra del teléfono: se pinta con la pantalla; su menú llega aparte (si se toca antes, se abre al llegar). */
+function AccionesRapidas({ modulo }: { modulo: typeof import("./MenusVendedor") | null }) {
+  const [abrir, setAbrir] = useState(false);
+  const foco = useRef(false);
+  if (modulo) return <modulo.AccionesRapidasMenu abrirAlMontar={abrir} enfocar={foco.current} />;
+  return (
+    <BotonAccionRapida
+      aria-haspopup="menu"
+      aria-expanded={false}
+      onPointerEnter={menus.pedir}
+      onFocus={() => { foco.current = true; menus.pedir(); }}
+      onBlur={() => { foco.current = false; }}
+      onClick={() => { setAbrir(true); menus.pedir(); }}
+    />
+  );
+}
 
 /** Barra superior propia de una pantalla completa en el teléfono (Nuevo pedido, Registrar cobro): volver, título y extra. */
 export const BarraSuperiorMovil = ({ titulo, subtitulo, volverA, onVolver, derecha }: {

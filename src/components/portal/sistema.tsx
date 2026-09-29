@@ -195,6 +195,17 @@ export const SkeletonFilas = ({ n = 4, alto = "h-16", className }: { n?: number;
 );
 
 /** Grilla de tarjetas de producto en carga. */
+/** Encabezado de la sección "Productos destacados" del inicio (el mismo mientras carga). */
+export const EncabezadoDestacados = ({ children }: { children?: ReactNode }) => (
+  <div className="mb-3 flex items-center justify-between">
+    <h2 className="text-base font-semibold text-foreground">Productos destacados</h2>
+    {children}
+  </div>
+);
+
+/** Esqueleto de los destacados del inicio. */
+export const SkeletonDestacados = () => <SkeletonProductos n={4} className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 lg:gap-4" />;
+
 export const SkeletonProductos = ({ n = 8, className }: { n?: number; className?: string }) => (
   <div className={className} aria-busy="true" aria-label="Cargando productos">
     {Array.from({ length: n }).map((_, i) => (

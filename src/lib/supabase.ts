@@ -17,7 +17,9 @@ const fetchConEmpresa: typeof fetch = (input, init) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   if (!url.includes('/rest/v1/')) return fetch(input, init);
   const headers = new Headers(init?.headers);
-  headers.set('x-empresa-id', empresaHeader);
+  // Una petición puede fijar su empresa explícitamente (.setHeader('x-empresa-id', …)): p. ej. el arranque, que
+  // resuelve la ficha del cliente de la empresa que va a quedar activa sin esperar a que se active.
+  if (!headers.has('x-empresa-id')) headers.set('x-empresa-id', empresaHeader);
   return fetch(input, { ...init, headers });
 };
 
@@ -94,6 +96,12 @@ export interface Producto {
   // IVA de venta del producto en su empresa (Odoo: taxes_id). null = aún sin sincronizar (el servidor usa el general)
   impuesto_pct?: number | null;
   impuesto_nombre?: string | null;
+  // Foto principal y descripción sincronizadas con Odoo en los dos sentidos (20r): de dónde vino el último cambio y cuándo
+  imagen_origen?: 'guds' | 'odoo' | null;
+  imagen_actualizada_en?: string | null;
+  imagen_odoo_url?: string | null;
+  descripcion_origen?: 'guds' | 'odoo' | null;
+  descripcion_actualizada_en?: string | null;
 }
 
 export interface Cliente {

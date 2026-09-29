@@ -3,6 +3,7 @@ import { supabase, Producto, TipoEmpaque } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { CART_CHANGED, notifyCartChanged } from "@/components/portal/PortalCartWidget";
+import { usePortal } from "@/components/portal/contextoPortal";
 
 // Carrito del portal del cliente: una sola lógica para el catálogo y favoritos (antes favoritos tenía un carrito
 // local que no se guardaba). Escribe en la tabla carrito con el precio autoritativo de precio_efectivo (el mismo que
@@ -79,23 +80,35 @@ export const useCarritoPortal = () => {
   // Precio real por empaque (mismo que cobra el checkout) para el diálogo: { tipo_empaque_id: precio }
   const [empaquePrecios, setEmpaquePrecios] = useState<Record<string, number>>({});
 
+  // Dentro del shell del portal las líneas salen del carrito único del panel (misma tabla y mismo usuario, ya cargado
+  // y sincronizado con CART_CHANGED): no se vuelven a pedir. Fuera del shell, el hook carga el suyo.
+  const panel = usePortal()?.carrito;
+  const recargarPanel = panel?.recargar;
+  const lineasPanel = panel?.cargado ? panel.items : null;
+  useEffect(() => {
+    if (lineasPanel) setCart(lineasPanel.map(({ id, producto_id, tipo_empaque_id, cantidad, precio_unitario }) => ({ id, producto_id, tipo_empaque_id, cantidad, precio_unitario })));
+  }, [lineasPanel]);
+  const enShell = !!panel;
+
   const cargarCarrito = useCallback(async () => {
     if (!user?.id) return;
+    if (recargarPanel) { await recargarPanel(); return; }
     const { data } = await supabase
       .from("carrito")
       .select("id, producto_id, tipo_empaque_id, cantidad, precio_unitario")
       .eq("usuario_id", user.id);
     if (data) setCart(data as ItemCarrito[]);
-  }, [user?.id]);
+  }, [user?.id, recargarPanel]);
 
-  useEffect(() => { cargarCarrito(); }, [cargarCarrito]);
+  useEffect(() => { if (!enShell) cargarCarrito(); }, [enShell, cargarCarrito]);
 
-  // El panel del carrito (widget) también cambia cantidades: se mantiene sincronizado
+  // El panel del carrito (widget) también cambia cantidades: se mantiene sincronizado (en el shell ya lo hace el panel)
   useEffect(() => {
+    if (enShell) return;
     const handler = () => { cargarCarrito(); };
     window.addEventListener(CART_CHANGED, handler);
     return () => window.removeEventListener(CART_CHANGED, handler);
-  }, [cargarCarrito]);
+  }, [enShell, cargarCarrito]);
 
   // Disponible para vender (unidades): existencia − lo comprometido en pedidos y entregas. Sin control de stock: sin tope.
   const disponibleDe = (p: ProductoCarrito) => (p.controla_stock === false ? Infinity : Number(p.stock_disponible ?? p.stock_actual ?? 0));

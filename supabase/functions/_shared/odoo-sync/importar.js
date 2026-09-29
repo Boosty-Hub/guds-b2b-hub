@@ -2,7 +2,7 @@
 //
 // - Lee Odoo en SOLO LECTURA por la API, empresa por empresa (GUDS SUPPLY y QUIRUTEC).
 // - Escribe en Supabase con upserts idempotentes por odoo_id: conserva los uuid de GUDS y solo toca filas
-//   que cambiaron. Los campos que administra GUDS (imágenes, ofertas, método de pago corregido a mano,
+//   que cambiaron. Los campos que administra GUDS (ofertas, método de pago corregido a mano,
 //   aplicaciones de cobros/retenciones hechas en GUDS…) no se pisan.
 // - Las escrituras masivas van con session_replication_role = replica: no disparan triggers
 //   (notificaciones, reposición de stock, recálculos). Lo derivado se recalcula explícitamente al final.
@@ -15,6 +15,7 @@ import { round2, stripHtml, txt, norm, jsonbLit, lotes, aUsd, fechaOdoo } from '
 import { leerCompras, proveedoresReferenciados, escribirCompras } from './compras.js';
 import { leerInventario, lotesReferenciados, clientesPorEntregas, escribirInventario, CAMPOS_LOTE } from './inventario.js';
 import { leerTesoreria, escribirTesoreria } from './tesoreria.js';
+import { sincronizarContenidoProductos } from './contenido-productos.js';
 
 // Documento sin número en Odoo (borrador o anulado antes de publicarse: name vacío o '/')
 const nombreDoc = (name, id, max = null) => (name && name !== '/' ? txt(name, max) : `ODOO-${id}`);
@@ -75,7 +76,8 @@ const CLIENTE_ALMACEN = `case when almacenes.vinculo_cliente = 'manual' then alm
 const VINCULO_ALMACEN = `case when almacenes.vinculo_cliente = 'manual' then 'manual' when excluded.cliente_id is not null then excluded.vinculo_cliente
   when ${CLIENTE_PREVIO} is not null then almacenes.vinculo_cliente end`;
 
-export async function importarOdoo({ odoo, sql, aplicar = false, log = console.log, origen = 'script' }) {
+// `storage` (opcional, storage.js): para subir al bucket las fotos de producto que cambian en Odoo (20r).
+export async function importarOdoo({ odoo, sql, aplicar = false, log = console.log, origen = 'script', storage = null }) {
   const t0 = Date.now();
   const ts = new Date().toISOString();
   const resumen = { entidades: {}, avisos: [] };
@@ -144,7 +146,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       d.clientes = await odoo.leerTodo('res.partner', [['customer_rank', '>', 0], ...deEmpresa], CAMPOS_CLIENTE, { empresa: cid });
       d.proveedores = await odoo.leerTodo('res.partner', [['supplier_rank', '>', 0], ...deEmpresa], CAMPOS_PROVEEDOR, { empresa: cid });
       d.productos = await odoo.leerTodo('product.template', deEmpresa,
-        ['name', 'default_code', 'description_sale', 'categ_id', 'uom_id', 'type', 'is_storable', 'sale_ok', 'active', 'company_id', 'taxes_id', 'write_date',
+        ['name', 'default_code', 'categ_id', 'uom_id', 'type', 'is_storable', 'sale_ok', 'active', 'company_id', 'taxes_id', 'write_date',
           'standard_price', 'product_brand_id'], { empresa: cid });
       // Costo promedio (standard_price depende de la empresa, fase 20j): los productos compartidos se leen con la primera
       // empresa; en las demás se lee aparte su costo con el contexto de cada una
@@ -370,7 +372,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
         return {
           odoo_id: p.id, empresa_id: empDe(p.company_id), sku,
           nombre: txt(typeof p.name === 'object' ? (p.name.es_VE || p.name.en_US) : p.name, 200) || sku,
-          descripcion: txt(p.description_sale), categ_odoo_id: m2oId(p.categ_id),
+          categ_odoo_id: m2oId(p.categ_id),
           unidad: txt(m2oNombre(p.uom_id), 50) || 'Unidad',
           precio_odoo: ultimoPrecio.get(p.id)?.usd ?? null,   // null: nunca se vendió; se respeta el precio de GUDS
           tipo_odoo: p.type, vendible: !!p.active && !!p.sale_ok, controla_stock: !!p.is_storable,
@@ -714,13 +716,13 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           with x as (
             select x.*, coalesce(x.precio_odoo, 0) precio_ins,
               x.vendible and coalesce(x.tipo_odoo, 'consu') <> 'service' and coalesce(x.precio_odoo, 0) > 0 disponible_ins
-            from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, empresa_id uuid, sku text, nombre text, descripcion text,
+            from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, empresa_id uuid, sku text, nombre text,
               categ_odoo_id int, unidad text, precio_odoo numeric, tipo_odoo text, vendible boolean, controla_stock boolean,
               impuesto_pct numeric, impuesto_nombre text)
           )
-          insert into productos (odoo_id, empresa_id, sku, nombre, descripcion, categoria_id, unidad, precio_base, precio_origen, stock_actual,
+          insert into productos (odoo_id, empresa_id, sku, nombre, categoria_id, unidad, precio_base, precio_origen, stock_actual,
             stock_minimo, disponible, activo, destacado, tipo_odoo, vendible, controla_stock, impuesto_pct, impuesto_nombre, odoo_sync_at)
-          select x.odoo_id, x.empresa_id, x.sku, x.nombre, x.descripcion, (select c.id from categorias c where c.odoo_id = x.categ_odoo_id),
+          select x.odoo_id, x.empresa_id, x.sku, x.nombre, (select c.id from categorias c where c.odoo_id = x.categ_odoo_id),
             x.unidad, x.precio_ins, case when x.precio_odoo is not null then 'odoo' else 'guds' end, 0, 0, x.disponible_ins, x.disponible_ins,
             false, x.tipo_odoo, x.vendible, x.controla_stock, x.impuesto_pct, x.impuesto_nombre, '${ts}'
           from x
@@ -1096,6 +1098,11 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       // Tesorería: saldos de bancos, extractos de Odoo y depósitos por identificar
       Object.assign(resumen.entidades[emp.nombre_corto], await escribirTesoreria({ ...ctxTes, aplicar: true }));
     }
+
+    // Fotos y descripciones de producto (bidireccionales, 20r): después de los productos, con la regla "gana el más reciente"
+    log('\n[4] Fotos y descripciones de producto…');
+    resumen.contenido = await sincronizarContenidoProductos({ odoo, sql, storage, aplicar, log, aviso,
+      plantillas: datos.flatMap((d) => d.productos) });
 
     if (aplicar) {
       // Direcciones de entrega (la empresa es la del cliente)

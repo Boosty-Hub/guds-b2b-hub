@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEmpresa } from "@/contexts/EmpresaContext";
+import { alQuedarLibre } from "@/lib/diferir";
 
 export interface Notification {
   id: string;
@@ -42,21 +43,31 @@ export const NotificationsProvider = ({ children }: { children: ReactNode }) => 
       setUnreadCount(0);
       return;
     }
-    const { data, error } = await supabase
-      .from("notificaciones")
-      .select("*")
-      .eq("usuario_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(10);
+    // Las 10 últimas y el total de no leídas (todas las del usuario, no solo las 10 que se muestran), en paralelo
+    const [{ data, error }, { count }] = await Promise.all([
+      supabase
+        .from("notificaciones")
+        .select("*")
+        .eq("usuario_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(10),
+      supabase.from("notificaciones").select("id", { count: "exact", head: true })
+        .eq("usuario_id", user.id).eq("leida", false),
+    ]);
 
     if (!error && data) {
       setNotifications(data as Notification[]);
-      // No leídas: todas las del usuario, no solo las 10 que se muestran
-      const { count } = await supabase.from("notificaciones").select("id", { count: "exact", head: true })
-        .eq("usuario_id", user.id).eq("leida", false);
       setUnreadCount(count ?? data.filter((n) => !n.leida).length);
     }
   }, [user?.id, versionEmpresa]);
+
+  // Los avisos se cargan (y se abre su canal) cuando la primera pantalla ya se pintó: no compiten con sus datos.
+  const [diferido, setDiferido] = useState(false);
+  useEffect(() => {
+    setDiferido(false);
+    if (!user?.id) return;
+    return alQuedarLibre(() => setDiferido(true), 500);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -64,6 +75,7 @@ export const NotificationsProvider = ({ children }: { children: ReactNode }) => 
       setUnreadCount(0);
       return;
     }
+    if (!diferido) return;
     fetchNotifications();
     // Un único canal por usuario. Al cambiar de usuario o desmontar, se limpia.
     const channel = supabase
@@ -80,7 +92,7 @@ export const NotificationsProvider = ({ children }: { children: ReactNode }) => 
       supabase.removeChannel(channel);
       clearInterval(poll);
     };
-  }, [user?.id, fetchNotifications]);
+  }, [user?.id, diferido, fetchNotifications]);
 
   const markAsRead = async (notificationId: string) => {
     await supabase.from("notificaciones").update({ leida: true }).eq("id", notificationId);

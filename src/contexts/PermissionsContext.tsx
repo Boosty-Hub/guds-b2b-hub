@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { alQuedarLibre } from "@/lib/diferir";
 
 type Accion = "ver" | "crear" | "editar" | "eliminar";
 type PermMap = Record<string, { ver: boolean; crear: boolean; editar: boolean; eliminar: boolean }>;
@@ -34,7 +35,14 @@ export const PermissionsProvider = ({ children }: { children: ReactNode }) => {
     setLoadedFor(uid);
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [user?.id]);
+  // Los permisos granulares solo los usan las pantallas del admin: para el resto de los roles se cargan cuando la
+  // primera pantalla ya se pintó, sin competir con sus datos (can() es optimista mientras tanto, como antes).
+  const esAdmin = user?.role === "admin";
+  useEffect(() => {
+    if (!user?.id || esAdmin) { load(); return; }
+    return alQuedarLibre(() => { load(); }, 1000);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [user?.id, esAdmin]);
 
   // "ready" solo cuando los permisos cargados corresponden al usuario actual
   const ready = !!user?.id && loadedFor === user.id;

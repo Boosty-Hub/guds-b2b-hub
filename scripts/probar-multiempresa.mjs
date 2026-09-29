@@ -1720,6 +1720,169 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
          and has_function_privilege('anon', p.oid, 'execute')) anon) t`));
 }
 
+// ── Fotos y descripciones bidireccionales con Odoo (20r): solo administración encola, sin bucles, gana el más reciente ──
+{
+  const qaVend20r = (await sql(`select a.id from auth.users a join usuarios u on u.auth_id = a.id where a.email = 'qa.vendedor@guds.test' and u.role = 'vendedor'`))[0]?.id || vendGuds;
+  const [p20r] = await sql(`select id from productos where empresa_id = '${guds.id}' and odoo_id is not null and imagen_url is null
+    and nullif(btrim(descripcion), '') is null and imagen_origen is null and descripcion_origen is null order by nombre limit 1`);
+  const P = p20r.id;
+  const colaP = `(select count(*) from public.odoo_escrituras e where e.tipo = 'producto' and e.referencia_id = '${P}')`;
+  // Cambio del admin por la API (función de prueba: cada sentencia ve lo que encoló el disparador de la anterior)
+  const previoAdmin = `create function public.p20r_admin(p uuid) returns text language plpgsql as $f$
+    declare r text;
+    begin
+      update public.productos set descripcion = '  Descripción de prueba 20r  ' where id = p;
+      update public.productos set imagen_url = 'https://ejemplo.invalid/prueba-20r.jpg' where id = p;
+      update public.productos set imagen_origen = 'odoo', imagen_odoo_checksum = 'falso', descripcion_origen = 'odoo', descripcion_odoo_md5 = 'falso' where id = p;
+      select row_to_json(t)::text into r from (select pr.descripcion, pr.descripcion_origen, pr.imagen_origen, pr.imagen_odoo_checksum, pr.descripcion_odoo_md5,
+          pr.descripcion_actualizada_en = now() ahora_desc, pr.imagen_actualizada_en = now() ahora_img,
+          (select count(*) from public.odoo_escrituras e where e.tipo = 'producto' and e.referencia_id = p) n,
+          (select row_to_json(e) from (select e.estado, e.solicitado_por is not null quien, e.datos -> 'campos' campos from public.odoo_escrituras e
+             where e.tipo = 'producto' and e.referencia_id = p order by e.created_at desc limit 1) e) fila
+        from public.productos pr where pr.id = p) t;
+      return r;
+    end $f$;`;
+  await caso('Productos→Odoo: el admin cambia descripción y foto → una sola escritura pendiente (quién y campos), sellado "guds" y huellas protegidas',
+    (r) => r?.descripcion === 'Descripción de prueba 20r' && r?.descripcion_origen === 'guds' && r?.imagen_origen === 'guds' && r?.ahora_desc && r?.ahora_img
+      && r?.imagen_odoo_checksum === null && r?.descripcion_odoo_md5 === null && r?.n === 1 && r?.fila?.estado === 'pendiente' && r?.fila?.quien
+      && [...(r?.fila?.campos || [])].sort().join(',') === 'descripcion,imagen',
+    como({ empresa: guds.id, previo: previoAdmin }, `select public.p20r_admin('${P}')`));
+  const previoQuitar = `create function public.p20r_quitar(p uuid) returns text language plpgsql as $f$
+    declare r text;
+    begin
+      update public.productos set imagen_url = null where id = p;
+      select row_to_json(t)::text into r from (select (select count(*) from public.odoo_escrituras e where e.tipo = 'producto' and e.referencia_id = p) n) t;
+      return r;
+    end $f$;`;
+  await caso('Productos→Odoo: quitar la foto no encola nada (GUDS no borra en Odoo)', (r) => r?.n === 0,
+    como({ empresa: guds.id, previo: `update public.productos set imagen_url = 'https://ejemplo.invalid/a.jpg' where id = '${P}'; ${previoQuitar}` },
+      `select public.p20r_quitar('${P}')`));
+  // Intento de cambio + conteo de la cola como postgres (la cola solo la lee administración): cada sentencia ve lo encolado por la anterior
+  const previoIntento = `create function public.p20r_contar(p uuid) returns bigint language sql security definer set search_path = public
+      as 'select count(*) from odoo_escrituras e where e.tipo = ''producto'' and e.referencia_id = p';
+    create function public.p20r_origen(p uuid) returns text language sql security definer set search_path = public
+      as 'select coalesce(descripcion_origen, ''-'') || ''/'' || coalesce(imagen_origen, ''-'') from productos where id = p';
+    create function public.p20r_intento(p uuid, q text) returns text language plpgsql as $f$
+    declare filas int;
+    begin
+      execute q using p;
+      get diagnostics filas = row_count;
+      return json_build_object('filas', filas, 'n', public.p20r_contar(p), 'origen', public.p20r_origen(p))::text;
+    end $f$;`;
+  const intento = (set) => `select public.p20r_intento('${P}', ${lit(`update public.productos set ${set} where id = $1`)})`;
+  if (qaVend20r) {
+    await caso('Productos→Odoo: un vendedor no cambia la descripción ni encola (RLS)', (r, e) => !!e || (r?.filas === 0 && r?.n === 0),
+      como({ uid: qaVend20r, empresa: guds.id, previo: previoIntento }, intento(`descripcion = 'x', imagen_url = 'https://ejemplo.invalid/v.jpg'`)));
+    await caso('Productos→Odoo: un vendedor no puede enviar un producto a Odoo', 'No tienes permiso para enviar productos a Odoo',
+      como({ uid: qaVend20r, empresa: guds.id }, `select public.enviar_producto_odoo('${P}')::text`));
+    await caso('Productos→Odoo: un vendedor no reintenta envíos', 'No tienes permiso para enviar productos a Odoo',
+      como({ uid: qaVend20r, empresa: guds.id }, `select public.reintentar_escritura_producto('00000000-0000-0000-0000-000000000000')::text`));
+    await caso('Productos→Odoo: un vendedor no lee el modo de escritura de productos ni la cola', (r) => r?.cfg === 0 && r?.cola === 0,
+      como({ uid: qaVend20r, empresa: guds.id }, `select row_to_json(t)::text from (select (select count(*) from configuracion where clave = 'odoo_escritura_productos') cfg,
+        (select count(*) from odoo_escrituras where tipo = 'producto') cola) t`));
+  }
+  // Cliente del portal: el de QA (si otra prueba ya le creó perfil se usa ese; si no, uno temporal dentro del bloque)
+  const qaCli20r = (await sql(`select id from auth.users where email = 'qa.cliente@guds.test'`))[0]?.id;
+  const perfilCli20r = qaCli20r ? (await sql(`select role from usuarios where auth_id = '${qaCli20r}'`))[0] : null;
+  if (qaCli20r && (!perfilCli20r || perfilCli20r.role === 'cliente')) {
+    const previoCli = perfilCli20r ? '' : `insert into usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${qaCli20r}', 'qa.cliente@guds.test', 'QA', 'cliente', '${cliGuds}', true);`;
+    await caso('Productos→Odoo: un cliente no cambia la descripción ni encola', (r, e) => !!e || (r?.filas === 0 && r?.n === 0),
+      como({ uid: qaCli20r, empresa: guds.id, previo: previoCli + previoIntento }, intento(`descripcion = 'x'`)));
+    await caso('Productos→Odoo: un cliente no puede enviar un producto a Odoo', 'No tienes permiso para enviar productos a Odoo',
+      como({ uid: qaCli20r, empresa: guds.id, previo: previoCli }, `select public.enviar_producto_odoo('${P}')::text`));
+  }
+  await caso('Productos→Odoo: sin sesión no se envía', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select public.enviar_producto_odoo('${P}')::text`));
+  await caso('Productos→Odoo: el admin lee el modo (simular/activo)', (r) => ['simular', 'activo'].includes(r?.valor),
+    como({ empresa: guds.id }, `select row_to_json(t)::text from (select valor from configuracion where clave = 'odoo_escritura_productos') t`));
+  await caso('Productos→Odoo: "Enviar a Odoo" sin nada distinto de Odoo se rechaza', 'ya coinciden con Odoo',
+    como({ empresa: guds.id }, `select public.enviar_producto_odoo('${P}')::text`));
+  await caso('Productos→Odoo: solo se reintentan envíos existentes', 'Envío no encontrado',
+    como({ empresa: guds.id }, `select public.reintentar_escritura_producto('00000000-0000-0000-0000-000000000000')::text`));
+
+  // Sin bucles: lo que escribe la sincronización (sin sesión de usuario, y en modo réplica) no encola ni se sella como "guds"
+  await caso('Sin bucle: un cambio de la sincronización (sin usuario) no encola ni marca "guds"', (r) => r?.filas === 1 && r?.n === 0 && r?.origen === '-/-',
+    como({ rol: 'postgres', uid: null, empresa: guds.id, previo: previoIntento }, intento(`descripcion = 'Desde Odoo', imagen_url = 'https://ejemplo.invalid/o.jpg'`)));
+  await caso('Sin bucle: en modo réplica (como la sincronización) ni siquiera un cambio del admin encola', (r) => r?.filas === 1 && r?.n === 0 && r?.origen === '-/-',
+    como({ empresa: guds.id, previo: `execute 'set local session_replication_role = replica'; ${previoIntento}` }, intento(`descripcion = 'x', imagen_url = 'https://ejemplo.invalid/r.jpg'`)));
+  await caso('Control: el mismo cambio del admin fuera de réplica sí encola', (r) => r?.filas === 1 && r?.n === 1 && r?.origen === 'guds/guds',
+    como({ empresa: guds.id, previo: previoIntento }, intento(`descripcion = 'x', imagen_url = 'https://ejemplo.invalid/r.jpg'`)));
+
+  // Gana el más reciente (descripciones): GUDS cambió hace un momento; Odoo cambió antes → se conserva GUDS; Odoo después → gana Odoo
+  const previoDesc = `create function public.p20r_desc(p uuid, oid int) returns text language plpgsql as $f$
+    declare a jsonb; b jsonb; c jsonb; d jsonb; r text;
+    begin
+      update public.productos set descripcion = 'Nueva en GUDS', descripcion_origen = 'guds', descripcion_actualizada_en = now(), descripcion_odoo_md5 = null where id = p;
+      a := public.sincronizar_descripciones_odoo(jsonb_build_array(jsonb_build_object('odoo_id', oid, 'descripcion', 'Vieja de Odoo', 'cambio_en', now() - interval '1 hour')));
+      select to_jsonb(x) into b from (select descripcion, descripcion_origen, descripcion_odoo_md5 from public.productos where id = p) x;
+      c := public.sincronizar_descripciones_odoo(jsonb_build_array(jsonb_build_object('odoo_id', oid, 'descripcion', 'Nueva de Odoo', 'cambio_en', now() + interval '1 minute')));
+      select to_jsonb(x) into d from (select descripcion, descripcion_origen, descripcion_odoo_md5 = md5('Nueva de Odoo') huella, descripcion_actualizada_en > now() fecha_odoo,
+        (select count(*) from public.odoo_escrituras e where e.tipo = 'producto' and e.referencia_id = p) n from public.productos where id = p) x;
+      -- Otra corrida con lo mismo: nada que hacer (idempotente)
+      r := jsonb_build_object('a', a, 'b', b, 'c', c, 'd', d, 'e', public.sincronizar_descripciones_odoo(jsonb_build_array(jsonb_build_object('odoo_id', oid, 'descripcion', 'Nueva de Odoo', 'cambio_en', now() + interval '1 minute'))))::text;
+      return r;
+    end $f$;`;
+  const oid20r = (await sql(`select odoo_id from productos where id = '${P}'`))[0].odoo_id;
+  await caso('Gana el más reciente: descripción de GUDS más nueva se conserva; la de Odoo más nueva la reemplaza; sin encolar y sin repetir',
+    (r) => r?.a?.guds_mas_reciente === 1 && r?.b?.descripcion === 'Nueva en GUDS' && r?.b?.descripcion_odoo_md5 === null
+      && r?.c?.traidas === 1 && r?.d?.descripcion === 'Nueva de Odoo' && r?.d?.descripcion_origen === 'odoo' && r?.d?.huella && r?.d?.fecha_odoo && r?.d?.n === 0
+      && r?.e?.traidas === 0 && r?.e?.iguales === 0 && r?.e?.guds_mas_reciente === 0,
+    como({ rol: 'postgres', uid: null, previo: previoDesc }, `select public.p20r_desc('${P}', ${oid20r})`));
+  // Lo que GUDS ya escribió en Odoo (huella guardada por el escritor) no vuelve como cambio de Odoo
+  await caso('Sin bucle: la descripción que GUDS escribió en Odoo no regresa como cambio de Odoo', (r) => r?.s?.traidas === 0 && r?.s?.iguales === 0 && r?.origen === 'guds',
+    como({ rol: 'postgres', uid: null, previo: `update public.productos set descripcion = 'Escrita por GUDS', descripcion_origen = 'guds', descripcion_actualizada_en = now() - interval '1 minute',
+        descripcion_odoo_md5 = md5('Escrita por GUDS') where id = '${P}';` },
+      `select row_to_json(t)::text from (select public.sincronizar_descripciones_odoo(jsonb_build_array(jsonb_build_object('odoo_id', ${oid20r}, 'descripcion', 'Escrita por GUDS',
+        'cambio_en', now()))) s, (select descripcion_origen from productos where id = '${P}') origen) t`));
+
+  // Gana el más reciente (fotos): decisión por huella y fecha; aplicar trae la de Odoo y no se repite
+  const previoImg = `create function public.p20r_img(p uuid, oid int) returns text language plpgsql as $f$
+    declare r jsonb := '{}'::jsonb; d record; ap jsonb;
+    begin
+      update public.productos set imagen_url = 'https://ejemplo.invalid/guds.jpg', imagenes = '["https://ejemplo.invalid/guds.jpg","https://ejemplo.invalid/b.jpg"]',
+        imagen_origen = 'guds', imagen_actualizada_en = now(), imagen_odoo_checksum = null, imagen_odoo_url = null where id = p;
+      select accion into d from public.decidir_imagenes_odoo(jsonb_build_array(jsonb_build_object('odoo_id', oid, 'checksum', 'ck1', 'mimetype', 'image/jpeg', 'cambio_en', now() - interval '1 hour')));
+      r := r || jsonb_build_object('vieja', d.accion);
+      select * into d from public.decidir_imagenes_odoo(jsonb_build_array(jsonb_build_object('odoo_id', oid, 'checksum', 'ck1', 'mimetype', 'image/jpeg', 'cambio_en', now() + interval '1 minute')));
+      r := r || jsonb_build_object('nueva', d.accion);
+      ap := public.aplicar_imagenes_odoo(jsonb_build_array(jsonb_build_object('producto_id', p, 'accion', 'traer', 'checksum', 'ck1', 'url', 'https://ejemplo.invalid/odoo.jpg',
+        'cambio_en', d.cambio_en, 'url_previa', d.url_previa, 'checksum_previo', d.checksum_previo, 'odoo_url_previa', d.odoo_url_previa)));
+      r := r || jsonb_build_object('aplicar', ap) || (select jsonb_build_object('url', imagen_url, 'imagenes', imagenes, 'origen', imagen_origen, 'ck', imagen_odoo_checksum)
+        from public.productos where id = p);
+      -- Misma huella en la próxima corrida: nada que traer
+      r := r || jsonb_build_object('repite', (select count(*) from public.decidir_imagenes_odoo(jsonb_build_array(jsonb_build_object('odoo_id', oid, 'checksum', 'ck1',
+        'mimetype', 'image/jpeg', 'cambio_en', now() + interval '2 minute')))));
+      -- Si el producto cambió mientras se descargaba, no se aplica
+      r := r || jsonb_build_object('cambiado', public.aplicar_imagenes_odoo(jsonb_build_array(jsonb_build_object('producto_id', p, 'accion', 'traer', 'checksum', 'ck2',
+        'url', 'https://ejemplo.invalid/odoo2.jpg', 'cambio_en', now(), 'url_previa', 'https://ejemplo.invalid/otra.jpg', 'checksum_previo', 'ck1'))) -> 'aplicadas');
+      -- Odoo quitó la foto (y fue después): se quita en GUDS y la galería sigue con la siguiente
+      select * into d from public.decidir_imagenes_odoo(jsonb_build_array(jsonb_build_object('odoo_id', oid, 'checksum', null, 'cambio_en', now() + interval '3 minute')));
+      ap := public.aplicar_imagenes_odoo(jsonb_build_array(jsonb_build_object('producto_id', p, 'accion', d.accion, 'cambio_en', d.cambio_en, 'url_previa', d.url_previa,
+        'checksum_previo', d.checksum_previo, 'odoo_url_previa', d.odoo_url_previa)));
+      r := r || jsonb_build_object('quitar', d.accion, 'sin_uso', ap -> 'sin_uso') || (select jsonb_build_object('url_q', imagen_url, 'imagenes_q', imagenes, 'ck_q', imagen_odoo_checksum)
+        from public.productos where id = p);
+      r := r || jsonb_build_object('n', (select count(*) from public.odoo_escrituras e where e.tipo = 'producto' and e.referencia_id = p));
+      return r::text;
+    end $f$;`;
+  await caso('Gana el más reciente: foto de GUDS más nueva se conserva; la de Odoo más nueva se trae (principal y galería) sin repetirse; quitar en Odoo se refleja',
+    (r) => r?.vieja === 'guds_mas_reciente' && r?.nueva === 'traer' && r?.aplicar?.aplicadas === 1 && r?.url === 'https://ejemplo.invalid/odoo.jpg'
+      && JSON.stringify(r?.imagenes) === JSON.stringify(['https://ejemplo.invalid/odoo.jpg', 'https://ejemplo.invalid/b.jpg']) && r?.origen === 'odoo' && r?.ck === 'ck1'
+      && r?.repite === 0 && r?.cambiado === 0 && r?.quitar === 'quitar' && JSON.stringify(r?.sin_uso) === JSON.stringify(['https://ejemplo.invalid/odoo.jpg'])
+      && r?.url_q === 'https://ejemplo.invalid/b.jpg' && JSON.stringify(r?.imagenes_q) === JSON.stringify(['https://ejemplo.invalid/b.jpg']) && r?.ck_q === null && r?.n === 0,
+    como({ rol: 'postgres', uid: null, previo: previoImg }, `select public.p20r_img('${P}', ${oid20r})`));
+
+  await caso('Productos→Odoo: funciones internas cerradas (anon y authenticated) y las de la API sin anon', (r) => r?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace and (
+      (p.proname in ('contenido_odoo_gana', 'imagenes_con_principal', 'sincronizar_descripciones_odoo', 'decidir_imagenes_odoo', 'aplicar_imagenes_odoo',
+         'encolar_escritura_producto', 'trg_producto_contenido_odoo', 'trg_producto_contenido_odoo_encolar')
+        and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute')))
+      or (p.proname in ('enviar_producto_odoo', 'reintentar_escritura_producto', 'puede_editar_producto_odoo') and has_function_privilege('anon', p.oid, 'execute')))) t`));
+  await caso('Productos→Odoo: las funciones con privilegios validan al llamador (security definer + auth.uid/permiso)', (r) => r?.n === 3,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosecdef
+      and p.proname in ('enviar_producto_odoo', 'reintentar_escritura_producto', 'trg_producto_contenido_odoo_encolar')
+      and pg_get_functiondef(p.oid) ~ 'puede_editar_producto_odoo\\(\\)') t`));
+}
+
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {
   const pol = await sql(String.raw`select tablename || '.' || policyname p, coalesce(qual,'') || ' ' || coalesce(with_check,'') t from pg_policies where schemaname = 'public'`);

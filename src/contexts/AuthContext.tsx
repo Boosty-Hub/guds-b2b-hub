@@ -1,10 +1,12 @@
-import { createContext, useCallback, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useCallback, useContext, useRef, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
+import { guardarAsignadas, lanzarArranque, SELECT_PERFIL } from "@/lib/arranque";
 
 export type UserRole = "admin" | "cliente" | "vendedor" | "delivery";
 
 export interface User {
   id: string;
+  auth_id?: string;
   email: string;
   nombre: string;
   apellido: string;
@@ -69,9 +71,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         
         if (session?.user) {
           console.log('Sesión encontrada:', session.user.email);
+          // Empresas (y la ficha del cliente) salen en paralelo con el perfil: ver lib/arranque.ts
+          lanzarArranque(session.user.id);
           const { data: userData, error } = await supabase
             .from('usuarios')
-            .select('*')
+            .select(SELECT_PERFIL)
             .eq('auth_id', session.user.id)
             .single();
 
@@ -82,8 +86,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             await supabase.auth.signOut();
             setUser(null);
           } else if (userData) {
+            guardarAsignadas(userData.id, userData.usuario_empresas);
             setUser({
               id: userData.id,
+              auth_id: userData.auth_id,
               email: userData.email,
               nombre: userData.nombre,
               apellido: userData.apellido || '',
@@ -110,7 +116,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
 
     checkSession();
-    fetchRegistros();
 
     // Escuchar cambios de autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -125,7 +130,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchRegistros = async () => {
+  // Solicitudes de registro: solo las usa la pantalla de Registros del admin, que las pide al abrirse
+  // (refreshRegistros). Antes se pedían en cada arranque para cualquier usuario, incluso sin sesión.
+  const registrosPedidos = useRef(false);
+  const fetchRegistros = useCallback(async () => {
+    registrosPedidos.current = true;
     const { data } = await supabase
       .from('registros_clientes')
       .select('*')
@@ -152,7 +161,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         notas: r.notas,
       })));
     }
-  };
+  }, []);
 
   const login = async (email: string, password: string): Promise<{ success: boolean; role?: UserRole; error?: string }> => {
     try {
@@ -189,11 +198,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       console.log('Usuario autenticado:', authData.user.id);
+      lanzarArranque(authData.user.id);
 
       // Obtener datos del usuario desde la tabla usuarios
       const { data: userData, error: userError } = await supabase
         .from('usuarios')
-        .select('*')
+        .select(SELECT_PERFIL)
         .eq('auth_id', authData.user.id)
         .single();
 
@@ -212,8 +222,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const role = (userData.role as UserRole) || 'cliente';
+      guardarAsignadas(userData.id, userData.usuario_empresas);
       setUser({
         id: userData.id,
+        auth_id: userData.auth_id,
         email: userData.email,
         nombre: userData.nombre,
         apellido: userData.apellido || '',
@@ -262,7 +274,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
     
     if (!error) {
-      await fetchRegistros();
+      if (registrosPedidos.current) await fetchRegistros();
       return true;
     }
     return false;
@@ -303,9 +315,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return registros.filter(r => r.estado === "pendiente");
   };
 
-  const refreshRegistros = async () => {
-    await fetchRegistros();
-  };
+  const refreshRegistros = fetchRegistros;
 
   return (
     <AuthContext.Provider

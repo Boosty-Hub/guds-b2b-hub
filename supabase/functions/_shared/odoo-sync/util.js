@@ -33,3 +33,16 @@ export const aUsd = (valor, valorRef, monedaId, monedaRefId) =>
 
 // Fecha/hora de Odoo ("2026-09-27 12:00:00", UTC) → ISO
 export const fechaOdoo = (v) => (v ? `${String(v).replace(' ', 'T')}Z` : null);
+
+// Bytes ↔ base64 sin Buffer (Node y Deno): Odoo recibe y entrega las imágenes en base64
+export const aBase64 = (bytes) => {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+export const deBase64 = (b64) => {
+  const s = atob(String(b64).replace(/\s+/g, ''));
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+};

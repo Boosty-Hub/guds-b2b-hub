@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as EventoTeclado } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  ArrowRight, Boxes, ChevronDown, ClipboardList, FileText, Heart, Home, Landmark, LayoutGrid, LifeBuoy, LineChart, Loader2, LogOut,
+  ArrowRight, Boxes, ClipboardList, FileText, Heart, Home, Landmark, LayoutGrid, LifeBuoy, LineChart, Loader2, LogOut,
   Receipt, Search, TicketPercent, UserRound, Wallet, type LucideIcon,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -11,11 +11,9 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { useEmpresa } from "@/contexts/EmpresaContext";
 import { EmpresaDistintivo, EmpresaSelector } from "@/components/EmpresaSelector";
 import { NotificationsDropdown } from "@/components/portal/NotificationsDropdown";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { BarraCarrito, BotonCarrito, CarritoHoja, useCarritoPanel } from "@/components/portal/PortalCartWidget";
+import { BotonCuenta } from "@/components/portal/BotonCuenta";
+import { BarraCarrito, BotonCarrito, useCarritoPanel } from "@/components/portal/PortalCartWidget";
+import { cargaDiferida } from "@/lib/cargaDiferida";
 import { ContextoPortal, type ClientePortal } from "@/components/portal/contextoPortal";
 import { SelectorMoneda } from "@/components/portal/sistema";
 import { PaginaCargando } from "@/components/portal/PortalPagina";
@@ -88,6 +86,11 @@ const coincide = (item: ItemNav, ruta: string) => {
   return !!item.tambien?.some(bajo);
 };
 
+// Overlays que no se ven al cargar (hoja del carrito, menú de la cuenta): su código (Radix Dialog / DropdownMenu y el motor
+// de posicionamiento) se descarga aparte, cuando el navegador queda libre o al abrirlos por primera vez.
+const hojaCarrito = cargaDiferida(() => import("@/components/portal/CarritoHoja"));
+const menuCuenta = cargaDiferida(() => import("@/components/portal/MenuCuenta"));
+
 // Caché del cliente por ficha: el shell se remonta al cambiar de empresa y no debe parpadear el nombre.
 const cacheCliente = new Map<string, ClientePortal>();
 
@@ -100,6 +103,8 @@ export default function PortalShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const carrito = useCarritoPanel();
+  const hoja = hojaCarrito.useModulo();
+  useEffect(() => { if (carrito.abierto) hojaCarrito.pedir(); }, [carrito.abierto]);
   const [cliente, setCliente] = useState<ClientePortal | null>(() => (user?.cliente_id ? cacheCliente.get(user.cliente_id) ?? null : null));
   const [monedaLista, setMonedaLista] = useState(false);
   useAplicarTemaPortal();
@@ -119,7 +124,7 @@ export default function PortalShell() {
         setCliente(data as ClientePortal);
       });
     return () => { activo = false; };
-  }, [user?.cliente_id]);
+    }, [user?.cliente_id]);
 
   // La moneda elegida se recuerda por usuario (recargar con Bs. mantiene Bs.)
   useEffect(() => {
@@ -260,7 +265,7 @@ export default function PortalShell() {
           </ul>
         </nav>
 
-        <CarritoHoja estado={carrito} />
+        {hoja && <hoja.CarritoHoja estado={carrito} />}
       </div>
     </ContextoPortal.Provider>
   );
@@ -397,36 +402,21 @@ function BuscadorSuperior() {
   );
 }
 
+/** Menú de la cuenta: el botón se pinta con el header; el desplegable llega aparte (si se toca antes, se abre al llegar). */
 function MenuCuenta({ onCerrarSesion }: { onCerrarSesion: () => void }) {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const ini = `${user?.nombre?.charAt(0) ?? ""}${user?.apellido?.charAt(0) ?? ""}`.toUpperCase() || "U";
+  // Solo existe en el header de escritorio: en teléfonos no se precarga (se pide si llega a usarse)
+  const modulo = menuCuenta.useModulo(typeof window.matchMedia !== "function" || window.matchMedia("(min-width: 1024px)").matches);
+  const [abrir, setAbrir] = useState(false);
+  const foco = useRef(false);
+  if (modulo) return <modulo.MenuCuentaDesplegable onCerrarSesion={onCerrarSesion} abrirAlMontar={abrir} enfocar={foco.current} />;
   return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
-        <button type="button" className="flex h-9 items-center gap-1.5 rounded-md pl-1 pr-1.5 hover:bg-muted" aria-label="Menú de la cuenta">
-          <Avatar className="h-7 w-7">
-            <AvatarImage src={user?.avatar} alt="" />
-            <AvatarFallback className="bg-muted text-[11px] font-semibold text-foreground">{ini}</AvatarFallback>
-          </Avatar>
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuLabel className="font-normal">
-          <p className="truncate text-sm font-medium">{[user?.nombre, user?.apellido].filter(Boolean).join(" ") || "Mi cuenta"}</p>
-          <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => navigate("/portal/cuenta")}>Mi cuenta</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate("/portal/cuenta/perfil")}>Datos personales</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate("/portal/cuenta/seguridad")}>Seguridad</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate("/portal/ayuda")}>Ayuda</DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={onCerrarSesion}>
-          <LogOut className="mr-2 h-4 w-4" aria-hidden />Cerrar sesión
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <BotonCuenta
+      aria-haspopup="menu"
+      aria-expanded={false}
+      onPointerEnter={menuCuenta.pedir}
+      onFocus={() => { foco.current = true; menuCuenta.pedir(); }}
+      onBlur={() => { foco.current = false; }}
+      onClick={() => { setAbrir(true); menuCuenta.pedir(); }}
+    />
   );
 }
