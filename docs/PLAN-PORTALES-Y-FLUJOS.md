@@ -154,11 +154,13 @@ rechazada implica devolución y nota de crédito. Seguridad y evidencia: **resue
   evidencias en el admin.
 - **D5 · Sin señal**: PWA con bandeja de salida (IndexedDB), cierres sin duplicar al volver la señal.
 - **D6 · Seguimiento e incidencias**: mapa en vivo, re-cola de reprogramadas, devoluciones confirmadas por almacén, KPIs.
-- **D7 · Entregado en GUDS → entregado en Odoo** (decisión 28-sep): al cerrar la entrega en GUDS se valida el documento de
-  entrega en Odoo con las cantidades entregadas (incompleta: solo lo entregado), se adjuntan foto y firma y se deja una nota
-  "(GUDS)"; al reprogramar se cambia la fecha prevista. Si alguien lo valida directo en Odoo, la sincronización cierra la entrega
-  en GUDS con la insignia **"Actualizado desde Odoo"**. Requiere usuario de API dedicado con permisos de Inventario, simulación
-  y un piloto con un documento acordado. Nunca borrar; un rechazo deja el documento abierto para que administración decida.
+- **D7 · Entregado en GUDS → entregado en Odoo** (decisiones 28-sep y C del 29-sep): a Odoo **solo van las cantidades entregadas y
+  la validación** del documento de entrega cuando sucede (incompleta: solo lo entregado, con pendiente según el motivo). **La foto,
+  la firma, el receptor y la reprogramación viven solo en GUDS**: no se adjuntan ni se cambia la fecha prevista en Odoo. Al validar
+  queda una nota interna "(GUDS)" en el documento con las cantidades, quién cerró la entrega y cuándo (decisión D). Si alguien lo
+  valida directo en Odoo, la sincronización cierra la entrega en GUDS con la insignia **"Actualizado desde Odoo"**. Con la API key
+  actual (decisión 10); `odoo_escritura_entregas` pasó de "simular" a **activo** el 29-sep por autorización del dueño. Nunca
+  borrar; un rechazo deja el documento abierto para que administración decida.
 - **D8 · Conciliación**: el sync compara lo validado en Odoo con el resultado de GUDS y marca discrepancias.
 
 ## 7. Reportes frente al Excel (R0–R8)
@@ -212,15 +214,28 @@ el detalle. "Facturado" y "NC" están inflados por facturas erróneas revertidas
 | 7 | **Dominio**: la plataforma pasa a `portal.guds-supply.com` | ✅ URL del sitio y redirecciones de acceso configuradas; correos de acceso en español; página `/restablecer-clave` (probada de punta a punta). Correo de acceso por SMTP de Resend desde `no-responder@portal.guds-supply.com` (28-sep) |
 | 8 | **Pago móvil y Zelle**: pago móvil es la forma de pago de los bancos venezolanos (teléfono, cédula/RIF, código del banco); Zelle es un correo registrado en el banco de EE. UU. | ✅ 19l: campos en Bancos (admin → Bancos → editar), se ofrecen al cliente solo si la cuenta tiene sus datos |
 | 9 | **Momento de facturar**: el almacén deja de validar al despachar; la factura sale tras la entrega | D7 |
-| 10 | ~~Usuario de API dedicado~~ → el dueño decidió usar siempre la API key actual (Freddy) | Piloto con 1 documento antes de activar D7 |
+| 10 | ~~Usuario de API dedicado~~ → el dueño decidió usar siempre la API key actual | Piloto con 1 documento antes de activar D7 |
 | 11 | **Incompleta** → pendiente o no según el motivo; **rechazo** → administración decide en Odoo (GUDS no anula) | D4/D7 |
 | 12 | **Precio por empaque** = precio por unidad × unidades (19k) | Confirmado |
 | 13 | **Pago después de aprobado**; **crédito abierto** con aviso por deuda vencida > 30 días; aprobación el mismo día hábil | F3/F5, V2 |
 | 14 | **Pedidos pendientes se pueden editar** (cliente y vendedor) mientras no estén aprobados | F4/V1: editar líneas y cantidades recalculando totales y stock comprometido en el servidor; el admin ve que fue editado |
-| 15 | **Fotos y descripciones bidireccionales**: se editan en GUDS y se escriben en Odoo (y lo que cambie en Odoo llega a GUDS) | ✅ 20r: escritura en Odoo acotada a `product.template` (`image_1920` y `description_sale`) por la cola `odoo_escrituras` (tipo `producto`, modo `odoo_escritura_productos` = activo); el sync detecta cambios por el checksum del adjunto de la imagen y el md5 de la descripción y solo descarga las fotos que cambiaron; gana el cambio más reciente (fecha del cambio en GUDS contra el `write_date` de Odoo). Quitar la foto en GUDS no se envía (en Odoo borraría el adjunto). El historial "(GUDS)" queda en la cola de GUDS (en el chatter de Odoo haría falta `message_post`, fuera del alcance permitido). Se usa la API key actual, no un usuario dedicado |
+| 15 | **Fotos y descripciones bidireccionales**: se editan en GUDS y se escriben en Odoo (y lo que cambie en Odoo llega a GUDS) | ✅ 20r: escritura en Odoo acotada a `product.template` (`image_1920` y `description_sale`) por la cola `odoo_escrituras` (tipo `producto`, modo `odoo_escritura_productos` = activo); el sync detecta cambios por el checksum del adjunto de la imagen y el md5 de la descripción y solo descarga las fotos que cambiaron; gana el cambio más reciente (fecha del cambio en GUDS contra el `write_date` de Odoo). Quitar la foto en GUDS no se envía (en Odoo borraría el adjunto). El historial queda en la cola de GUDS y, desde el 29-sep (decisión D), también como nota interna "(GUDS)" en el historial de la plantilla en Odoo. Se usa la API key actual, no un usuario dedicado |
 | 16 | **Multiempresa del cliente**: el selector GUDS / Quirutec solo aparece si el cliente tiene habilitadas ambas empresas; se habilita desde la ficha del cliente en el admin | F1/F6 |
 | 17 | **Mapas** con el token de Mapbox de la cuenta de GUDS (en variables de entorno, no en el código) | D0/D2; restringir el token por URL (`portal.guds-supply.com`) en Mapbox |
 | 18 | Vendedor con efectivo, soporte por WhatsApp y ejecutivo de cuenta, cola de delivery (ventas + reposiciones a consignación, rutas mixtas), evidencia por resultado (24 meses), el cliente y el vendedor ven la evidencia, reportes (venta neta sin ND cambiarias, reversos neteados, NC financieras aparte, costo promedio solo para administración, clasificación en Odoo, mapeo de vendedores propuesto por GUDS, históricos solo con nombre y RIF, metas por vendedor y mes en USD) | Según la propuesta por defecto |
+
+### 9.4 Tomadas (29-sep)
+
+| # | Decisión | Qué implica |
+|---|---|---|
+| A | **Cobros de Odoo sin aplicar** (~245 mil USD) | Contabilidad los concilia en Odoo; GUDS no los muestra como saldo a favor hasta entonces |
+| B | **Registro aprobado → cliente en Odoo automático**, enlazando si ya existe por RIF o nombre | ✅ 20s (con contactos, límites y reenvío de pedidos que esperaban) |
+| C | **Entregas**: a Odoo solo cantidades entregadas y estado entregado; foto, firma y reprogramación viven en GUDS | ✅ `odoo_escritura_entregas` = activo desde el 29-sep 07:02 |
+| D | **Notas "(GUDS)"** en Odoo | ✅ 20s: nota interna (sin correos) en clientes, productos, documentos de entrega y pedidos |
+| E | **Productos nacen en Odoo** y se editan en GUDS; nombre, código, categoría e IVA quedan bloqueados | ✅ 20t: sin crear, importar ni borrar en GUDS |
+| F | **Letra de la plataforma** | Pendiente: se mostró la comparación (letra del sistema frente a Plus Jakarta Sans) |
+| G | **Rol Contador** con lo financiero y sus ediciones | ✅ 20t |
+| H | **S00927** (cotización de prueba) | Se deja como está en Odoo |
 
 ### 9.3 Pendiente
 

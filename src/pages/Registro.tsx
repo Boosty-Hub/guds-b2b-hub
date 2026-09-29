@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
+import { useContactoEmpresa, hrefTelefono } from "@/hooks/useContactoEmpresa";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Logo } from "@/components/Logo";
@@ -41,6 +42,7 @@ import { RifInput, isValidRif } from "@/components/forms/RifInput";
 import { PhoneInput, isValidPhone } from "@/components/forms/PhoneInput";
 import { supabase } from "@/lib/supabase";
 import { compressImage } from "@/lib/image";
+import { ESTADOS_VE } from "@/components/clientes/odooCliente";
 
 const MAX_DOC_SIZE = 5 * 1024 * 1024; // debe coincidir con el file_size_limit del bucket `documentos`
 const ALLOWED_DOC_TYPES = ["application/pdf", "image/jpeg", "image/png"];
@@ -80,6 +82,8 @@ const step3Schema = z.object({
   mismaDireccionEntrega: z.boolean(),
   direccionEntrega: z.string().trim().optional(),
   ciudad: z.string().trim().min(1, "La ciudad es requerida"),
+  // Odoo exige el estado para crear el cliente (Fase 9b)
+  estado: z.string().min(1, "Selecciona el estado"),
 }).refine(
   (data) => data.mismaDireccionEntrega || !!data.direccionEntrega,
   { message: "Ingresa la dirección de entrega", path: ["direccionEntrega"] },
@@ -89,6 +93,7 @@ const fullSchema = step1Schema.merge(step2Schema).and(step3Schema);
 type FormValues = z.infer<typeof fullSchema>;
 
 const Registro = () => {
+  const contacto = useContactoEmpresa();
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -122,6 +127,7 @@ const Registro = () => {
       mismaDireccionEntrega: true,
       direccionEntrega: "",
       ciudad: "",
+      estado: "",
     },
   });
 
@@ -201,6 +207,7 @@ const Registro = () => {
         direccion: data.direccion,
         direccionEntrega: data.mismaDireccionEntrega ? null : (data.direccionEntrega || null),
         ciudad: data.ciudad,
+        estadoVe: data.estado,
       });
 
       if (!ok) {
@@ -524,19 +531,41 @@ const Registro = () => {
                       />
                     )}
 
-                    <FormField
-                      control={form.control}
-                      name="ciudad"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Ciudad *</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Caracas" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="ciudad"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Ciudad *</FormLabel>
+                            <FormControl>
+                              <Input placeholder="Caracas" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="estado"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Estado *</FormLabel>
+                            <Select value={field.value} onValueChange={field.onChange}>
+                              <FormControl>
+                                <SelectTrigger aria-label="Estado">
+                                  <SelectValue placeholder="Selecciona el estado" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {ESTADOS_VE.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
 
                     <div className="bg-muted rounded-xl p-4 mt-6">
                       <h3 className="font-semibold mb-3 flex items-center gap-2">
@@ -606,12 +635,14 @@ const Registro = () => {
             </Form>
           </div>
 
-          <p className="text-center text-sm text-muted-foreground mt-6">
-            ¿Necesitas ayuda? Contáctanos al{" "}
-            <a href="tel:+582125550000" className="text-primary font-medium">
-              +58 212-555-0000
-            </a>
-          </p>
+          {(contacto.telefono || contacto.email) && (
+            <p className="text-center text-sm text-muted-foreground mt-6">
+              ¿Necesitas ayuda? Contáctanos al{" "}
+              {contacto.telefono
+                ? <a href={hrefTelefono(contacto.telefono)} className="text-primary font-medium">{contacto.telefono}</a>
+                : <span className="text-primary font-medium break-all">{contacto.email}</span>}
+            </p>
+          )}
         </div>
       </div>
     </div>

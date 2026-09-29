@@ -8,6 +8,24 @@ const valor = (v: unknown) => (v === null || v === undefined || v === "" ? "—"
 /** Lista compacta de lo que cambia en Odoo (campo: antes → después). */
 export function CambiosOdoo({ escritura, className }: { escritura: EscrituraCliente; className?: string }) {
   const cambios = escritura.resultado?.cambios;
+  const res = escritura.resultado;
+  // Fase 20s: alta del cliente, contactos y límite (resumen del resultado o del plan simulado)
+  if (escritura.tipo === "cliente_nuevo" || escritura.tipo === "cliente_limite" || (escritura.tipo === "persona_contacto" && !cambios)) {
+    const partner = res && typeof res.partner === "object" ? res.partner : null;
+    const texto = res?.omitida ? res.omitida
+      : escritura.tipo === "cliente_limite" ? (res?.valor !== undefined ? `Límite ${`$${Number(res.valor).toFixed(2)}`}` : "Límite de crédito")
+        : escritura.tipo === "persona_contacto" ? `${res?.accion === "enlazar" ? "Enlazar con el contacto existente" : "Crear contacto hijo"}${res?.contacto ? `: ${res.contacto}` : ""}`
+          : res?.accion === "crear" ? "Crear cliente nuevo en Odoo"
+            : res?.accion === "enlazar" ? `Enlazar con ${partner?.nombre ?? "contacto existente"}${partner?.rif ? ` (${partner.rif})` : ""}`
+              : res?.accion === "revisar" ? `Varias coincidencias (${res.candidatos?.length ?? 0}): elegir en la ficha`
+                : res?.accion === "ya_vinculado" ? "Ya estaba vinculado" : "Buscar en Odoo por RIF y nombre";
+    return (
+      <div className={cn("space-y-0.5 text-xs", className)}>
+        <p>{texto}{res?.motivo ? <span className="text-muted-foreground"> · {res.motivo}</span> : null}</p>
+        {res?.nota?.texto && <p className="text-[11px] text-muted-foreground">Nota: {res.nota.ok === false ? <span className="text-destructive">no se pudo dejar ({res.nota.error})</span> : res.nota.simulada ? "se dejaría" : "dejada"} en Odoo</p>}
+      </div>
+    );
+  }
   if (escritura.accion === "crear") {
     const c = escritura.campos ?? {};
     return (

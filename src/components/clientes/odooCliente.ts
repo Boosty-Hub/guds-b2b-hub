@@ -56,7 +56,7 @@ export const direccionPayload = (d: DireccionForm) => ({
 /** Fila de historial_escrituras_cliente. */
 export interface EscrituraCliente {
   id: string;
-  tipo: "cliente_contacto" | "cliente_direccion";
+  tipo: "cliente_contacto" | "cliente_direccion" | "cliente_nuevo" | "persona_contacto" | "cliente_limite";
   accion: "editar" | "crear";
   direccion: string | null;
   estado: "pendiente" | "procesando" | "simulada" | "hecha" | "error";
@@ -69,6 +69,17 @@ export interface EscrituraCliente {
     no_aplicados?: string[];
     ya_existia?: boolean;
     existente?: number | null;
+    // Tipos de la fase 20s (alta del cliente, contactos y límite)
+    accion?: string;
+    motivo?: string | null;
+    omitida?: string;
+    sin_cambios?: boolean;
+    partner?: { id: number; nombre: string | null; rif: string | null } | number;
+    candidatos?: unknown[];
+    valor?: number;
+    contacto?: string;
+    odoo_id?: number;
+    nota?: { texto?: string; ok?: boolean; error?: string; simulada?: boolean } | null;
   } | null;
   error: string | null;
   intentos: number;

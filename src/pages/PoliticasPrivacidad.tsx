@@ -1,8 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Shield } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useContactoEmpresa } from "@/hooks/useContactoEmpresa";
 
 const PoliticasPrivacidad = () => {
+  const contacto = useContactoEmpresa();
   const navigate = useNavigate();
 
   return (
@@ -113,7 +115,7 @@ const PoliticasPrivacidad = () => {
               <li>Retirar su consentimiento en cualquier momento</li>
             </ul>
             <p className="text-muted-foreground leading-relaxed mt-4">
-              Para ejercer estos derechos, contáctenos a través de soporte@guds.app.
+              Para ejercer estos derechos, contáctenos por los canales de la sección 11 (Contacto).
             </p>
           </section>
 
@@ -150,15 +152,16 @@ const PoliticasPrivacidad = () => {
               privacidad, contáctenos:
             </p>
             <div className="mt-4 text-muted-foreground">
-              <p><strong>Email:</strong> soporte@guds.app</p>
-              <p><strong>Teléfono:</strong> +58 412 123 4567</p>
-              <p><strong>Dirección:</strong> Caracas, Venezuela</p>
+              {contacto.email && <p><strong>Email:</strong> <span className="break-all">{contacto.email}</span></p>}
+              {contacto.telefono && <p><strong>Teléfono:</strong> {contacto.telefono}</p>}
+              {!contacto.email && !contacto.telefono && <p>A través de tu ejecutivo de cuenta o desde Ayuda, en tu portal.</p>}
+              <p><strong>Dirección:</strong> {contacto.ciudad ? `${contacto.ciudad}, Venezuela` : "Venezuela"}</p>
             </div>
           </section>
         </div>
 
         <div className="text-center mt-12 text-muted-foreground text-sm border-t border-border pt-8">
-          <p>GUDS - Sistema de Gestión B2B</p>
+          <p>{contacto.nombre ?? "GUDS"}</p>
           <p>© {new Date().getFullYear()} Todos los derechos reservados</p>
         </div>
       </div>

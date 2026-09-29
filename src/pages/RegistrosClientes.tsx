@@ -12,16 +12,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
   Table,
   TableBody,
   TableCell,
@@ -38,7 +28,9 @@ import {
   User,
   MapPin,
   FileText,
+  ExternalLink,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, RegistroCliente } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -47,6 +39,7 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
+import { AprobarRegistroDialog } from "@/components/clientes/AprobarRegistroDialog";
 
 const statusConfig = {
   pendiente: { label: "Pendiente", color: "bg-yellow-500", icon: Clock },
@@ -66,9 +59,8 @@ const RegistrosClientes = () => {
   const [isRejectOpen, setIsRejectOpen] = useState(false);
   const [isApproveOpen, setIsApproveOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
-  const [approving, setApproving] = useState(false);
-  // Credenciales generadas al aprobar (para comunicárselas al cliente)
-  const [credenciales, setCredenciales] = useState<{ email: string; password: string } | null>(null);
+  // Credenciales generadas al aprobar (para comunicárselas al cliente) y a qué cliente quedó ligado
+  const [credenciales, setCredenciales] = useState<{ email: string; password: string; clienteId?: string; existente: boolean } | null>(null);
   const { toast } = useToast();
 
   const pendingCount = getPendingRegistros().length;
@@ -84,11 +76,17 @@ const RegistrosClientes = () => {
 
   const pagination = usePagination(filteredRegistros, 50);
 
-  const handleApprove = async () => {
+  const handleApprove = async ({ estado, vendedorId }: { estado: string | null; vendedorId: string | null }) => {
     if (!selectedRegistro) return;
-    setApproving(true);
-    const res = await aprobarRegistro(selectedRegistro.id);
-    setApproving(false);
+    // El estado de Venezuela (Odoo lo exige para crear el cliente) se guarda en el registro antes de aprobar
+    if (estado && estado !== selectedRegistro.estadoVe) {
+      const { error } = await supabase.from("registros_clientes").update({ estado_ve: estado }).eq("id", selectedRegistro.id);
+      if (error) {
+        toast({ title: "No se pudo guardar el estado", description: error.message, variant: "destructive" });
+        return;
+      }
+    }
+    const res = await aprobarRegistro(selectedRegistro.id, vendedorId ? { vendedor_id: vendedorId } : undefined);
 
     if (!res.success) {
       toast({
@@ -101,13 +99,16 @@ const RegistrosClientes = () => {
     const negocio = selectedRegistro.nombreNegocio;
     setIsApproveOpen(false);
     setSelectedRegistro(null);
+    // ¿Quedó ligado a un cliente que ya existía? (lo anota la aprobación en el registro)
+    const { data: reg } = await supabase.from("registros_clientes").select("uso_cliente_existente").eq("id", selectedRegistro.id).maybeSingle();
+    const existente = !!(reg as { uso_cliente_existente?: boolean } | null)?.uso_cliente_existente;
     // Mostrar las credenciales temporales para comunicárselas al cliente
     if (res.email && res.password) {
-      setCredenciales({ email: res.email, password: res.password });
+      setCredenciales({ email: res.email, password: res.password, clienteId: res.clienteId, existente });
     }
     toast({
       title: "Registro Aprobado",
-      description: `${negocio} ha sido aprobado como cliente`,
+      description: existente ? `${negocio}: el acceso quedó ligado al cliente que ya existía` : `${negocio} ha sido aprobado como cliente; su alta en Odoo está en curso`,
     });
   };
 
@@ -364,6 +365,15 @@ const RegistrosClientes = () => {
                 </div>
               </div>
 
+              {selectedRegistro.estado === "aprobado" && selectedRegistro.clienteCreadoId && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                  <span className="text-muted-foreground">{selectedRegistro.usoClienteExistente ? "Quedó ligado a un cliente que ya existía (mismo RIF o nombre)" : "Cliente creado al aprobar"}</span>
+                  <Link to={`/admin/clientes/${selectedRegistro.clienteCreadoId}`} className="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline">
+                    Ver cliente y su estado en Odoo <ExternalLink className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              )}
+
               {/* Notes (if rejected) */}
               {selectedRegistro.notas && (
                 <div className="space-y-3">
@@ -406,24 +416,8 @@ const RegistrosClientes = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Approve Confirmation */}
-      <AlertDialog open={isApproveOpen} onOpenChange={setIsApproveOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Aprobar este registro?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Se creará la cuenta de cliente para "{selectedRegistro?.nombreNegocio}" y se generará
-              una contraseña temporal. Deberás comunicársela al cliente (no se envía por email).
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={approving}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleApprove} disabled={approving} className="bg-green-600 hover:bg-green-700">
-              {approving ? "Aprobando..." : "Aprobar Cliente"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Aprobación: qué pasará (ya existe / enlazar / crear en Odoo), estado y vendedor */}
+      <AprobarRegistroDialog registro={selectedRegistro} open={isApproveOpen} onOpenChange={setIsApproveOpen} onAprobar={handleApprove} />
 
       {/* Credenciales generadas */}
       <Dialog open={!!credenciales} onOpenChange={(o) => { if (!o) setCredenciales(null); }}>
@@ -446,6 +440,14 @@ const RegistrosClientes = () => {
                 <code className="font-bold text-primary">{credenciales?.password}</code>
               </div>
             </div>
+            {credenciales?.clienteId && (
+              <p className="text-xs text-muted-foreground">
+                {credenciales.existente
+                  ? "No se creó otro cliente: el acceso quedó ligado al cliente que ya existía con ese RIF o nombre. "
+                  : "El cliente se está creando (o enlazando) en Odoo en segundo plano. "}
+                <Link to={`/admin/clientes/${credenciales.clienteId}`} className="font-medium text-primary underline-offset-2 hover:underline">Ver su ficha y el estado en Odoo</Link>
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button

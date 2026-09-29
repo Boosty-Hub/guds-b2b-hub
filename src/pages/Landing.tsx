@@ -24,6 +24,7 @@ import { supabase, Producto } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
 import { BannerVisual } from "@/components/BannerVisual";
 import { useRealtimeRefetch } from "@/hooks/useRealtimeRefetch";
+import { useContactoEmpresa, hrefTelefono } from "@/hooks/useContactoEmpresa";
 
 interface ProductoLanding {
   id: string;
@@ -44,6 +45,7 @@ const benefits = [
 ];
 
 const Landing = () => {
+  const contacto = useContactoEmpresa();
   const [searchTerm, setSearchTerm] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [productos, setProductos] = useState<ProductoLanding[]>([]);
@@ -393,10 +395,14 @@ const Landing = () => {
               Nuestro equipo está listo para ayudarte. Contáctanos y te responderemos a la brevedad.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button size="lg" variant="outline" className="gap-2">
-                <Phone className="h-5 w-5" />
-                +58 212-555-0000
-              </Button>
+              {contacto.telefono && (
+                <Button size="lg" variant="outline" className="gap-2" asChild>
+                  <a href={hrefTelefono(contacto.telefono)}>
+                    <Phone className="h-5 w-5" />
+                    {contacto.telefono}
+                  </a>
+                </Button>
+              )}
               <Link to="/registro">
                 <Button size="lg" className="gap-2 w-full sm:w-auto">
                   Solicitar Información
@@ -437,14 +443,15 @@ const Landing = () => {
             <div>
               <h4 className="font-semibold mb-4">Contacto</h4>
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>+58 212-555-0000</li>
-                <li>info@guds.com</li>
-                <li>Caracas, Venezuela</li>
+                {contacto.telefono && <li><a href={hrefTelefono(contacto.telefono)} className="hover:text-primary">{contacto.telefono}</a></li>}
+                {contacto.email && <li className="break-all">{contacto.email}</li>}
+                <li>{contacto.ciudad ? `${contacto.ciudad}, Venezuela` : "Venezuela"}</li>
+                <li><Link to="/registro" className="hover:text-primary">Solicitar una cuenta</Link></li>
               </ul>
             </div>
           </div>
           <div className="border-t border-border mt-8 pt-8 text-center text-sm text-muted-foreground">
-            © 2024 GUDS Distribuidora. Todos los derechos reservados.
+            © {new Date().getFullYear()} {contacto.nombre ?? "GUDS"}. Todos los derechos reservados.
           </div>
         </div>
       </footer>

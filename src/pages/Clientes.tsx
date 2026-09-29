@@ -45,6 +45,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { OdooBadge } from "@/components/OdooBadge";
+import { ESTADOS_VE, estadoVe } from "@/components/clientes/odooCliente";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
@@ -90,6 +91,7 @@ const Clientes = () => {
     telefono: "",
     direccion: "",
     ciudad: "",
+    estado: "",
     limite_credito: 0,
     dias_credito: 30,
     lista_precios_id: "",
@@ -127,6 +129,7 @@ const Clientes = () => {
       telefono: "",
       direccion: "",
       ciudad: "",
+      estado: "",
       limite_credito: 0,
       dias_credito: 30,
       lista_precios_id: "",
@@ -149,7 +152,9 @@ const Clientes = () => {
       email: formData.email,
       telefono: formData.telefono || null,
       direccion: formData.direccion,
+      calle: formData.direccion,
       ciudad: formData.ciudad,
+      estado: formData.estado || null,   // Odoo lo exige para crear el cliente (Fase 9b)
       limite_credito: formData.limite_credito,
       dias_credito: formData.dias_credito,
       lista_precios_id: formData.lista_precios_id || null,
@@ -161,7 +166,7 @@ const Clientes = () => {
       return;
     }
 
-    toast({ title: "Cliente Creado", description: `${formData.nombre_negocio} ha sido creado exitosamente` });
+    toast({ title: "Cliente Creado", description: `${formData.nombre_negocio}: creado en GUDS; su alta en Odoo está en curso (ver su ficha)` });
     resetForm();
     setIsCreateOpen(false);
     fetchData();
@@ -180,7 +185,9 @@ const Clientes = () => {
         email: formData.email,
         telefono: formData.telefono || null,
         direccion: formData.direccion,
+        calle: formData.direccion,
         ciudad: formData.ciudad,
+        estado: formData.estado || null,
         limite_credito: formData.limite_credito,
         dias_credito: formData.dias_credito,
         lista_precios_id: formData.lista_precios_id || null,
@@ -227,6 +234,7 @@ const Clientes = () => {
       telefono: cliente.telefono || "",
       direccion: cliente.direccion || "",
       ciudad: cliente.ciudad || "",
+      estado: estadoVe(cliente.estado) ?? "",
       limite_credito: cliente.limite_credito ?? 0,
       dias_credito: cliente.dias_credito ?? 0,
       lista_precios_id: cliente.lista_precios_id || "",
@@ -455,6 +463,13 @@ const Clientes = () => {
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="cli-nuevo-estado">Estado (Odoo lo exige)</Label>
+              <Select value={formData.estado || undefined} onValueChange={(v) => setFormData({ ...formData, estado: v })}>
+                <SelectTrigger id="cli-nuevo-estado"><SelectValue placeholder="Elige el estado" /></SelectTrigger>
+                <SelectContent className="max-h-72">{ESTADOS_VE.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
               <Label>Lista de Precios</Label>
               <Select value={formData.lista_precios_id} onValueChange={(v) => setFormData({ ...formData, lista_precios_id: v })}>
                 <SelectTrigger>
@@ -584,6 +599,13 @@ const Clientes = () => {
                 disabled={!!selectedCliente?.odoo_id}
                 onChange={(e) => setFormData({ ...formData, ciudad: e.target.value })}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cli-editar-estado" className="flex items-center gap-1.5">Estado {!!selectedCliente?.odoo_id && <OdooBadge />}</Label>
+              <Select value={formData.estado || undefined} onValueChange={(v) => setFormData({ ...formData, estado: v })} disabled={!!selectedCliente?.odoo_id}>
+                <SelectTrigger id="cli-editar-estado"><SelectValue placeholder="Elige el estado" /></SelectTrigger>
+                <SelectContent className="max-h-72">{ESTADOS_VE.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>Lista de Precios</Label>

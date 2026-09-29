@@ -19,7 +19,7 @@ import { usePermissions } from "@/contexts/PermissionsContext";
 
 interface Contacto {
   id: string; nombre: string; cargo: string | null; email: string | null; telefono: string | null; celular: string | null;
-  es_principal: boolean; activo: boolean; notas: string | null;
+  es_principal: boolean; activo: boolean; notas: string | null; odoo_id?: number | null;
 }
 interface UsuarioPortal { id: string; email: string; activo: boolean; debe_cambiar_clave: boolean; contacto_id: string | null; nombre: string; apellido: string | null }
 interface Credenciales { titulo: string; email: string; password: string }
@@ -321,7 +321,9 @@ const ClienteUsuarios = () => {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>¿Eliminar a {aBorrar?.nombre}?</AlertDialogTitle>
-            <AlertDialogDescription>Se elimina el contacto del cliente.</AlertDialogDescription>
+            <AlertDialogDescription>
+              Se elimina el contacto del cliente en GUDS.{aBorrar?.odoo_id ? " En Odoo se conserva (GUDS no borra contactos en Odoo)." : ""}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>

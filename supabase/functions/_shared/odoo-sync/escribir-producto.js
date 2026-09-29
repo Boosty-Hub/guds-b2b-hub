@@ -8,7 +8,10 @@
 // escribió GUDS no vuelve en la próxima sincronización como si fuera un cambio de Odoo.
 // Nunca borra en Odoo: quitar la foto en GUDS no se envía (en Odoo eso borraría el adjunto de la imagen) y odoo.js bloquea
 // image_1920 = false. Solo usa `escribir` de odoo.js con image_1920 / description_sale.
-import { txt, fechaOdoo, aBase64 } from './util.js';
+// Cada escritura aplicada deja una nota interna "(GUDS)" en la plantilla (decisión D, 29-sep); si la nota falla, la escritura
+// no se revierte y el error queda en el resultado.
+import { txt, fechaOdoo, aBase64, fechaCaracas } from './util.js';
+import { dejarNota } from './notas.js';
 
 const MAX_BYTES_FOTO = 5 * 1024 * 1024;
 const lit = (v) => (v === null || v === undefined ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
@@ -26,7 +29,7 @@ async function leerOdoo(odoo, odooId, lang) {
   };
 }
 
-export async function escribirProducto({ odoo, sql, fila, aplicar, log = () => {}, storage = null }) {
+export async function escribirProducto({ odoo, sql, fila, aplicar, log = () => {}, storage = null, quien = 'GUDS' }) {
   // Un envío viejo (p. ej. un reintento) no hace falta si ya hay uno más reciente del mismo producto: ese envía el estado actual
   const [nuevo] = await sql(`select count(*)::int n from odoo_escrituras o join odoo_escrituras f on f.id = ${lit(fila.id)}
     where o.tipo = 'producto' and o.referencia_id = f.referencia_id and o.id <> f.id and o.created_at > f.created_at
@@ -100,7 +103,10 @@ export async function escribirProducto({ odoo, sql, fila, aplicar, log = () => {
     return { modo: aplicar ? 'aplicada' : 'simulacion', sin_cambios: true, ...plan,
       motivo: omitidos.length ? omitidos.map((o) => o.motivo).join(' · ') : 'Odoo ya tenía estos datos' };
   }
-  if (!aplicar) return { modo: 'simulacion', ...plan };
+  const queCambio = [plan.campos.includes('imagen') && 'Foto principal', plan.campos.includes('descripcion') && 'descripción de venta'].filter(Boolean).join(' y ');
+  const nota = { modelo: 'product.template', id: p.odoo_id,
+    texto: `(GUDS) ${queCambio.charAt(0).toUpperCase()}${queCambio.slice(1)} actualizada${plan.campos.length > 1 ? 's' : ''} desde GUDS por ${quien} el ${fechaCaracas()}.` };
+  if (!aplicar) return { modo: 'simulacion', ...plan, nota: { ...nota, simulada: true } };
 
   await odoo.escribir('product.template', [p.odoo_id], vals, cid, { lang });
   const despues = await leerOdoo(odoo, p.odoo_id, lang);
@@ -110,9 +116,10 @@ export async function escribirProducto({ odoo, sql, fila, aplicar, log = () => {
   if ('description_sale' in vals) sets.push(`descripcion_odoo_md5 = md5(${lit(despues.descripcion)}::text)`);
   if (vals.image_1920) sets.push(`imagen_odoo_checksum = ${lit(despues.imagen.checksum)}`, `imagen_odoo_url = ${lit(p.imagen_url)}`);
   await sql(`begin; set local session_replication_role = replica; update productos set ${sets.join(', ')} where id = ${lit(p.id)}; commit;`);
+  const notaHecha = await dejarNota(odoo, nota, cid, true);
   log(`producto ${p.nombre} (Odoo ${p.odoo_id}): ${plan.campos.join(', ')}`);
   return {
-    modo: 'aplicada', ...plan,
+    modo: 'aplicada', ...plan, nota: notaHecha,
     despues: { descripcion_igual: 'description_sale' in vals ? despues.descripcion === (p.descripcion || null) : undefined,
       imagen: despues.imagen ? { checksum: despues.imagen.checksum, bytes: despues.imagen.bytes, tipo: despues.imagen.tipo } : null },
   };

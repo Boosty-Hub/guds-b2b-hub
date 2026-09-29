@@ -1,10 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Mail, Phone, MessageCircle, Clock, MapPin } from "lucide-react";
+import { ArrowLeft, Mail, Phone, MessageCircle, MapPin } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useContactoEmpresa, hrefTelefono } from "@/hooks/useContactoEmpresa";
 
 const Soporte = () => {
   const navigate = useNavigate();
+  const contacto = useContactoEmpresa();
 
   return (
     <div className="min-h-screen bg-background">
@@ -21,104 +23,72 @@ const Soporte = () => {
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-foreground mb-4">Centro de Soporte</h1>
           <p className="text-muted-foreground text-lg">
-            Estamos aquí para ayudarte. Contáctanos a través de cualquiera de nuestros canales.
+            Estamos aquí para ayudarte. Estos son nuestros canales de contacto.
           </p>
         </div>
 
         <div className="grid md:grid-cols-2 gap-6 mb-12">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-3">
-                <Mail className="h-6 w-6 text-primary" />
-                Correo Electrónico
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground mb-2">
-                Envíanos un correo y te responderemos en menos de 24 horas.
-              </p>
-              <a 
-                href="mailto:soporte@guds.app" 
-                className="text-primary font-medium hover:underline"
-              >
-                soporte@guds.app
-              </a>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-3">
-                <Phone className="h-6 w-6 text-primary" />
-                Teléfono
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground mb-2">
-                Llámanos de lunes a viernes en horario de oficina.
-              </p>
-              <a 
-                href="tel:+584121234567" 
-                className="text-primary font-medium hover:underline"
-              >
-                +58 412 123 4567
-              </a>
-            </CardContent>
-          </Card>
-
+          {contacto.email && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-3">
+                  <Mail className="h-6 w-6 text-primary" />
+                  Correo electrónico
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-2">Escríbenos y te respondemos lo antes posible.</p>
+                <span className="text-primary font-medium break-all select-all">{contacto.email}</span>
+              </CardContent>
+            </Card>
+          )}
+          {contacto.telefono && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-3">
+                  <Phone className="h-6 w-6 text-primary" />
+                  Teléfono
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-2">Llámanos en horario de oficina.</p>
+                <a href={hrefTelefono(contacto.telefono)} className="text-primary font-medium hover:underline">{contacto.telefono}</a>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-3">
                 <MessageCircle className="h-6 w-6 text-primary" />
-                WhatsApp
+                Desde tu cuenta
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground mb-2">
-                Escríbenos por WhatsApp para una respuesta rápida.
+            <CardContent className="space-y-3">
+              <p className="text-muted-foreground">
+                Si ya eres cliente, entra a tu cuenta: en Ayuda está tu ejecutivo de cuenta y los canales de soporte. Si aún no
+                tienes cuenta, solicítala y te contactamos.
               </p>
-              <a 
-                href="https://wa.me/584121234567" 
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary font-medium hover:underline"
-              >
-                Iniciar chat
-              </a>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => navigate("/login")}>Iniciar sesión</Button>
+                <Button size="sm" variant="outline" onClick={() => navigate("/registro")}>Solicitar una cuenta</Button>
+              </div>
             </CardContent>
           </Card>
-
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-3">
-                <Clock className="h-6 w-6 text-primary" />
-                Horario de Atención
+                <MapPin className="h-6 w-6 text-primary" />
+                Ubicación
               </CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-muted-foreground">
-                Lunes a Viernes: 8:00 AM - 6:00 PM<br />
-                Sábados: 9:00 AM - 1:00 PM<br />
-                Domingos: Cerrado
+                {contacto.ciudad ? `${contacto.ciudad}, Venezuela` : "Venezuela"}<br />
+                Zona horaria: GMT-4 (hora de Venezuela)
               </p>
             </CardContent>
           </Card>
         </div>
-
-        <Card className="mb-12">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-3">
-              <MapPin className="h-6 w-6 text-primary" />
-              Ubicación
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">
-              Caracas, Venezuela<br />
-              Zona horaria: GMT-4 (Hora de Venezuela)
-            </p>
-          </CardContent>
-        </Card>
 
         <div className="bg-muted rounded-lg p-8 text-center">
           <h2 className="text-2xl font-bold text-foreground mb-4">
@@ -138,7 +108,7 @@ const Soporte = () => {
                 ¿Cuáles son los métodos de pago aceptados?
               </h3>
               <p className="text-muted-foreground">
-                Aceptamos transferencias bancarias, pago móvil, efectivo y crédito según las condiciones acordadas con cada cliente.
+                Transferencia, pago móvil, Zelle, efectivo y crédito según las condiciones acordadas con cada cliente. Las cuentas para pagar están en tu portal, en Finanzas.
               </p>
             </div>
             <div>
@@ -146,7 +116,7 @@ const Soporte = () => {
                 ¿Cuánto tiempo tarda la entrega?
               </h3>
               <p className="text-muted-foreground">
-                El tiempo de entrega depende de tu ubicación. Generalmente las entregas se realizan en 24-48 horas hábiles.
+                Depende de tu zona: coordinamos la entrega cuando se aprueba el pedido y te avisamos en cada paso.
               </p>
             </div>
             <div>
@@ -161,7 +131,7 @@ const Soporte = () => {
         </div>
 
         <div className="text-center mt-12 text-muted-foreground text-sm">
-          <p>GUDS - Sistema de Gestión B2B</p>
+          <p>{contacto.nombre ?? "GUDS"}</p>
           <p>© {new Date().getFullYear()} Todos los derechos reservados</p>
         </div>
       </div>

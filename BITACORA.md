@@ -10,6 +10,27 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-29 · Decisiones A–H: clientes nuevos a Odoo (9b), entregas activas, notas "(GUDS)", productos solo se editan, rol Contador
+
+- **Fase 9b completa** (`…20s_clientes_nuevos_odoo.sql`, agente): al aprobar un registro, si ya existe en GUDS (mismo RIF
+  normalizado o nombre) se liga a ese cliente; si no, se crea y su alta en Odoo se encola. En Odoo se enlaza si hay un único
+  cliente con ese RIF, se deja para que administración elija si hay varias coincidencias, y si no hay ninguna se crea validando
+  contra `fields_get`. Los pedidos que esperaban se reenvían solos. Contactos como hijos "(GUDS)"; límites de crédito con
+  `credit_limit`/`use_partner_credit_limit` y el campo propio de Corpo Eureka (`account_use_credit_limit` = false en ambas
+  compañías). Panel Odoo en la ficha del cliente y aviso al aprobar. Guardas: `odoo_id` de clientes y contactos no se cambia
+  por la API; el registro público entra siempre pendiente; el formulario pide el estado (Odoo lo exige).
+- **Notas "(GUDS)"** en Odoo: nota interna sin destinatarios ni seguidores en clientes, productos, documentos de entrega y pedidos.
+- **Entregas activas** en Odoo desde las 07:02 (decisión C: solo cantidades y validar; foto, firma y reprogramación en GUDS).
+- **Productos** (decisión E, `…20t`): sin crear, importar ni borrar en GUDS; la base rechaza crearlos por la API.
+- **Roles** (decisión G, `…20t`): Contador con lo financiero (ver, crear, editar) y consulta de reportes, dashboard, clientes y
+  órdenes; Almacén con inventario ver/editar para devoluciones.
+- **Montos negativos** como `-$1,234.69` (antes `$-1,234.69`); landing, registro, Soporte y Privacidad ya no muestran teléfonos,
+  correos ni horarios inventados (solo los datos reales de la empresa, hoy vacíos).
+- Verificado: la llave de Odoo actual no vence (la nota de 90 días era incorrecta); IA de conciliación sin saldo en Anthropic.
+  Pruebas de base (400 casos, todos pasan), `tsc`, `vite build` y Playwright (Contador, productos, registros, ficha del cliente,
+  páginas públicas, portal, vendedor y admin en 390 y 1440).
+- Pendiente: letra de la plataforma (decisión F), cargar teléfono y correo de la empresa, revisar textos legales, saldo de la IA.
+
 ## 2026-09-29 · Fotos y descripciones bidireccionales con Odoo (decisión 15) y portales a 90+ en Lighthouse móvil
 
 - **Fotos y descripciones** (`…20r_fotos_descripciones_odoo.sql`): lo que administración cambia en la foto principal o la

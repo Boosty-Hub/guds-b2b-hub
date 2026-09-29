@@ -22,6 +22,7 @@ import { usePermissions } from "@/contexts/PermissionsContext";
 import { EditarContactoClienteDialog } from "@/components/clientes/EditarContactoClienteDialog";
 import { DireccionClienteDialog, type DireccionEntrega } from "@/components/clientes/DireccionClienteDialog";
 import { HistorialOdooCliente } from "@/components/clientes/HistorialOdooCliente";
+import { EstadoOdooCliente, EstadoOdooContacto, type EstadoOdoo } from "@/components/clientes/EstadoOdooCliente";
 import { BotonUbicacionesCliente } from "@/components/delivery/UbicacionesClienteDialog";
 
 interface ClienteFull extends Cliente {
@@ -80,6 +81,10 @@ const ClienteDetalle = () => {
   const { user } = useAuth();
   const { can } = usePermissions();
   const puedeEditarOdoo = user?.role === "admin" && can("clientes", "editar");
+  // Estado del cliente en Odoo (alta, contactos y límite, 20s): personal de administración; crear/enlazar exige clientes:crear
+  const puedeVerOdoo = user?.role === "admin" && can("clientes", "ver");
+  const puedeCrearOdoo = user?.role === "admin" && can("clientes", "crear");
+  const [estadoOdoo, setEstadoOdoo] = useState<EstadoOdoo | null>(null);
   const [contactoAbierto, setContactoAbierto] = useState(false);
   const [dirDialogo, setDirDialogo] = useState<{ abierto: boolean; direccion: DireccionEntrega | null }>({ abierto: false, direccion: null });
   const [versionOdoo, setVersionOdoo] = useState(0);
@@ -237,6 +242,10 @@ const ClienteDetalle = () => {
         ]} />
       </Panel>
 
+      {puedeVerOdoo && (
+        <EstadoOdooCliente clienteId={cliente.id} version={versionOdoo} puedeCrear={puedeCrearOdoo} onCambio={recargarOdoo} onEstado={setEstadoOdoo} />
+      )}
+
       <Tabs defaultValue="ordenes">
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="ordenes"><ShoppingCart className="mr-1.5 h-3.5 w-3.5" />Órdenes ({ordenes.length})</TabsTrigger>
@@ -280,7 +289,7 @@ const ClienteDetalle = () => {
               <p className="p-6 text-center text-sm text-muted-foreground">Sin contactos. <Link to={`/admin/clientes/${cliente.id}/usuarios`} className="text-primary underline">Agregar contactos y darles acceso al portal</Link></p>
             ) : (
               <Table>
-                <TableHeader><TableRow><TableHead>Contacto</TableHead><TableHead>Cargo</TableHead><TableHead>Correo</TableHead><TableHead>Portal</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Contacto</TableHead><TableHead>Cargo</TableHead><TableHead>Correo</TableHead><TableHead>Portal</TableHead>{puedeVerOdoo && <TableHead>Odoo</TableHead>}</TableRow></TableHeader>
                 <TableBody>
                   {contactos.map((k) => {
                     const acceso = accesos.find((a) => a.contacto_id === k.id);
@@ -290,6 +299,7 @@ const ClienteDetalle = () => {
                         <TableCell className="text-muted-foreground">{k.cargo || "—"}</TableCell>
                         <TableCell className="text-muted-foreground">{k.email || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap text-xs">{acceso ? (acceso.activo ? <span className="text-success">Con acceso</span> : <span className="text-destructive">Desactivado</span>) : <span className="text-muted-foreground">Sin acceso</span>}</TableCell>
+                        {puedeVerOdoo && <TableCell className="whitespace-nowrap text-xs"><EstadoOdooContacto contacto={estadoOdoo?.contactos.find((x) => x.id === k.id)} /></TableCell>}
                       </TableRow>
                     );
                   })}

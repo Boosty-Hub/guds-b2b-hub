@@ -24,8 +24,9 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 2. **Conciliación bancaria**: la herramienta de GUDS se mantiene y debe funcionar (a futuro podría llevarse a Odoo).
 3. **Clientes nuevos desde GUDS** se crean en Odoo, **sin duplicados por RIF ni por nombre**.
 4. **Vendedores sin correo real**: se dejan los campos para llenarlos después.
-5. **Escritura en Odoo** con la key de Freddy Cardoso. Todo lo que GUDS cree en Odoo debe quedar marcado
-   (campo de origen o texto "(GUDS)"), igual que en GUDS lo que viene de Odoo lleva la marca Odoo.
+5. **Escritura en Odoo** con la API key del usuario de Odoo acordado con el dueño. Todo lo que GUDS cree en Odoo debe quedar marcado
+   (campo de origen o texto "(GUDS)"), igual que en GUDS lo que viene de Odoo lleva la marca Odoo. Desde el 29-sep (decisión D)
+   además queda una **nota interna "(GUDS)"** en el historial de Odoo de lo que GUDS crea o cambia.
 6. **Otras retenciones**: se adaptan las que se usan (ver Fases 4 y 5).
 
 ## Fases
@@ -41,7 +42,7 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 7 | Bancos y tesorería: cuentas, cajas, extractos, conciliación GUDS | ✅ 2026-09-27 |
 | 8 | Capa GUDS: tienda por empresa, portal cliente/vendedor, crédito, stock comprometido, contactos, delivery, reportes | ✅ 2026-09-27 |
 | 9a | Sincronización periódica Odoo → GUDS (15 min + nocturna), solo lectura de Odoo | ✅ 2026-09-27 |
-| 9b | Envío a Odoo de pedidos, clientes, contactos y límites de crédito creados en GUDS (marcados "(GUDS)") | 🟡 pedidos: aprobación en admin → cotización en Odoo automática (28-sep); faltan clientes, contactos y límites |
+| 9b | Envío a Odoo de pedidos, clientes, contactos y límites de crédito creados en GUDS (marcados "(GUDS)") | ✅ 2026-09-29: pedidos (28-sep), clientes nuevos (crear o enlazar sin duplicar), contactos, límites y notas "(GUDS)" (20s) |
 
 ### Fase 0 — hecho
 - Respaldo completo en `C:\Users\gabri\GUDS-backups\2026-09-27` (fuera del repo y de OneDrive) con
@@ -85,10 +86,10 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
   cambia de empresa → vuelve a entrar → restablecer clave) y recorridos sin errores: 70 pantallas de administración y 52 del portal del cliente (13 × 2 empresas × móvil y escritorio); cuadre 68/68 e importación idempotente. Datos de prueba borrados (pedidos, notificaciones,
   usuarios, contactos y numeración).
 
-### Fase 9b — en curso (envío a Odoo; prohibido borrar en Odoo)
+### Fase 9b — hecho (envío a Odoo; prohibido borrar en Odoo)
 - Motor `supabase/functions/_shared/odoo-sync/enviar.js` + `scripts/enviar-pedido-odoo.mjs <pedido> [--apply]`. El cliente de
-  Odoo (`odoo.js`) tiene una única vía de escritura, `crear()`, limitada a `create` en `sale.order`; no existe forma de borrar ni
-  modificar registros de Odoo desde GUDS.
+  Odoo (`odoo.js`) solo crea, modifica y deja notas en lo que tiene en sus listas blancas; no existe forma de borrar ni archivar
+  registros de Odoo desde GUDS (no hay `unlink` ni escritura de `active`).
 - El pedido se crea como **cotización en borrador** en la empresa del pedido, con almacén general P-01, precio de GUDS por unidad,
   referencia `<número> (GUDS)`, origen `GUDS` y nota "(GUDS)". Solo clientes con lista de precios en USD (en Bs habría que convertir).
 - Idempotente (busca la referencia antes de crear) y vincula pedido y líneas con su `odoo_id` para que la sincronización no duplique.
@@ -97,6 +98,55 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
   El envío va como línea del servicio configurado (Configuración → Políticas de venta) o, si falta, como nota. Ver bitácora.
 - **Primera prueba (27-sep):** GUDS-ORD-00001 → **S00927** (Quirutec como cliente de GUDS, 1 × CARAMELOS CHAO $0,38, "No procesar").
   Detalle y hallazgos en la bitácora (almacén de consignación en S00927, envío de $50 sin equivalente en Odoo).
+- **Clientes nuevos (29-sep, migración `20260929_fase20s_clientes_nuevos_odoo.sql`; decisiones 3 y B):** al **aprobar un registro**
+  (o dar de alta un cliente en Clientes) el cliente se crea en Odoo **automáticamente y sin duplicar**:
+  - En GUDS: si en la empresa (o entre los compartidos) ya hay un cliente con el mismo RIF (`clave_rif`: `J-12345678-9` =
+    `J123456789` = `J-12345678`) o el mismo nombre normalizado, **no se crea otro**: el acceso del solicitante queda ligado a
+    ese cliente y el registro lo anota (`uso_cliente_existente`, `coincidencia`). La regla de duplicados de 18c usa la misma clave.
+  - Si es nuevo, se crea en GUDS (calle, estado de Venezuela, tipo de persona) y se encola su alta (`odoo_escrituras` tipo
+    `cliente_nuevo`). `escribir-cliente-nuevo.js` busca en Odoo (compañía del cliente o compartidos, activos o archivados) por
+    RIF (`vat`/`rif`/`cedula`) y nombre normalizados: **1 coincidencia activa por RIF → enlaza** (solo pone `clientes.odoo_id` y
+    deja la nota); **varias**, una archivada, una ya ligada a otro cliente o un nombre igual con otro RIF → queda "varias
+    coincidencias" y administración elige en la ficha (crear uno nuevo solo si ningún candidato tiene su RIF); **ninguna → crea**
+    el `res.partner` (compañía, nombre, RIF en el formato de Odoo con su dígito verificador, correo, teléfonos, dirección con estado
+    y país, persona jurídica o natural, `customer_rank`, vendedor mapeado por nombre, lista USD de la empresa, idioma y zona
+    horaria, marca "(GUDS)" en las notas). Antes de crear valida el payload contra `fields_get`/`default_get` de Odoo (en Odoo
+    son obligatorios calle, ciudad, estado, país y tipo municipal) y vuelve a buscar por RIF. Sin vendedor en GUDS se envía
+    `user_id` vacío (si no, Odoo pondría al usuario de la API). **Contribuyente especial**: Odoo no tiene un campo propio (lo
+    maneja con posiciones fiscales, que difieren entre compañías), así que va en el comentario para que contabilidad asigne la
+    posición fiscal.
+  - Al crear o enlazar, `aplicar_vinculo_cliente_odoo()` liga el cliente (la sincronización lo actualiza por `odoo_id`, único en
+    toda la base: no duplica la fila; también lee los clientes enlazados que Odoo aún no marca como clientes), **reenvía solos los
+    pedidos aprobados** que fallaron por "no existe en Odoo" y encola sus contactos y, si es nuevo con límite, su límite.
+  - Registros: el formulario público pide el **estado**; al aprobar se ve qué pasará ("se creará en Odoo" / "se enlazará con X" /
+    "ya existe en GUDS: X"), se confirma el estado (deducido de la ciudad si falta) y se puede elegir vendedor.
+  - Ficha del cliente → panel **Odoo**: alta (en cola, simulado, creado, enlazado, varias coincidencias con selector, error con
+    reintentar y "Completar datos"), contactos (en Odoo / pendientes / con error; desactivados no se envían) y límite.
+  - Modo `configuracion.odoo_escritura_clientes_nuevos` (clientes nuevos y contactos): `activo` desde el 29-sep, tras simular el
+    alta en ambas compañías con el payload validado contra `fields_get` (no se creó ningún cliente ni contacto real de prueba).
+- **Contactos (flanco 29):** `cliente_contactos` → contacto hijo en Odoo (`parent_id` = cliente, `type` contact, nombre, cargo,
+  correo, teléfono y celular, dirección del cliente como en el formulario de Odoo, marca "(GUDS)"). Crear y editar se envían (si
+  ya existe un hijo con el mismo nombre o correo se enlaza); desactivar o borrar en GUDS **no** se envía. Los de un cliente sin
+  Odoo esperan a que quede ligado. Nombre, cargo y correo solo se escriben en contactos que creó GUDS (odoo.js lo comprueba).
+- **Límites (flanco 28):** al editar el límite de un cliente de Odoo queda pendiente (18l) y se encola (`cliente_limite`, modo
+  `odoo_escritura_clientes`); se escribe `credit_limit` (por compañía, con el contexto de la compañía del cliente),
+  `use_partner_credit_limit` y `credit_limit_value` (el "Límite de Crédito" del módulo propio `eu_customer_limit_category`, que
+  es el que lee primero la sincronización) y se apaga el pendiente si el límite no cambió mientras tanto. **`account_use_credit_limit`
+  está en `false` en GUDS SUPPLY y en QUIRUTEC (verificado el 29-sep)**: el límite estándar queda registrado pero Odoo no avisa ni
+  bloquea al confirmar pedidos por él; el módulo propio sí usa `credit_limit_value` en pedidos (`exceed_credit`).
+- **Notas "(GUDS)" (decisión D, 29-sep):** `odoo.js` → `nota(modelo, id, texto)` = `message_post` como **nota interna**
+  (`message_type` comment + subtipo `mail.mt_note`, sin `partner_ids`, sin suscribir al usuario de la API). Solo en `res.partner`,
+  `product.template`, `stock.picking` y `sale.order`; el texto siempre empieza con "(GUDS)". Se deja al crear o enlazar un cliente,
+  editar teléfonos o direcciones (19w), enviar un límite, crear o editar un contacto, escribir foto o descripción (20r), validar un
+  documento de entrega desde GUDS (cantidades, quién y cuándo) y crear un pedido (quién lo aprobó). Si la nota falla, la escritura
+  principal no se revierte y el error queda en el resultado. En modo simular la nota queda solo en el plan. Prueba real: **una**
+  nota en la plantilla 1125 (29-sep): quedó como nota (subtipo "Note"), sin destinatarios, sin notificaciones, sin correos y sin
+  seguidores nuevos.
+- Verificado (29-sep): 400 pruebas de base (incluye 49 nuevas de 20s: permisos, sin duplicar por RIF y por nombre en GUDS y
+  en Odoo, enlace, varias coincidencias, límite que se apaga, contactos, registro público, funciones internas cerradas y guardas de
+  odoo.js), simulación de los escritores contra Odoo en solo lectura (alta en ambas compañías, contacto, límite, nota de entrega),
+  e2e a 1440 y 390 px (aprobar un registro nuevo → alta simulada en la ficha; aprobar uno con el RIF de un cliente existente → queda
+  ligado; enviar y completar datos) y sincronización `ok` con la función desplegada.
 
 ### Fase 9a — hecho (sincronización periódica, solo lectura de Odoo)
 - Función edge **`sync-odoo`** (`supabase/functions/sync-odoo/`) con el mismo motor del importador; escribe por conexión
@@ -109,7 +159,7 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 - Registro en `sync_corridas` (corridas, simulaciones y trazas de progreso; limpieza automática a 2/60 días).
 - Interfaz: indicador **"Odoo · hace X min"** en el header (verde/ámbar/rojo) con **"Sincronizar ahora"** para quien
   puede editar Configuración (`solicitar_sync_odoo()`; el secreto nunca llega al navegador).
-- Secretos de la función: `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_API_KEY` (la de Freddy Cardoso), `SYNC_ODOO_SECRET`.
+- Secretos de la función: `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_API_KEY` (la del usuario acordado), `SYNC_ODOO_SECRET`.
   La API key actual (creada el 26-sep) **no tiene fecha de vencimiento** en Odoo (`res.users.apikeys.expiration_date` vacío,
   verificado el 29-sep). Si se revoca o se cambia, el indicador se pone rojo y hay que actualizar el secreto `ODOO_API_KEY`
   (y `.env.local`).
@@ -342,7 +392,7 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 9 | 16 vendedores con correo de relleno `@guds.test` | Cuando GUDS pase los correos (decisión 4) |
 | 10 | El widget de soporte "Ticket" responde 403 (`widget-listar-tickets`) | Revisar con Boosty (no es de esta plataforma) |
 | 11 | ~~Frontend multiempresa sin publicar~~ | ✅ Publicado en `portal.guds-supply.com` (Netlify, rama main) |
-| 12 | ¿Se permite crear productos en GUDS? Existirían solo en GUDS (no en Odoo). Hoy la pantalla lo permite | Decisión de GUDS |
+| 12 | ~~¿Se permite crear productos en GUDS?~~ | ✅ Decisión E (29-sep): nacen en Odoo y se editan en GUDS (nombre, código, categoría e IVA siguen bloqueados); crear e importar quitados y bloqueados en la base (20t) |
 | 13 | ~~Listas de precios de Odoo vacías~~ | ✅ Se sincronizan listas, reglas y la lista de cada cliente (20a); hoy Odoo no tiene reglas y su precio de lista es $1 de relleno |
 | 14 | ~~Impuestos de Odoo no espejados~~ | ✅ IVA de cada producto desde Odoo, por grupo de tasa como Odoo (20a/20b); IVA por línea de los pedidos de Odoo |
 | 15 | El motivo de nota de crédito (`motivos` en Odoo) está vacío en todas las NC | Informativo (se importa si lo cargan) |
@@ -358,13 +408,13 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 25 | 674 líneas de extracto bancario por conciliar en Odoo | Informativo para contabilidad; visible por banco en GUDS |
 | 26 | ~~Correo de autenticación sin SMTP y `site_url` en localhost~~ | ✅ SMTP de Resend y dominio `portal.guds-supply.com` (28-sep) |
 | 27 | Pedidos de GUDS completados antes de la Fase 9b quedan comprometiendo stock hasta pasar a Odoo | Fase 9b (envío de pedidos a Odoo) |
-| 28 | Límites de crédito editados en GUDS quedan pendientes de enviar a Odoo | Fase 9 |
-| 29 | Contactos creados en GUDS no existen en Odoo | Fase 9 (crearlos como contacto hijo, marcados "(GUDS)") |
+| 28 | ~~Límites de crédito editados en GUDS quedan pendientes de enviar a Odoo~~ | ✅ 20s: se escriben en Odoo (`credit_limit` por compañía, `use_partner_credit_limit` y `credit_limit_value`) y se apaga el pendiente; `account_use_credit_limit` está apagado en ambas compañías |
+| 29 | ~~Contactos creados en GUDS no existen en Odoo~~ | ✅ 20s: contacto hijo marcado "(GUDS)"; crear y editar se envían, desactivar no |
 | 30 | ~~Reportes (ventas por empresa, vendedor, producto; cobranza; inventario)~~ | ✅ `/admin/reportes` (migración 18u), ver "Reportes" en la Fase 8 |
 | 31 | **Documentos que no son venta**: 986 facturas + 353 NC del "Diario Saldo Inicial CXC" y 113 del "ND CxC Saldos Iniciales" (saldos de apertura migrados a Odoo, fechados 2021–2026) y 493 notas del diario "Nota debito cliente" en Bs con cuenta *Diferencia en cambio* y 0 en USD (ajustes cambiarios). GUDS ahora guarda el diario (`facturas.diario_odoo`, `es_saldo_inicial`) y marca como ND lo emitido en diarios de ND | ✅ migración 18t + importador; los reportes de ventas los excluyen |
 | 32 | ~~Los montos negativos se mostraban como `$-1,234.69`~~ | ✅ `-$1,234.69` / `-Bs. …` (29-sep) |
 | 33 | **Envío**: GUDS cobra $50 en pedidos menores de $500. Decisión (28-sep): va como línea de servicio. En Odoo no hay un servicio vendible de envío | Contabilidad crea el servicio en Odoo (cuenta de ingresos + IVA) y se configura su código en Políticas de venta; mientras tanto va como nota |
-| 34 | S00927 (prueba) quedó con almacén G-CONSIGNADO REPRESENTACIONES FAW; los envíos nuevos usan P-01 | Si se confirma, cambiar almacén en Odoo (GUDS no edita en Odoo) |
+| 34 | S00927 (prueba) quedó con almacén G-CONSIGNADO REPRESENTACIONES FAW; los envíos nuevos usan P-01 | Decisión H (29-sep): se deja como está |
 | 35 | ~~Vendedor y repartidor veían toda la empresa; vendedor podía autoaprobar; cualquiera borraba fotos de productos; cliente insertaba pagos "verificados"; empaque sin precio a precio unitario~~ | ✅ migraciones 19i–19k |
 | 36 | ~~Impuestos: GUDS aplicaba 16 % a todo~~ | ✅ Etapa 2 (20a/20b); validado contra pedidos reales de Odoo |
 | 37 | ~~La sincronización no generaba notificaciones~~ | ✅ Eventos del pedido con triggers que corren también con la sincronización (20d) |
@@ -372,11 +422,16 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 39 | ~~Saldos bancarios legibles por cualquier usuario con sesión; funciones internas y aprobación de registros ejecutables sin sesión~~ | ✅ 19l, 19q |
 | 40 | En Odoo, el diario "Banco Banesco USA" de GUDS tiene la cuenta de Banesco en bolívares (mismo número); las cuentas extranjeras llevan ceros a la izquierda (20 dígitos) | Corregir en Odoo; mientras tanto esa cuenta no se publica a clientes |
 | 41 | ~~Correo de Auth sin SMTP~~ | ✅ Resend configurado en Supabase (28-sep) |
-| 42 | **Cobros de Odoo con parte sin aplicar**: 261 cobros con al menos 1 USD sin aplicar a facturas (~245 mil USD). No aparecen como saldo a favor ni en el admin ni en el portal | Decisión: mostrarlos como saldo a favor o conciliarlos primero en Odoo (lista en Reportes → Calidad y cuadre) |
+| 42 | **Cobros de Odoo con parte sin aplicar**: 261 cobros con al menos 1 USD sin aplicar a facturas (~245 mil USD) | Decisión A (29-sep): contabilidad los concilia en Odoo; GUDS los refleja al sincronizar (lista en Reportes → Calidad y cuadre) |
 | 43 | 64 documentos marcados anulados que Odoo aún tiene con saldo ("por cruzar" con su NC) | Contabilidad los cruza en Odoo; en GUDS no se pueden pagar |
 | 44 | Clasificación comercial casi vacía en Odoo: marca (`product_brand_id`) sin datos, Industria cargada en 3 clientes, canal y segmento vacíos | Cargarla en Odoo; GUDS ya la sincroniza (20q) |
 | 45 | 48 productos con ventas en categorías marcadas inactivas en GUDS (todas las de Quirutec) y 241 clientes sin condición de pago | Corregir en Categorías de GUDS y en Odoo (lista en Calidad y cuadre) |
 | 46 | 16 de 19 vendedores sin teléfono (el ejecutivo de cuenta del portal sale sin WhatsApp) | Cargar el celular de cada vendedor |
-| 47 | **Aprobar un registro crea el cliente solo en GUDS** (sin `odoo_id`): sus pedidos no pueden enviarse a Odoo ("el cliente no existe en Odoo"). Hay 3 registros pendientes | Fase 9b: crear el cliente en Odoo al aprobar, sin duplicar por RIF ni nombre (decisión 3 del 27-sep) |
-| 48 | Los roles **Almacén** y **Contador** existen sin ningún permiso | Configurar en Roles (Almacén: inventario ver/editar para devoluciones) |
+| 47 | ~~Aprobar un registro crea el cliente solo en GUDS (sin `odoo_id`)~~ | ✅ 20s: al aprobar se crea o enlaza en Odoo sin duplicar por RIF ni nombre; los pedidos que esperaban se reenvían solos. Los 3 registros pendientes siguen sin aprobar |
+| 48 | ~~Los roles Almacén y Contador existían sin permisos~~ | ✅ 20t: Contador con lo financiero (ver, crear, editar) y consulta de reportes, dashboard, clientes y órdenes (decisión G); Almacén con inventario ver/editar |
 | 49 | La IA de la conciliación bancaria no responde: la cuenta de la API de Anthropic no tiene saldo (verificado 29-sep); la conciliación por reglas funciona | Cargar saldo en esa cuenta |
+| 50 | ~~`clientes.odoo_id` y `cliente_contactos.odoo_id` se podían cambiar desde la API; el registro público aceptaba filas "aprobadas" con cliente asignado~~ | ✅ 20s: guardas en la base (solo la sincronización y la función edge ligan con Odoo; el registro público entra siempre pendiente) |
+| 51 | Vendedores de Odoo archivados (p. ej. uno con 88 clientes en GUDS): un cliente nuevo con ese vendedor en GUDS se crea en Odoo sin vendedor (queda el aviso en el alta) | Reasignar los clientes a vendedores activos en Odoo |
+| 52 | Los clientes que GUDS crea en Odoo no llevan posición fiscal (el contribuyente especial va en el comentario); las posiciones fiscales tienen nombres cruzados entre compañías ("75 % Contribuyente Ordinario" en GUDS, "75 % contribuyente especial" en Quirutec) | Contabilidad asigna la posición fiscal en Odoo; si se unifican los nombres, GUDS podría asignarla |
+| 53 | Datos de contacto de relleno en la landing, el registro, Soporte y Privacidad (teléfonos, correos y horario inventados) | ✅ 29-sep: se muestran solo el teléfono, correo y ciudad reales de la empresa (tabla `empresas`, hoy vacíos: cargarlos en Configuración → Empresas) |
+| 54 | Términos y Condiciones y Política de Privacidad son textos de plantilla (Términos dice "Diciembre 2024"; Privacidad muestra la fecha del día) | Que el dueño o su asesor legal los revisen |

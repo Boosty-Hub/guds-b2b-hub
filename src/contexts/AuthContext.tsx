@@ -32,9 +32,12 @@ export interface RegistroCliente {
   rifDocumentoPath: string | null;
   tipoNegocio: string;
   empresaId?: string | null;          // empresa con la que quiere comprar (GUDS / Quirutec)
+  estadoVe?: string | null;           // estado de Venezuela de la dirección (Odoo lo exige para crear el cliente)
   estado: "pendiente" | "aprobado" | "rechazado";
   fechaRegistro: string;
   notas?: string;
+  clienteCreadoId?: string | null;    // cliente al que quedó ligado al aprobarse
+  usoClienteExistente?: boolean;      // al aprobar ya existía (mismo RIF o nombre): no se creó otro
 }
 
 interface AuthContextType {
@@ -49,7 +52,7 @@ interface AuthContextType {
   aprobarRegistro: (
     id: string,
     opts?: { lista_precios_id?: string; vendedor_id?: string; limite_credito?: number; dias_credito?: number }
-  ) => Promise<{ success: boolean; email?: string; password?: string; error?: string }>;
+  ) => Promise<{ success: boolean; email?: string; password?: string; clienteId?: string; error?: string }>;
   rechazarRegistro: (id: string, notas: string) => Promise<void>;
   getPendingRegistros: () => RegistroCliente[];
   refreshRegistros: () => Promise<void>;
@@ -156,9 +159,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         rifDocumentoPath: r.rif_documento_path,
         tipoNegocio: r.tipo_negocio,
         empresaId: r.empresa_id ?? null,
+        estadoVe: r.estado_ve ?? null,
         estado: r.estado,
         fechaRegistro: r.created_at?.split('T')[0] || '',
         notas: r.notas,
+        clienteCreadoId: r.cliente_creado_id ?? null,
+        usoClienteExistente: !!r.uso_cliente_existente,
       })));
     }
   }, []);
@@ -270,6 +276,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         rif_documento_path: registro.rifDocumentoPath,
         tipo_negocio: registro.tipoNegocio,
         empresa_id: registro.empresaId || null,
+        estado_ve: registro.estadoVe || null,
         estado: 'pendiente',
       });
     
@@ -283,8 +290,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const aprobarRegistro = async (
     id: string,
     opts?: { lista_precios_id?: string; vendedor_id?: string; limite_credito?: number; dias_credito?: number }
-  ): Promise<{ success: boolean; email?: string; password?: string; error?: string }> => {
-    // Aprueba, crea el cliente + la cuenta de auth y devuelve la contraseña temporal.
+  ): Promise<{ success: boolean; email?: string; password?: string; clienteId?: string; error?: string }> => {
+    // Aprueba: crea el cliente (o usa el que ya existe con ese RIF o nombre) + la cuenta de acceso, encola su alta en Odoo
+    // y devuelve la contraseña temporal.
     const { data, error } = await supabase.rpc('aprobar_registro_cliente', {
       p_registro_id: id,
       p_admin_id: user?.id ?? null,
@@ -299,7 +307,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
     await fetchRegistros();
     const row = Array.isArray(data) ? data[0] : data;
-    return { success: true, email: row?.email, password: row?.password_temporal };
+    return { success: true, email: row?.email, password: row?.password_temporal, clienteId: row?.cliente_id };
   };
 
   const rechazarRegistro = async (id: string, notas: string) => {

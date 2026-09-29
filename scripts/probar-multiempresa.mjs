@@ -1883,6 +1883,312 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
       and pg_get_functiondef(p.oid) ~ 'puede_editar_producto_odoo\\(\\)') t`));
 }
 
+// ── Clientes nuevos, contactos y límites → Odoo (20s): aprobar sin duplicar (RIF o nombre), enlazar o elegir, contactos y
+//    límites a la cola, solo administración, funciones internas cerradas y reglas del escritor (sin tocar Odoo) ──
+{
+  const qaVend20s = (await sql(`select a.id from auth.users a join usuarios u on u.auth_id = a.id where a.email = 'qa.vendedor@guds.test' and u.role = 'vendedor'`))[0]?.id || vendGuds;
+  const qaCli20s = (await sql(`select id from auth.users where email = 'qa.cliente@guds.test'`))[0]?.id;
+  const perfilCli20s = qaCli20s ? (await sql(`select role from usuarios where auth_id = '${qaCli20s}'`))[0] : null;
+  const previoCli20s = qaCli20s && !perfilCli20s
+    ? `insert into usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${qaCli20s}', 'qa.cliente@guds.test', 'QA', 'cliente', '${cliGuds}', true);` : '';
+  const adminUsr = (await sql(`select id from usuarios where auth_id = '${admin}'`))[0].id;
+  // Cliente real de GUDS (de Odoo) con RIF válido que no está en Quirutec ni compartido: referencia para "ya existe" (el bloque se deshace)
+  const [ref20s] = await sql(`select c.id, c.nombre_negocio, c.rif from clientes c where c.empresa_id = '${guds.id}' and c.odoo_id is not null and c.activo
+    and public.clave_rif(c.rif) ~ '^[JVG][0-9]{8}$' and length(public.normalizar_nombre_empresa(c.nombre_negocio)) > 6
+    and not exists (select 1 from clientes q where q.id <> c.id and public.clave_rif(q.rif) = public.clave_rif(c.rif))
+    and not exists (select 1 from clientes d where d.id <> c.id and (d.empresa_id = '${guds.id}' or d.empresa_id is null)
+      and public.normalizar_nombre_empresa(d.nombre_negocio) = public.normalizar_nombre_empresa(c.nombre_negocio))
+    order by c.created_at limit 1`);
+  const rifSinDv = ref20s.rif.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 9);          // "J-12345678-9" → "J12345678"
+  const U = (n) => `00000000-0000-0000-0000-0000000a20${String(n).padStart(2, '0')}`;
+  const reg = (id, nombre, rif, emp = guds.id, ciudad = 'Valencia') => `insert into public.registros_clientes (id, nombre_negocio, nombre_contacto,
+    email, telefono, direccion, ciudad, rif, tipo_negocio, estado, empresa_id)
+    values ('${id}', ${lit(nombre)}, 'Ana Prueba', 'registro.20s.${id.slice(-2)}@guds.test', '0414-0000000', 'Av. Ficticia 1', ${lit(ciudad)}, ${lit(rif)}, 'Farmacia', 'pendiente', '${emp}');`;
+  // Aprueba como el usuario del bloque y devuelve lo que quedó (cada sentencia ve lo que hizo la anterior)
+  const fnAprobar = `create function public.p20s_aprobar(p uuid) returns text language plpgsql as $f$
+    declare v record; r text;
+    begin
+      select * into v from public.aprobar_registro_cliente(p);
+      select row_to_json(t)::text into r from (select
+        v.cliente_id = (select cliente_creado_id from public.registros_clientes where id = p) ligado,
+        (select count(*) from public.clientes where registro_origen_id = p) nuevos,
+        (select row_to_json(c) from (select odoo_vinculo, estado, es_empresa, empresa_id, calle from public.clientes where id = v.cliente_id) c) cli,
+        (select row_to_json(g) from (select uso_cliente_existente, coincidencia, estado from public.registros_clientes where id = p) g) reg,
+        (select u.cliente_id = v.cliente_id and u.debe_cambiar_clave from public.usuarios u where lower(u.email) = lower(v.email)) acceso,
+        (select row_to_json(e) from (select estado, solicitado_por is not null quien, datos ->> 'registro_id' = p::text del_registro, datos ->> 'origen' origen
+           from public.odoo_escrituras where tipo = 'cliente_nuevo' and referencia_id = v.cliente_id limit 1) e) cola,
+        (select count(*) from public.odoo_escrituras where tipo = 'cliente_nuevo' and referencia_id = v.cliente_id) n_cola,
+        v.cliente_id::text cliente) t;
+      return r;
+    end $f$;`;
+  const aprobar = (id) => `select public.p20s_aprobar('${id}')`;
+
+  // Permisos
+  await caso('Clientes nuevos→Odoo: sin sesión no se previsualiza ni se aprueba', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select public.previsualizar_registro_cliente('${U(1)}')::text`));
+  await caso('Clientes nuevos→Odoo: sin sesión no se elige, completa ni envía nada', (r, e) => /permission denied/.test(e || ''),
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select public.elegir_cliente_odoo('${cliGuds}', 1)::text`));
+  for (const [fn, args] of [['completar_cliente_odoo', `'${cliGuds}', '{}'::jsonb`], ['enviar_cliente_odoo', `'${cliGuds}'`], ['enviar_contactos_odoo', `'${cliGuds}'`],
+    ['enviar_limite_credito_odoo', `'${cliGuds}'`], ['estado_odoo_cliente', `'${cliGuds}'`]]) {
+    await caso(`Clientes nuevos→Odoo: sin sesión no se ejecuta ${fn}`, 'permission denied',
+      como({ rol: 'anon', uid: null, empresa: guds.id }, `select public.${fn}(${args})::text`));
+  }
+  if (qaVend20s) {
+    await caso('Clientes nuevos→Odoo: un vendedor no previsualiza ni aprueba registros', 'No tienes permiso para aprobar registros',
+      como({ uid: qaVend20s, empresa: guds.id, previo: reg(U(1), 'Prueba 20s Ficticia Uno', 'J-99999997-0') }, `select public.previsualizar_registro_cliente('${U(1)}')::text`));
+    await caso('Clientes nuevos→Odoo: un vendedor no elige coincidencias ni envía clientes a Odoo', 'No tienes permiso para crear o enlazar',
+      como({ uid: qaVend20s, empresa: guds.id }, `select public.elegir_cliente_odoo('${cliGuds}', 1)::text`));
+    await caso('Clientes nuevos→Odoo: un vendedor no envía contactos ni límites', 'No tienes permiso para editar',
+      como({ uid: qaVend20s, empresa: guds.id }, `select public.enviar_contactos_odoo('${cliGuds}')::text`));
+    await caso('Clientes nuevos→Odoo: un vendedor no ve el estado de Odoo del cliente', 'No tienes permiso para ver el estado',
+      como({ uid: qaVend20s, empresa: guds.id }, `select public.estado_odoo_cliente('${cliGuds}')::text`));
+  }
+  if (qaCli20s && (!perfilCli20s || perfilCli20s.role === 'cliente')) {
+    await caso('Clientes nuevos→Odoo: un cliente del portal no aprueba registros', 'No tienes permiso para aprobar registros',
+      como({ uid: qaCli20s, empresa: guds.id, previo: previoCli20s + reg(U(1), 'Prueba 20s Ficticia Uno', 'J-99999997-0') },
+        `select row_to_json(t)::text from public.aprobar_registro_cliente('${U(1)}') t`));
+    await caso('Clientes nuevos→Odoo: un cliente del portal no elige ni envía a Odoo', 'No tienes permiso para crear o enlazar',
+      como({ uid: qaCli20s, empresa: guds.id, previo: previoCli20s }, `select public.enviar_cliente_odoo('${cliGuds}')::text`));
+  }
+
+  // Aprobación de un cliente nuevo: se crea en GUDS (estado inferido de la ciudad) y su alta en Odoo queda en cola
+  await caso('Clientes nuevos→Odoo: aprobar un registro nuevo crea el cliente y encola su alta en Odoo (pendiente, quién, del registro)',
+    (r) => r?.ligado && r?.nuevos === 1 && r?.cli?.odoo_vinculo === 'pendiente' && r?.cli?.estado === 'Carabobo' && r?.cli?.es_empresa === true
+      && r?.cli?.calle === 'Av. Ficticia 1' && r?.reg?.uso_cliente_existente === false && r?.reg?.estado === 'aprobado' && r?.acceso === true
+      && r?.n_cola === 1 && r?.cola?.estado === 'pendiente' && r?.cola?.quien && r?.cola?.del_registro && r?.cola?.origen === 'registro',
+    como({ empresa: guds.id, previo: reg(U(2), 'Prueba 20s Ficticia Dos', 'J-99999997-0') + fnAprobar }, aprobar(U(2))));
+  // Sin duplicar en GUDS: mismo RIF (sin dígito verificador) o mismo nombre → se usa el cliente existente y no se encola nada
+  await caso('Clientes nuevos→Odoo: mismo RIF en otro formato → no se crea otro cliente; el acceso queda ligado al existente',
+    (r) => r?.ligado && r?.nuevos === 0 && r?.cliente === ref20s.id && r?.reg?.uso_cliente_existente === true && r?.reg?.coincidencia === 'rif'
+      && r?.acceso === true && r?.n_cola === 0,
+    como({ empresa: guds.id, previo: reg(U(3), 'Prueba 20s Otro Nombre Ficticio', rifSinDv) + fnAprobar }, aprobar(U(3))));
+  await caso('Clientes nuevos→Odoo: mismo nombre (otro formato, "C.A.") → no se crea otro cliente; coincidencia por nombre',
+    (r) => r?.nuevos === 0 && r?.cliente === ref20s.id && r?.reg?.coincidencia === 'nombre' && r?.n_cola === 0,
+    como({ empresa: guds.id, previo: reg(U(4), `${ref20s.nombre_negocio.toLowerCase().replace(/,?\s*c\.?\s*a\.?$/i, '')} c.a.`, 'J-99999996-4') + fnAprobar }, aprobar(U(4))));
+  await caso('Clientes nuevos→Odoo: el mismo RIF en la otra empresa sí crea su cliente (y su alta en Odoo)',
+    (r) => r?.nuevos === 1 && r?.cli?.empresa_id === qrt.id && r?.reg?.uso_cliente_existente === false && r?.n_cola === 1,
+    como({ empresa: qrt.id, previo: reg(U(5), 'Prueba 20s Ficticia Cinco', rifSinDv, qrt.id) + fnAprobar }, aprobar(U(5))));
+  await caso('Clientes nuevos→Odoo: la vista previa dice qué pasará (existente por RIF / crear en Odoo con el estado inferido)',
+    (r) => r?.a?.accion === 'usar_existente' && r?.a?.existente?.id === ref20s.id && r?.a?.existente?.coincidencia === 'rif'
+      && r?.b?.accion === 'crear_odoo' && r?.b?.estado_ve === 'Carabobo' && r?.b?.estado_inferido === true && r?.b?.rif_valido === true && ['simular', 'activo'].includes(r?.b?.modo),
+    como({ empresa: guds.id, previo: reg(U(3), 'Prueba 20s Otro Nombre Ficticio', rifSinDv) + reg(U(2), 'Prueba 20s Ficticia Dos', 'J-99999997-0') },
+      `select json_build_object('a', public.previsualizar_registro_cliente('${U(3)}'), 'b', public.previsualizar_registro_cliente('${U(2)}'))::text`));
+  await caso('Clientes nuevos→Odoo: el alta manual de un cliente sin RIF repetido también se encola (y no se puede fijar su odoo_id)',
+    (r) => r?.odoo_id === null && r?.vinculo === 'pendiente' && r?.n === 1 && r?.origen === 'manual',
+    como({ empresa: guds.id, previo: `create function public.p20s_manual() returns text language plpgsql as $f$
+        declare v uuid; r text;
+        begin
+          insert into public.clientes (codigo, nombre_negocio, rif, tipo_negocio, odoo_id) values ('PRUEBA-20S', 'Prueba 20s Ficticia Manual', 'J-99999995-8', 'Farmacia', 987654321)
+            returning id into v;
+          select row_to_json(t)::text into r from (select c.odoo_id, c.odoo_vinculo vinculo,
+            (select count(*) from public.odoo_escrituras e where e.tipo = 'cliente_nuevo' and e.referencia_id = v) n,
+            (select e.datos ->> 'origen' from public.odoo_escrituras e where e.tipo = 'cliente_nuevo' and e.referencia_id = v limit 1) origen
+            from public.clientes c where c.id = v) t;
+          return r;
+        end $f$;` }, `select public.p20s_manual()`));
+  await caso('Clientes nuevos→Odoo: "J-12345678" y "J-12345678-9" ya cuentan como el mismo RIF al dar de alta', 'Ya existe un cliente',
+    como({ empresa: guds.id }, `with x as (insert into clientes (codigo, nombre_negocio, rif, tipo_negocio) values ('PRUEBA-20S', 'Prueba 20s Ficticia Rif', ${lit(rifSinDv)}, 'Empresa')
+      returning id) select row_to_json(x)::text from x`));
+
+  // Enlace (lo hace la función edge como postgres): liga, reenvía pedidos que esperaban, encola contactos activos y el límite
+  const cliPrueba = (id, nombre, rif) => `insert into public.clientes (id, codigo, nombre_negocio, rif, tipo_negocio, empresa_id, limite_credito)
+    values ('${id}', 'PRUEBA-20S-${id.slice(-2)}', ${lit(nombre)}, ${lit(rif)}, 'Farmacia', '${guds.id}', 150);`;
+  const previoVinculo = `perform set_config('request.headers', '${hdr(guds.id)}', true);
+    ${cliPrueba(U(10), 'Prueba 20s Ficticia Vinculo', 'J-99999994-1')}
+    insert into public.ordenes (cliente_id, subtotal, total, estado, empresa_id, aprobacion, aprobado_por, aprobado_at, odoo_envio_error)
+      values ('${U(10)}', 1, 1, 'pendiente', '${guds.id}', 'aprobada', '${adminUsr}', now(), 'El cliente X no existe en Odoo (primero hay que crearlo)');
+    insert into public.cliente_contactos (cliente_id, nombre, activo) values ('${U(10)}', 'Contacto Activo', true), ('${U(10)}', 'Contacto Inactivo', false);
+    ${cliPrueba(U(11), 'Prueba 20s Ficticia Otro', 'J-99999993-5')}`;
+  await caso('Clientes nuevos→Odoo: al crearse en Odoo el cliente queda ligado, sus pedidos se reenvían y se encolan su contacto activo y su límite',
+    (r) => r?.v?.pedidos_reenviados === 1 && r?.v?.contactos_encolados === 1 && r?.v?.limite_encolado === true && r?.c?.odoo_id === 999999001
+      && r?.c?.odoo_vinculo === 'creado' && r?.c?.limite_credito_pendiente === true && r?.err === 0 && r?.k === 1 && r?.l === 1 && /ya está ligado/.test(r?.otro || ''),
+    como({ rol: 'postgres', uid: null, empresa: guds.id, previo: previoVinculo + `create function public.p20s_vinculo() returns text language plpgsql as $f$
+        declare v jsonb; o text;
+        begin
+          v := public.aplicar_vinculo_cliente_odoo('${U(10)}', 999999001, 'creado', '{}'::jsonb);
+          begin perform public.aplicar_vinculo_cliente_odoo('${U(11)}', 999999001, 'enlazado', '{}'::jsonb); exception when others then o := sqlerrm; end;
+          return json_build_object('v', v, 'otro', o,
+            'c', (select row_to_json(c) from (select odoo_id, odoo_vinculo, limite_credito_pendiente from public.clientes where id = '${U(10)}') c),
+            'err', (select count(*) from public.ordenes where cliente_id = '${U(10)}' and odoo_envio_error is not null),
+            'k', (select count(*) from public.odoo_escrituras where tipo = 'persona_contacto' and datos ->> 'cliente_id' = '${U(10)}'),
+            'l', (select count(*) from public.odoo_escrituras where tipo = 'cliente_limite' and referencia_id = '${U(10)}'))::text;
+        end $f$;` }, `select public.p20s_vinculo()`));
+  await caso('Clientes nuevos→Odoo: al enlazar con uno que ya existía en Odoo, manda Odoo (el límite de GUDS no se envía)',
+    (r) => r?.v?.limite_encolado === false && r?.c?.odoo_vinculo === 'enlazado' && r?.c?.limite_credito_pendiente === false,
+    como({ rol: 'postgres', uid: null, empresa: guds.id, previo: previoVinculo + `create function public.p20s_enlace() returns text language plpgsql as $f$
+        declare v jsonb;
+        begin
+          v := public.aplicar_vinculo_cliente_odoo('${U(10)}', 999999002, 'enlazado', '{}'::jsonb);
+          return json_build_object('v', v, 'c', (select row_to_json(c) from (select odoo_vinculo, limite_credito_pendiente from public.clientes where id = '${U(10)}') c))::text;
+        end $f$;` }, `select public.p20s_enlace()`));
+
+  // Varias coincidencias: queda para que administración elija; solo entre los candidatos; "crear nuevo" solo sin RIF igual
+  const previoVarias = (cands) => `perform set_config('request.headers', '${hdr(guds.id)}', true);
+    ${cliPrueba(U(12), 'Prueba 20s Ficticia Varias', 'J-99999992-9')}
+    perform public.registrar_revision_cliente_odoo('${U(12)}', ${lit(JSON.stringify({ candidatos: cands }))}::jsonb);
+    create function public.p20s_elegir(p int) returns text language plpgsql as $f$
+    declare r jsonb := '{}'; x uuid;
+    begin
+      r := r || jsonb_build_object('vinculo', (select odoo_vinculo from public.clientes where id = '${U(12)}'));
+      begin perform public.elegir_cliente_odoo('${U(12)}', 999999555); exception when others then r := r || jsonb_build_object('ajeno', sqlerrm); end;
+      begin perform public.elegir_cliente_odoo('${U(12)}', null); r := r || jsonb_build_object('crear', 'ok'); exception when others then r := r || jsonb_build_object('crear', sqlerrm); end;
+      if not r ? 'crear' or r ->> 'crear' <> 'ok' then
+        x := public.elegir_cliente_odoo('${U(12)}', p);
+        r := r || jsonb_build_object('elegido', (select datos -> 'elegido' from public.odoo_escrituras where id = x));
+      else
+        r := r || jsonb_build_object('elegido', (select datos -> 'elegido' from public.odoo_escrituras where tipo = 'cliente_nuevo' and referencia_id = '${U(12)}' order by created_at desc limit 1));
+      end if;
+      begin perform public.elegir_cliente_odoo('${U(12)}', p); exception when others then r := r || jsonb_build_object('doble', sqlerrm); end;
+      return r::text;
+    end $f$;`;
+  await caso('Clientes nuevos→Odoo: varias coincidencias por RIF → el admin elige una de ellas (no un contacto cualquiera, no "crear otro", no dos veces)',
+    (r) => r?.vinculo === 'varias' && /no está entre las coincidencias/.test(r?.ajeno || '') && /mismo RIF/.test(r?.crear || '') && r?.elegido === 999999101 && /en curso/.test(r?.doble || ''),
+    como({ empresa: guds.id, previo: previoVarias([{ id: 999999101, coincide: 'rif' }, { id: 999999102, coincide: 'rif' }]) }, `select public.p20s_elegir(999999101)`));
+  await caso('Clientes nuevos→Odoo: coincidencias solo por nombre (otro RIF) → el admin puede crear un cliente nuevo en Odoo',
+    (r) => r?.crear === 'ok' && r?.elegido === 'crear',
+    como({ empresa: guds.id, previo: previoVarias([{ id: 999999103, coincide: 'nombre', rif_distinto: true }]) }, `select public.p20s_elegir(999999103)`));
+
+  // Límite de crédito: pendiente → a la cola al editarlo; se apaga al escribirse (solo si no cambió mientras tanto)
+  await caso('Límites→Odoo: el admin edita el límite de un cliente de Odoo → pendiente y a la cola',
+    (r) => r?.pendiente === true && r?.n === 1,
+    como({ empresa: guds.id, previo: `create function public.p20s_limite(c uuid) returns text language plpgsql as $f$
+        begin
+          update public.clientes set limite_credito = coalesce(limite_credito, 0) + 123 where id = c;
+          return json_build_object('pendiente', (select limite_credito_pendiente from public.clientes where id = c),
+            'n', (select count(*) from public.odoo_escrituras where tipo = 'cliente_limite' and referencia_id = c and estado = 'pendiente'))::text;
+        end $f$;` }, `select public.p20s_limite('${cliOdoo}')`));
+  await caso('Límites→Odoo: al quedar escrito en Odoo se apaga el pendiente; si el límite cambió mientras tanto, sigue pendiente',
+    (r) => r?.a === true && r?.pa === false && r?.b === false && r?.pb === true,
+    como({ rol: 'postgres', uid: null, empresa: guds.id, previo: `${cliPrueba(U(13), 'Prueba 20s Ficticia Limite', 'J-99999991-2')}
+        ${cliPrueba(U(14), 'Prueba 20s Ficticia Limite Dos', 'J-99999990-6')}
+        update public.clientes set limite_credito_pendiente = true where id in ('${U(13)}', '${U(14)}');
+        create function public.p20s_marcar() returns text language plpgsql as $f$
+        declare a boolean; b boolean;
+        begin
+          a := public.marcar_limite_credito_enviado('${U(13)}', 150);
+          b := public.marcar_limite_credito_enviado('${U(14)}', 99);
+          return json_build_object('a', a, 'pa', (select limite_credito_pendiente from public.clientes where id = '${U(13)}'),
+            'b', b, 'pb', (select limite_credito_pendiente from public.clientes where id = '${U(14)}'))::text;
+        end $f$;` }, `select public.p20s_marcar()`));
+  if (qaVend20s) {
+    await caso('Límites→Odoo: un vendedor no cambia límites (ni encola)', (r, e) => !!e || r?.n === 0,
+      como({ uid: qaVend20s, empresa: guds.id }, `with x as (update clientes set limite_credito = 1 where id = '${cliOdoo}' returning id) select row_to_json(t)::text from (select count(*) n from x) t`));
+  }
+
+  // Contactos: el admin los crea o edita → a la cola; desactivar no se envía; nadie fija su odoo_id; sin cliente en Odoo esperan
+  await caso('Contactos→Odoo: crear y editar se encolan; desactivar no; el odoo_id no se fija desde la API; los de un cliente sin Odoo esperan',
+    (r) => r?.crear === 1 && r?.odoo_id === null && r?.editar === 1 && r?.desactivar === 0 && r?.sin_odoo === 0,
+    como({ empresa: guds.id, previo: `${cliPrueba(U(15), 'Prueba 20s Ficticia Sin Odoo', 'J-99999989-1')}
+        create function public.p20s_contactos(c uuid) returns text language plpgsql as $f$
+        declare k uuid; k2 uuid; r jsonb := '{}'; n0 int;
+        begin
+          insert into public.cliente_contactos (cliente_id, nombre, cargo, odoo_id) values (c, 'Contacto Prueba 20s', 'Compras', 123456789) returning id into k;
+          r := r || jsonb_build_object('crear', (select count(*) from public.odoo_escrituras where tipo = 'persona_contacto' and referencia_id = k and datos ->> 'accion' = 'crear'),
+            'odoo_id', (select odoo_id from public.cliente_contactos where id = k));
+          perform public.p20s_fijar(k);
+          update public.cliente_contactos set cargo = 'Gerente de compras' where id = k;
+          r := r || jsonb_build_object('editar', (select count(*) from public.odoo_escrituras where tipo = 'persona_contacto' and referencia_id = k and datos ->> 'accion' = 'editar'));
+          n0 := (select count(*) from public.odoo_escrituras where tipo = 'persona_contacto' and referencia_id = k);
+          update public.cliente_contactos set activo = false where id = k;
+          r := r || jsonb_build_object('desactivar', (select count(*) from public.odoo_escrituras where tipo = 'persona_contacto' and referencia_id = k) - n0);
+          insert into public.cliente_contactos (cliente_id, nombre) values ('${U(15)}', 'Contacto Espera') returning id into k2;
+          r := r || jsonb_build_object('sin_odoo', (select count(*) from public.odoo_escrituras where tipo = 'persona_contacto' and referencia_id = k2));
+          return r::text;
+        end $f$;
+        create function public.p20s_fijar(k uuid) returns void language plpgsql security definer set search_path = public as $x$
+        declare c text := current_setting('request.jwt.claims', true);
+        begin
+          -- Como la función edge (sin sesión de usuario): liga el contacto y da por hecho su envío
+          perform set_config('request.jwt.claims', '', true);
+          update cliente_contactos set odoo_id = 999999201 where id = k;
+          update odoo_escrituras set estado = 'hecha' where referencia_id = k;
+          perform set_config('request.jwt.claims', c, true);
+        end $x$;` },
+      `select public.p20s_contactos('${cliOdoo}')`));
+  if (qaVend20s) {
+    await caso('Contactos→Odoo: un vendedor no crea contactos de clientes (ni encola)', (r, e) => !!e || r?.n === 0,
+      como({ uid: qaVend20s, empresa: guds.id }, `with x as (insert into cliente_contactos (cliente_id, nombre) values ('${cliOdoo}', 'Contacto Vendedor') returning id)
+        select row_to_json(t)::text from (select count(*) n from x) t`));
+  }
+
+  // Registro público: siempre entra pendiente y sin datos de revisión; el estado de Venezuela se normaliza
+  await caso('Registro público: entra pendiente aunque lo manden aprobado; el estado de Venezuela se normaliza',
+    (r) => r?.estado === 'pendiente' && r?.cliente_creado_id === null && r?.uso_cliente_existente === false && r?.estado_ve === 'Bolívar',
+    como({ rol: 'anon', uid: null, empresa: guds.id, previo: `create function public.p20s_leer_registro(p uuid) returns text language sql security definer set search_path = public
+        as 'select row_to_json(t)::text from (select estado, cliente_creado_id, uso_cliente_existente, estado_ve from registros_clientes where id = p) t';
+        grant execute on function public.p20s_leer_registro(uuid) to anon;
+        create function public.p20s_registro_anon() returns text language plpgsql as $f$
+        begin
+          insert into public.registros_clientes (id, nombre_negocio, nombre_contacto, email, telefono, direccion, ciudad, rif, tipo_negocio, estado, empresa_id,
+            cliente_creado_id, uso_cliente_existente, estado_ve)
+          values ('${U(20)}', 'Prueba 20s Ficticia Anonima', 'Ana', 'registro.20s.anon@guds.test', '0414', 'Calle 1', 'Ciudad Bolívar', 'J-99999988-4', 'Farmacia',
+            'aprobado', '${guds.id}', '${cliGuds}', true, 'Bolivar. (VE)');
+          return public.p20s_leer_registro('${U(20)}');
+        end $f$;
+        grant execute on function public.p20s_registro_anon() to anon;` }, `select public.p20s_registro_anon()`));
+
+  // Reglas de datos (SQL): RIF y estado inferido
+  await caso('Clave de RIF: J-12345678-9 = J123456789 = J-12345678; cédula de 7 dígitos con 0; N/D sin clave',
+    (r) => r?.a === 'J12345678' && r?.a === r?.b && r?.a === r?.c && r?.d === 'V01234567' && r?.e === null,
+    como({ rol: 'postgres', uid: null }, `select json_build_object('a', public.clave_rif('J-12345678-9'), 'b', public.clave_rif('j123456789'), 'c', public.clave_rif('J-12345678'),
+      'd', public.clave_rif('V-1234567'), 'e', public.clave_rif('N/D'))::text`));
+  await caso('Estado inferido: "Valencia" → Carabobo, "Av. Bolívar, Caracas" → Distrito Capital, "Edo. Miranda", "Ciudad Bolívar"; texto sin pistas → nada',
+    (r) => r?.a === 'Carabobo' && r?.b === 'Distrito Capital' && r?.c === 'Miranda' && r?.d === 'Bolívar' && r?.e === null,
+    como({ rol: 'postgres', uid: null }, `select json_build_object('a', public.inferir_estado_ve('Valencia'), 'b', public.inferir_estado_ve('Av. Bolívar, Caracas'),
+      'c', public.inferir_estado_ve('Sector La Macarena, Edo. Miranda'), 'd', public.inferir_estado_ve('Ciudad Bolívar'), 'e', public.inferir_estado_ve('Calle 5 con Av. 3'))::text`));
+
+  // Funciones internas cerradas; las de la API sin anon; las SECURITY DEFINER validan al llamador
+  await caso('Clientes nuevos→Odoo: funciones internas cerradas (anon y authenticated) y las de la API sin anon', (r) => r?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace and (
+      (p.proname in ('clave_rif', 'inferir_estado_ve', 'buscar_cliente_existente', 'nombre_usuario_actual', 'encolar_cliente_nuevo', 'aplicar_vinculo_cliente_odoo',
+         'registrar_revision_cliente_odoo', 'registrar_error_cliente_odoo', 'marcar_limite_credito_enviado', 'trg_cliente_odoo_protegido', 'trg_contacto_odoo_protegido',
+         'trg_registro_cliente_normalizar', 'trg_cliente_sin_duplicados', 'trg_cliente_nuevo_odoo', 'trg_contacto_odoo_encolar', 'trg_cliente_limite_odoo_encolar', 'encolar_escritura_odoo')
+        and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute')))
+      or (p.proname in ('aprobar_registro_cliente', 'previsualizar_registro_cliente', 'puede_crear_cliente_odoo', 'elegir_cliente_odoo', 'completar_cliente_odoo',
+         'enviar_cliente_odoo', 'enviar_contactos_odoo', 'enviar_limite_credito_odoo', 'reintentar_escritura_cliente', 'historial_escrituras_cliente', 'estado_odoo_cliente')
+        and has_function_privilege('anon', p.oid, 'execute')))) t`));
+  await caso('Clientes nuevos→Odoo: las acciones SECURITY DEFINER validan al llamador (sesión + permiso de administración)', (r) => r?.n === 10 && r?.total === 10,
+    como({}, `select row_to_json(t)::text from (select count(*) filter (where pg_get_functiondef(p.oid) ~ '(puede_crear_cliente_odoo|puede_editar_cliente_odoo)\\(|es_personal_admin\\(\\)') n,
+      count(*) total from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosecdef
+      and p.proname in ('aprobar_registro_cliente', 'previsualizar_registro_cliente', 'elegir_cliente_odoo', 'completar_cliente_odoo', 'enviar_cliente_odoo',
+        'enviar_contactos_odoo', 'enviar_limite_credito_odoo', 'reintentar_escritura_cliente', 'historial_escrituras_cliente', 'estado_odoo_cliente')) t`));
+
+  // Reglas del escritor (JS, sin tocar Odoo): no duplicar en Odoo por RIF ni por nombre, y guardas de odoo.js
+  const { decidirVinculo } = await import('../supabase/functions/_shared/odoo-sync/escribir-cliente-nuevo.js');
+  const { crearClienteOdoo, formaAltaPartner } = await import('../supabase/functions/_shared/odoo-sync/odoo.js');
+  const P = (id, name, vat, extra = {}) => ({ id, name, vat, rif: vat, cedula: false, company_id: [1, 'GUDS'], active: true, customer_rank: 1, supplier_rank: 0, ...extra });
+  const yo = { rif: 'J-12345678-9', nombre: 'Farmacia Ficticia Uno, C.A.' };
+  const reglas = [
+    ['RIF igual en otro formato (J123456789) → enlaza, no crea', decidirVinculo(yo, [P(1, 'OTRO NOMBRE', 'J123456789')]), (d) => d.accion === 'enlazar' && d.partner.id === 1],
+    ['RIF igual sin dígito verificador (cédula J-12345678) → enlaza', decidirVinculo(yo, [P(2, 'X', false, { cedula: 'J-12345678', rif: false })]), (d) => d.accion === 'enlazar'],
+    ['Dos contactos con el mismo RIF → no crea: administración elige (sin "crear nuevo")', decidirVinculo(yo, [P(3, 'A', 'J-123456789'), P(4, 'B', 'J-12345678-9')]),
+      (d) => d.accion === 'revisar' && d.puede_crear === false && d.candidatos.length === 2],
+    ['RIF igual pero archivado → no crea ni enlaza solo', decidirVinculo(yo, [P(5, 'A', 'J-123456789', { active: false })]), (d) => d.accion === 'revisar' && d.puede_crear === false],
+    ['RIF igual ya ligado a otro cliente de GUDS → no enlaza', decidirVinculo(yo, [P(6, 'A', 'J-123456789')], new Map([[6, { id: 'x', nombre: 'Otro' }]])),
+      (d) => d.accion === 'revisar'],
+    ['Mismo nombre ("FARMACIA FICTICIA UNO CA") y otro RIF → no crea solo: administración decide (puede crear)', decidirVinculo(yo, [P(7, 'FARMACIA FICTICIA UNO CA', 'J-87654321-0')]),
+      (d) => d.accion === 'revisar' && d.puede_crear === true && d.candidatos[0].rif_distinto],
+    ['Mismo nombre y sin RIF en Odoo → enlaza', decidirVinculo(yo, [P(8, 'Farmacia Ficticia Uno', false)]), (d) => d.accion === 'enlazar' && d.partner.id === 8],
+    ['Sin coincidencias → crea', decidirVinculo(yo, [P(9, 'Otra Farmacia', 'J-11111111-1')]), (d) => d.accion === 'crear'],
+  ];
+  for (const [nombre, d, ok] of reglas) casos.push({ ok: ok(d) ? '✓' : '✗', caso: `Escritor Odoo: ${nombre}`, resultado: JSON.stringify({ accion: d.accion, motivo: d.motivo }).slice(0, 100) });
+  const odooFalso = crearClienteOdoo({ url: 'http://127.0.0.1:9', db: 'x', usuario: 'x', apiKey: 'x', timeoutMs: 500 });
+  const rechaza = async (fn) => { try { await fn(); return 'NO RECHAZÓ'; } catch (e) { return e.message; } };
+  const guardas = [
+    ['crear un cliente sin la marca "(GUDS)"', () => formaAltaPartner({ name: 'X', company_id: 1, customer_rank: 1, comment: 'Hola' }), /marca "\(GUDS\)"/],
+    ['crear un cliente con campos fuera de la lista (active)', () => formaAltaPartner({ name: 'X', company_id: 1, customer_rank: 1, comment: '(GUDS) x', active: false }), /no permitidos/],
+    ['crear un contacto hijo sin la marca "(GUDS)"', () => formaAltaPartner({ parent_id: 5, type: 'contact', name: 'X' }), /marca "\(GUDS\)"/],
+    ['archivar un contacto (write active)', () => odooFalso.escribir('res.partner', [5], { active: false }, 1), /no permitidos/],
+    ['un límite de crédito negativo', () => odooFalso.escribir('res.partner', [5], { credit_limit: -1 }, 1), /mayor o igual a 0/],
+    ['una nota que no empieza con "(GUDS)"', () => odooFalso.nota('res.partner', 5, 'Hola', 1), /empiezan con "\(GUDS\)"/],
+    ['una nota en un modelo no permitido (account.move)', () => odooFalso.nota('account.move', 5, '(GUDS) x', 1), /no deja notas/],
+  ];
+  for (const [nombre, fn, re] of guardas) {
+    const m = await rechaza(fn);
+    casos.push({ ok: re.test(m) ? '✓' : '✗', caso: `odoo.js bloquea ${nombre}`, resultado: m.slice(0, 100) });
+  }
+}
+
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {
   const pol = await sql(String.raw`select tablename || '.' || policyname p, coalesce(qual,'') || ' ' || coalesce(with_check,'') t from pg_policies where schemaname = 'public'`);

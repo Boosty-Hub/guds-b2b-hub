@@ -9,7 +9,12 @@
 // el plan exacto de escrituras. aplicar = true: relee el documento justo antes, escribe, valida y confirma leyendo el documento.
 // Nunca borra ni cancela nada; si el documento ya está validado en Odoo no escribe nada. No cambia el comportamiento de
 // Odoo al validar (p. ej. el SMS de confirmación al cliente se envía igual que al validar a mano).
+// Decisión C del dueño (29-sep): a Odoo solo van las cantidades entregadas y la validación; la foto, la firma, el receptor y
+// la reprogramación viven solo en GUDS (no se adjuntan ni se cambia la fecha en Odoo). Al validar se deja una nota interna
+// "(GUDS)" en el documento con las cantidades, quién y cuándo (decisión D); en modo simular la nota queda solo en el plan.
 import { m2oId, m2oNombre } from './odoo.js';
+import { fechaCaracas } from './util.js';
+import { dejarNota } from './notas.js';
 
 const EPS = 1e-6;
 const r4 = (n) => Math.round(Number(n || 0) * 10000) / 10000;
@@ -39,7 +44,7 @@ async function leerDocumento(odoo, pid, cid) {
 const firma = (doc) => JSON.stringify({ s: doc.p.state, w: doc.p.write_date, m: doc.moves.map((m) => [m.id, m.state, r4(m.quantity), m.picked]),
   l: doc.lineas.map((l) => [l.id, r4(l.quantity)]) });
 
-export async function escribirEntrega({ odoo, sql, fila, aplicar, log = () => {} }) {
+export async function escribirEntrega({ odoo, sql, fila, aplicar, log = () => {}, quien = 'GUDS' }) {
   const d = fila.datos || {};
   const pid = Number(d.transferencia_odoo_id);
   if (!Number.isInteger(pid) || pid <= 0) throw new Error('La escritura no trae el documento de Odoo');
@@ -197,10 +202,15 @@ export async function escribirEntrega({ odoo, sql, fila, aplicar, log = () => {}
   // Mismo efecto que el asistente de pendiente de Odoo: "Crear pendiente" (process) o "Sin pendiente" (process_cancel_backorder)
   const contexto = crearPendiente ? { skip_backorder: true } : { skip_backorder: true, picking_ids_not_to_backorder: [pid] };
   const validacion = { modelo: 'stock.picking', metodo: 'button_validate', ids: [pid], contexto };
+  const nota = { modelo: 'stock.picking', id: pid,
+    texto: `(GUDS) Entrega ${d.resultado === 'completa' ? 'completa' : 'incompleta'} registrada en GUDS por ${quien}`
+      + `${d.cerrada_at ? ` el ${fechaCaracas(d.cerrada_at)}` : ''} y validada desde GUDS. Entregado: `
+      + `${lineas.map((l) => `${String(l.producto || '').slice(0, 50)} ${l.entregada} de ${l.reservada}`).join('; ')}. `
+      + `${!quedaAlgo ? 'Sin pendiente.' : crearPendiente ? 'Lo no entregado queda en un pendiente (backorder).' : 'Sin pendiente (no entregado por otros motivos).'}` };
   const plan = {
     modo: aplicar ? 'activo' : 'simulacion', resultado: d.resultado, documento, crear_pendiente: crearPendiente, motivo_pendiente: motivoPendiente,
     lineas: lineas.map(({ picked, ...l }) => ({ ...l, lotes: l.lotes.map(({ picked: _p, ...x }) => x) })),
-    escrituras, validacion, advertencias,
+    escrituras, validacion, advertencias, nota: { ...nota, simulada: !aplicar },
   };
   if (!aplicar) {
     log(`${p.name}: simulación → ${escrituras.length} escrituras + button_validate (${crearPendiente ? 'con' : 'sin'} pendiente)`);
@@ -230,9 +240,10 @@ export async function escribirEntrega({ odoo, sql, fila, aplicar, log = () => {}
       + `${hechas.length ? `; ya se escribieron ${hechas.length} cambios de cantidad` : ''}. Revisar y validar a mano en Odoo`);
   }
   const pendientes = await odoo.leer('stock.picking', 'search_read', [[['backorder_id', '=', pid]]], { fields: ['name', 'state'] }, cid);
+  const notaHecha = await dejarNota(odoo, nota, cid, true);
   log(`${p.name} validado en Odoo${pendientes.length ? ` · pendiente ${pendientes.map((b) => b.name).join(', ')}` : ''}`);
   return {
-    ...plan, resultado_odoo: 'validado', escrituras_hechas: hechas,
+    ...plan, resultado_odoo: 'validado', escrituras_hechas: hechas, nota: notaHecha,
     respuesta: esAsistente ? { asistente: respuesta.res_model } : respuesta === true ? true : typeof respuesta === 'object' ? { tipo: respuesta?.type ?? null } : respuesta ?? null,
     documento_final: { estado: despues.state, fecha_validado: despues.date_done },
     pendientes: pendientes.map((b) => ({ id: b.id, nombre: b.name, estado: b.state })),

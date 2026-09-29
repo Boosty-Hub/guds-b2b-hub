@@ -21,7 +21,11 @@ const ESTADO: Record<EscrituraCliente["estado"], { label: string; cls: string }>
 const fecha = (d: string) => new Date(d).toLocaleString("es-VE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 const que = (e: EscrituraCliente) =>
-  e.tipo === "cliente_contacto" ? "Teléfonos / dirección" : `${e.accion === "crear" ? "Nueva dirección" : "Dirección"}: ${e.direccion ?? "—"}`;
+  e.tipo === "cliente_contacto" ? "Teléfonos / dirección"
+    : e.tipo === "cliente_nuevo" ? "Alta del cliente en Odoo"
+      : e.tipo === "persona_contacto" ? `${e.accion === "crear" ? "Contacto nuevo" : "Contacto"}: ${e.direccion ?? "—"}`
+        : e.tipo === "cliente_limite" ? "Límite de crédito"
+          : `${e.accion === "crear" ? "Nueva dirección" : "Dirección"}: ${e.direccion ?? "—"}`;
 
 /** Últimos cambios del cliente enviados a Odoo (quién, cuándo, qué, estado), con reintentar los que fallaron. */
 export function HistorialOdooCliente({ clienteId, version }: { clienteId: string; version: number }) {

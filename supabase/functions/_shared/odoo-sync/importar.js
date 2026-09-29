@@ -234,6 +234,19 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       extra.forEach((c) => clientesLeidos.add(c.id));
       log(`    ${d.emp.nombre_corto}: +${extra.length} clientes con documentos pero sin marca de cliente en Odoo`);
     }
+    // Clientes creados o enlazados desde GUDS (20s) que Odoo no marca como clientes y aún no tienen documentos (p. ej. un
+    // proveedor con el mismo RIF): se leen igual, para que la sincronización los actualice por odoo_id (sin duplicar la fila)
+    const ligadosGuds = (await sql(`select odoo_id from clientes where odoo_vinculo in ('creado', 'enlazado') and odoo_id is not null`))
+      .map((x) => x.odoo_id).filter((id) => !clientesLeidos.has(id));
+    for (const [i, d] of datos.entries()) {
+      const faltan = ligadosGuds.filter((id) => !clientesLeidos.has(id));
+      if (!faltan.length) break;
+      const deEmpresa = i === 0 ? ['|', ['company_id', '=', d.cid], ['company_id', '=', false]] : [['company_id', '=', d.cid]];
+      const extra = await odoo.leerTodo('res.partner', [['id', 'in', faltan], ...deEmpresa], CAMPOS_CLIENTE, { empresa: d.cid });
+      d.clientes.push(...extra);
+      extra.forEach((c) => clientesLeidos.add(c.id));
+      if (extra.length) log(`    ${d.emp.nombre_corto}: +${extra.length} clientes creados o enlazados desde GUDS`);
+    }
 
     const idsClientes = [...new Set(datos.flatMap((d) => d.clientes.map((c) => c.id)))];
     const direcciones = idsClientes.length

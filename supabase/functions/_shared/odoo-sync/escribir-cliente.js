@@ -11,12 +11,17 @@
 // Siempre lee Odoo y arma el plan: en modo simular (aplicar = false) lo devuelve sin escribir en Odoo ni tocar GUDS.
 // Si Odoo acepta, relee el registro y deja la ficha de GUDS con lo que quedó en Odoo (el mismo mapeo que importar.js),
 // para no esperar a la próxima sincronización. Solo usa `escribir`/`crear` de odoo.js: nunca borra nada en Odoo.
+// Cada cambio aplicado deja una nota interna "(GUDS)" en el cliente en Odoo (decisión D, 29-sep); si la nota falla, el cambio
+// no se revierte y el error queda en el resultado.
 import { m2oId, m2oNombre } from './odoo.js';
-import { txt } from './util.js';
+import { txt, fechaCaracas } from './util.js';
+import { dejarNota, cambiosTexto } from './notas.js';
 
 const CAMPOS_PARTNER = ['name', 'type', 'parent_id', 'company_id', 'street', 'street2', 'city', 'state_id', 'country_id',
   'phone', 'mobile', 'active'];
 const CAMPOS_DIRECCION = ['street', 'street2', 'city', 'state_id', 'country_id'];
+const ETIQUETA = { phone: 'Teléfono', mobile: 'Celular', street: 'Calle', street2: 'Complemento', city: 'Ciudad', state_id: 'Estado', country_id: 'País' };
+const conEtiquetas = (cambios) => cambios.map((c) => ({ ...c, etiqueta: ETIQUETA[c.campo] ?? c.campo }));
 
 const lit = (v) => (v === null || v === undefined ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
 // "Bolívar", "Bolivar." y "Bolivar. (VE)" son el mismo estado
@@ -52,7 +57,7 @@ async function leerPartner(odoo, id, cid = null) {
   return p ?? null;
 }
 
-async function buscarEstado(odoo, nombre) {
+export async function buscarEstado(odoo, nombre) {
   const estados = await odoo.leer('res.country.state', 'search_read', [[['country_id.code', '=', 'VE']]], { fields: ['name', 'country_id'] });
   const hallados = estados.filter((s) => normEstado(s.name) === normEstado(nombre));
   if (hallados.length !== 1) throw new Error(`Odoo: no se encontró el estado "${nombre}" de Venezuela`);
@@ -96,7 +101,7 @@ const resumenPartner = (p) => p && ({
 });
 
 // ── Contacto del cliente ───────────────────────────────────────────────────
-async function escribirContacto({ odoo, sql, fila, aplicar, log }) {
+async function escribirContacto({ odoo, sql, fila, aplicar, log, quien }) {
   const campos = fila.datos?.campos || {};
   await reemplazada(sql, fila);
   const [c] = await sql(`select id, odoo_id, empresa_id, nombre_negocio from clientes where id = ${lit(fila.referencia_id)}`);
@@ -115,7 +120,9 @@ async function escribirContacto({ odoo, sql, fila, aplicar, log }) {
     contactosHijos = hijos.filter((h) => CAMPOS_DIRECCION.some((k) => k in vals && valorOdoo(h[k]) !== valorOdoo(vals[k]))).length;
   }
   const plan = { partner: c.odoo_id, empresa_odoo: cid, vals, cambios: diferencias(antes, vals, estado), contactos_hijos: contactosHijos, antes: resumenPartner(antes) };
-  if (!aplicar) return { modo: 'simulacion', ...plan };
+  const nota = { modelo: 'res.partner', id: c.odoo_id,
+    texto: `(GUDS) Teléfonos / dirección actualizados desde GUDS por ${quien} el ${fechaCaracas()}: ${cambiosTexto(conEtiquetas(plan.cambios)) || 'sin diferencias con Odoo'}.` };
+  if (!aplicar) return { modo: 'simulacion', ...plan, nota: { ...nota, simulada: true } };
 
   await odoo.escribir('res.partner', [c.odoo_id], vals, cid);
   const despues = await leerPartner(odoo, c.odoo_id, cid);
@@ -123,12 +130,13 @@ async function escribirContacto({ odoo, sql, fila, aplicar, log }) {
       direccion = ${lit(direccionGuds(despues))}, calle = ${lit(txt(despues.street))}, complemento = ${lit(txt(despues.street2))},
       ciudad = ${lit(txt(despues.city, 100))}, estado = ${lit(m2oNombre(despues.state_id))}, updated_at = now()
     where id = ${lit(c.id)}`);
+  const notaHecha = await dejarNota(odoo, nota, cid, true);
   log(`cliente ${c.nombre_negocio} (Odoo ${c.odoo_id}): ${Object.keys(vals).join(', ')}`);
-  return { modo: 'aplicada', ...plan, despues: resumenPartner(despues), no_aplicados: noAplicados(despues, vals) };
+  return { modo: 'aplicada', ...plan, despues: resumenPartner(despues), no_aplicados: noAplicados(despues, vals), nota: notaHecha };
 }
 
 // ── Direcciones de entrega ─────────────────────────────────────────────────
-async function editarDireccion({ odoo, sql, fila, aplicar, log }) {
+async function editarDireccion({ odoo, sql, fila, aplicar, log, quien }) {
   const campos = fila.datos?.campos || {};
   await reemplazada(sql, fila);
   const [d] = await sql(`select d.id, d.odoo_id, d.nombre, c.id cliente_id, c.odoo_id cliente_odoo_id, c.empresa_id
@@ -144,7 +152,9 @@ async function editarDireccion({ odoo, sql, fila, aplicar, log }) {
   const { vals, estado } = await valsDesde(odoo, campos, antes);
   if (!Object.keys(vals).length) throw new Error('No hay datos para enviar a Odoo');
   const plan = { accion: 'editar', partner: d.odoo_id, empresa_odoo: cid, vals, cambios: diferencias(antes, vals, estado), antes: resumenPartner(antes) };
-  if (!aplicar) return { modo: 'simulacion', ...plan };
+  const nota = { modelo: 'res.partner', id: d.cliente_odoo_id,
+    texto: `(GUDS) Dirección de entrega "${d.nombre ?? d.odoo_id}" actualizada desde GUDS por ${quien} el ${fechaCaracas()}: ${cambiosTexto(conEtiquetas(plan.cambios)) || 'sin diferencias con Odoo'}.` };
+  if (!aplicar) return { modo: 'simulacion', ...plan, nota: { ...nota, simulada: true } };
 
   await odoo.escribir('res.partner', [d.odoo_id], vals, cid);
   const despues = await leerPartner(odoo, d.odoo_id, cid);
@@ -152,11 +162,12 @@ async function editarDireccion({ odoo, sql, fila, aplicar, log }) {
       complemento = ${lit(txt(despues.street2))}, ciudad = ${lit(txt(despues.city))},
       estado = ${lit(m2oNombre(despues.state_id))}, telefono = ${lit(txt(despues.phone) || txt(despues.mobile))}, updated_at = now()
     where id = ${lit(d.id)}`);
+  const notaHecha = await dejarNota(odoo, nota, cid, true);
   log(`dirección ${d.nombre ?? d.odoo_id} (Odoo ${d.odoo_id}): ${Object.keys(vals).join(', ')}`);
-  return { modo: 'aplicada', ...plan, despues: resumenPartner(despues), no_aplicados: noAplicados(despues, vals) };
+  return { modo: 'aplicada', ...plan, despues: resumenPartner(despues), no_aplicados: noAplicados(despues, vals), nota: notaHecha };
 }
 
-async function crearDireccion({ odoo, sql, fila, aplicar, log }) {
+async function crearDireccion({ odoo, sql, fila, aplicar, log, quien }) {
   const campos = fila.datos?.campos || {};
   if (!txt(campos.nombre)) throw new Error('La dirección nueva necesita un nombre');
   const [c] = await sql(`select id, odoo_id, empresa_id, nombre_negocio from clientes where id = ${lit(fila.referencia_id)}`);
@@ -175,7 +186,9 @@ async function crearDireccion({ odoo, sql, fila, aplicar, log }) {
     ['name', '=', vals.name], ['street', '=', vals.street]]], { fields: ['id'], limit: 1 }, cid);
   const existente = previa?.id || iguales[0]?.id || null;
   const plan = { accion: 'crear', padre: c.odoo_id, empresa_odoo: cid, vals, existente };
-  if (!aplicar) return { modo: 'simulacion', ...plan };
+  const nota = { modelo: 'res.partner', id: c.odoo_id,
+    texto: `(GUDS) Dirección de entrega "${vals.name}" ${existente ? 'enlazada' : 'agregada'} desde GUDS por ${quien} el ${fechaCaracas()}: ${[vals.street, vals.street2, vals.city].filter(Boolean).join(', ')}.` };
+  if (!aplicar) return { modo: 'simulacion', ...plan, nota: { ...nota, simulada: true } };
 
   let nuevoId = existente;
   if (!nuevoId) {
@@ -194,16 +207,17 @@ async function crearDireccion({ odoo, sql, fila, aplicar, log }) {
       complemento = excluded.complemento, ciudad = excluded.ciudad,
       estado = excluded.estado, telefono = excluded.telefono, activo = excluded.activo, updated_at = now()
     returning id`);
+  const notaHecha = await dejarNota(odoo, nota, cid, true);
   log(`dirección nueva "${vals.name}" de ${c.nombre_negocio}: Odoo ${p.id}${existente ? ' (ya existía)' : ''}`);
-  return { modo: 'aplicada', ...plan, odoo_id_creado: p.id, direccion_id: g?.id ?? null, ya_existia: !!existente, despues: resumenPartner(p) };
+  return { modo: 'aplicada', ...plan, odoo_id_creado: p.id, direccion_id: g?.id ?? null, ya_existia: !!existente, despues: resumenPartner(p), nota: notaHecha };
 }
 
-export async function escribirCliente({ odoo, sql, fila, aplicar, log = () => {} }) {
-  if (fila.tipo === 'cliente_contacto') return escribirContacto({ odoo, sql, fila, aplicar, log });
+export async function escribirCliente({ odoo, sql, fila, aplicar, log = () => {}, quien = 'GUDS' }) {
+  if (fila.tipo === 'cliente_contacto') return escribirContacto({ odoo, sql, fila, aplicar, log, quien });
   if (fila.tipo === 'cliente_direccion') {
     return fila.datos?.accion === 'crear'
-      ? crearDireccion({ odoo, sql, fila, aplicar, log })
-      : editarDireccion({ odoo, sql, fila, aplicar, log });
+      ? crearDireccion({ odoo, sql, fila, aplicar, log, quien })
+      : editarDireccion({ odoo, sql, fila, aplicar, log, quien });
   }
   throw new Error(`escribirCliente: tipo ${fila.tipo} no soportado`);
 }

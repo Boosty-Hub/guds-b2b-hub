@@ -12,8 +12,12 @@
 // - Al vincular, el pedido y sus líneas quedan con su odoo_id: la sincronización periódica los actualiza desde Odoo
 //   (Odoo manda) sin duplicarlos. `numero` pasa a ser el de Odoo y el de GUDS queda en `numero_guds`.
 //
+// - Al crearla deja una nota interna "(GUDS)" en la cotización con quién la aprobó (decisión D, 29-sep); si la nota falla,
+//   el pedido no se revierte y el error queda en el resultado.
+//
 // Uso: enviarPedido({ odoo, sql, ordenId, aplicar, log }) — `sql(query)` como en importar.js (rol postgres).
 import { m2oId, m2oNombre } from './odoo.js';
+import { dejarNota } from './notas.js';
 
 const lit = (v) => (v === null || v === undefined ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
 const escaparHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -35,7 +39,7 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
   if (aplicar && o.aprobacion !== 'aprobada') throw new Error(`El pedido ${o.numero} no está aprobado (aprobación: ${o.aprobacion ?? '—'})`);
   if (aplicar && !o.aprobado_por) throw new Error(`El pedido ${o.numero} no tiene registrado quién lo aprobó`);
   if (!o.odoo_company_id) throw new Error('La empresa del pedido no está ligada a Odoo');
-  if (!o.cliente_odoo_id) throw new Error(`El cliente ${o.nombre_negocio} no existe en Odoo (primero hay que crearlo)`);
+  if (!o.cliente_odoo_id) throw new Error(`El cliente ${o.nombre_negocio} no existe en Odoo (primero hay que crearlo): el pedido se envía solo cuando GUDS termine de crearlo o enlazarlo en Odoo`);
   const items = await sql(`
     select i.id, i.cantidad, i.precio_unitario, i.descuento, coalesce(i.unidades_por_empaque, 1) unidades, i.nombre_producto,
            p.odoo_id plantilla, p.nombre, p.sku
@@ -118,6 +122,7 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
 
   // 4. Crear (o tomar la existente) y leerla de vuelta
   let odooId = existentes[0]?.id ?? null;
+  const creadaAhora = !odooId;
   try {
     if (!odooId) odooId = await odoo.crear('sale.order', vals, cid);
   } catch (e) {
@@ -156,6 +161,10 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
     where id = ${lit(o.id)} and odoo_id is null;
     ${updLineas};
     commit;`);
+  const notaHecha = creadaAhora
+    ? await dejarNota(odoo, { modelo: 'sale.order', id: odooId, texto: `(GUDS) Pedido ${o.numero} creado desde la plataforma GUDS. ${aprobacionTxt}` }, cid, true)
+    : null;
+  if (notaHecha && !notaHecha.ok) log(`⚠ ${so.name}: no se pudo dejar la nota (GUDS): ${notaHecha.error}`);
   log(`✓ Creada en Odoo: ${so.name} (${o.nombre_corto}) · ${ref} · total ${so.amount_total} ${m2oNombre(so.currency_id)} · ${lineasOdoo.length} línea(s)`);
-  return { ...resumen, odoo: { id: odooId, ...so, lineas: lineasOdoo }, lineasVinculadas: pares.filter((x) => x.linea).length };
+  return { ...resumen, odoo: { id: odooId, ...so, lineas: lineasOdoo }, lineasVinculadas: pares.filter((x) => x.linea).length, nota: notaHecha };
 }
