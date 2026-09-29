@@ -110,8 +110,9 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 - Interfaz: indicador **"Odoo · hace X min"** en el header (verde/ámbar/rojo) con **"Sincronizar ahora"** para quien
   puede editar Configuración (`solicitar_sync_odoo()`; el secreto nunca llega al navegador).
 - Secretos de la función: `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_API_KEY` (la de Freddy Cardoso), `SYNC_ODOO_SECRET`.
-  **La API key de Odoo del grupo "Internal User" vence a los 90 días**: al vencer, el indicador se pone rojo y hay que
-  generar otra y actualizar el secreto `ODOO_API_KEY` (y `.env.local`).
+  La API key actual (creada el 26-sep) **no tiene fecha de vencimiento** en Odoo (`res.users.apikeys.expiration_date` vacío,
+  verificado el 29-sep). Si se revoca o se cambia, el indicador se pone rojo y hay que actualizar el secreto `ODOO_API_KEY`
+  (y `.env.local`).
 - Verificado: diagnóstico del adaptador SQL, simulación y corrida aplicada en la nube, disparo por pg_net y por un job
   de cron de prueba, cuadre 68/68, 74 pruebas de base y e2e del indicador ("Sincronizar ahora" termina en ~66 s).
 
@@ -361,7 +362,7 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 29 | Contactos creados en GUDS no existen en Odoo | Fase 9 (crearlos como contacto hijo, marcados "(GUDS)") |
 | 30 | ~~Reportes (ventas por empresa, vendedor, producto; cobranza; inventario)~~ | ✅ `/admin/reportes` (migración 18u), ver "Reportes" en la Fase 8 |
 | 31 | **Documentos que no son venta**: 986 facturas + 353 NC del "Diario Saldo Inicial CXC" y 113 del "ND CxC Saldos Iniciales" (saldos de apertura migrados a Odoo, fechados 2021–2026) y 493 notas del diario "Nota debito cliente" en Bs con cuenta *Diferencia en cambio* y 0 en USD (ajustes cambiarios). GUDS ahora guarda el diario (`facturas.diario_odoo`, `es_saldo_inicial`) y marca como ND lo emitido en diarios de ND | ✅ migración 18t + importador; los reportes de ventas los excluyen |
-| 32 | Los montos negativos se muestran como `$-1,234.69` (formato de `formatPrice`) | Cosmético |
+| 32 | ~~Los montos negativos se mostraban como `$-1,234.69`~~ | ✅ `-$1,234.69` / `-Bs. …` (29-sep) |
 | 33 | **Envío**: GUDS cobra $50 en pedidos menores de $500. Decisión (28-sep): va como línea de servicio. En Odoo no hay un servicio vendible de envío | Contabilidad crea el servicio en Odoo (cuenta de ingresos + IVA) y se configura su código en Políticas de venta; mientras tanto va como nota |
 | 34 | S00927 (prueba) quedó con almacén G-CONSIGNADO REPRESENTACIONES FAW; los envíos nuevos usan P-01 | Si se confirma, cambiar almacén en Odoo (GUDS no edita en Odoo) |
 | 35 | ~~Vendedor y repartidor veían toda la empresa; vendedor podía autoaprobar; cualquiera borraba fotos de productos; cliente insertaba pagos "verificados"; empaque sin precio a precio unitario~~ | ✅ migraciones 19i–19k |
@@ -375,4 +376,7 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 43 | 64 documentos marcados anulados que Odoo aún tiene con saldo ("por cruzar" con su NC) | Contabilidad los cruza en Odoo; en GUDS no se pueden pagar |
 | 44 | Clasificación comercial casi vacía en Odoo: marca (`product_brand_id`) sin datos, Industria cargada en 3 clientes, canal y segmento vacíos | Cargarla en Odoo; GUDS ya la sincroniza (20q) |
 | 45 | 48 productos con ventas en categorías marcadas inactivas en GUDS (todas las de Quirutec) y 241 clientes sin condición de pago | Corregir en Categorías de GUDS y en Odoo (lista en Calidad y cuadre) |
-| 46 | Ningún vendedor tiene teléfono cargado (el ejecutivo de cuenta del portal sale sin WhatsApp) | Cargar el celular de cada vendedor |
+| 46 | 16 de 19 vendedores sin teléfono (el ejecutivo de cuenta del portal sale sin WhatsApp) | Cargar el celular de cada vendedor |
+| 47 | **Aprobar un registro crea el cliente solo en GUDS** (sin `odoo_id`): sus pedidos no pueden enviarse a Odoo ("el cliente no existe en Odoo"). Hay 3 registros pendientes | Fase 9b: crear el cliente en Odoo al aprobar, sin duplicar por RIF ni nombre (decisión 3 del 27-sep) |
+| 48 | Los roles **Almacén** y **Contador** existen sin ningún permiso | Configurar en Roles (Almacén: inventario ver/editar para devoluciones) |
+| 49 | La IA de la conciliación bancaria no responde: la cuenta de la API de Anthropic no tiene saldo (verificado 29-sep); la conciliación por reglas funciona | Cargar saldo en esa cuenta |

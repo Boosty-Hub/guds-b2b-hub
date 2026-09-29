@@ -80,11 +80,13 @@ export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
     // Robusto ante null/undefined/NaN (datos importados pueden venir sin valor).
     const n = Number(priceUSD);
     const safe = Number.isFinite(n) ? n : 0;
+    // El signo va antes del símbolo (-$1,234.69), no entre el símbolo y la cifra
+    const signo = safe < 0 && Math.abs(safe) >= 0.005 ? "-" : "";
     if (currency === "USD") {
-      return `$${safe.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `${signo}$${Math.abs(safe).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     } else {
-      const priceBS = convertToBS(safe);
-      return `Bs. ${priceBS.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const priceBS = convertToBS(Math.abs(safe));
+      return `${signo}Bs. ${priceBS.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
   };
 

@@ -72,10 +72,14 @@ const METODOS = [
   { tipo: "efectivo", label: "Efectivo" },
 ];
 
-const fmtMoneda = (n: number, moneda: string) =>
-  moneda === "USD"
-    ? `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : `Bs. ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// El signo va antes del símbolo (-$1,234.69)
+const fmtMoneda = (n: number, moneda: string) => {
+  const signo = n < 0 && Math.abs(n) >= 0.005 ? "-" : "";
+  const v = Math.abs(n);
+  return moneda === "USD"
+    ? `${signo}$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `${signo}Bs. ${v.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
 
 const emptyForm = {
   nombre: "", metodos: ["transferencia"], moneda: "USD", numero_cuenta: "", titular: "", documento: "", activo: true,

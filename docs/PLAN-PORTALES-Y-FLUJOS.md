@@ -209,10 +209,10 @@ el detalle. "Facturado" y "NC" están inflados por facturas erróneas revertidas
 
 | # | Decisión | Qué implica |
 |---|---|---|
-| 7 | **Dominio**: la plataforma pasa a `portal.guds-supply.com` | ✅ URL del sitio y redirecciones de acceso configuradas; correos de acceso en español; página `/restablecer-clave` (probada de punta a punta). El dominio de correo está verificado en el proveedor, pero **Supabase aún no tiene el SMTP** (falta la clave SMTP del proveedor) |
+| 7 | **Dominio**: la plataforma pasa a `portal.guds-supply.com` | ✅ URL del sitio y redirecciones de acceso configuradas; correos de acceso en español; página `/restablecer-clave` (probada de punta a punta). Correo de acceso por SMTP de Resend desde `no-responder@portal.guds-supply.com` (28-sep) |
 | 8 | **Pago móvil y Zelle**: pago móvil es la forma de pago de los bancos venezolanos (teléfono, cédula/RIF, código del banco); Zelle es un correo registrado en el banco de EE. UU. | ✅ 19l: campos en Bancos (admin → Bancos → editar), se ofrecen al cliente solo si la cuenta tiene sus datos |
 | 9 | **Momento de facturar**: el almacén deja de validar al despachar; la factura sale tras la entrega | D7 |
-| 10 | **Usuario de API dedicado** en Odoo (Ventas + Inventario) | Lo crea el administrador de Odoo; piloto con 1 documento antes de activar D7 |
+| 10 | ~~Usuario de API dedicado~~ → el dueño decidió usar siempre la API key actual (Freddy) | Piloto con 1 documento antes de activar D7 |
 | 11 | **Incompleta** → pendiente o no según el motivo; **rechazo** → administración decide en Odoo (GUDS no anula) | D4/D7 |
 | 12 | **Precio por empaque** = precio por unidad × unidades (19k) | Confirmado |
 | 13 | **Pago después de aprobado**; **crédito abierto** con aviso por deuda vencida > 30 días; aprobación el mismo día hábil | F3/F5, V2 |

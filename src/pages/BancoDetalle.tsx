@@ -39,10 +39,13 @@ const ORIGEN_MOV: Record<string, string> = {
   por_identificar: "Por identificar", manual: "Manual",
 };
 const fmtMoneda = (n: number | null | undefined, moneda: string) => {
-  const v = Number(n || 0);
+  const n0 = Number(n || 0);
+  // El signo va antes del símbolo (-$1,234.69)
+  const signo = n0 < 0 && Math.abs(n0) >= 0.005 ? "-" : "";
+  const v = Math.abs(n0);
   return moneda === "USD"
-    ? `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : `Bs. ${v.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    ? `${signo}$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `${signo}Bs. ${v.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 const fmtFecha = (d?: string | null) => (d ? new Date(d.length === 10 ? `${d}T00:00:00` : d).toLocaleDateString("es-VE") : "—");
 
