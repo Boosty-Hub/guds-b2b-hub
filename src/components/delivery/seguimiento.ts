@@ -160,7 +160,7 @@ export const TIPO_CUADRE: Record<TipoCuadre, { label: string; corto: string; cls
   },
   pendiente_odoo: {
     label: "Cerrada en GUDS · Odoo abierta", corto: "Odoo aún abierta", cls: "border-sky-300 bg-sky-50 text-sky-900 dark:bg-sky-500/15 dark:text-sky-200",
-    ayuda: "Entregada en GUDS y el documento sigue abierto en Odoo. Es lo normal mientras la escritura de entregas en Odoo está en modo simulación.",
+    ayuda: "Entregada en GUDS y el documento sigue abierto en Odoo. Con la escritura de entregas activa se valida en minutos; si sigue abierta, revisa el error de la escritura en el detalle de la entrega o valídala en Odoo.",
   },
   cuadrada: {
     label: "Cuadrada", corto: "Cuadrada", cls: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200",
