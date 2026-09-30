@@ -32,6 +32,9 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
   caracteres del español y grosores 400–700, precargado y con caché de un año. Lighthouse móvil 89–93 (±1 frente a sin letra).
 - Verificado: pruebas de base (399 casos; la de stock comprometido no aplica hoy por falta de datos), `tsc`, `vite build`,
   Playwright (letra en admin, vendedor y portal; indicadores corregidos) y corrida de sincronización 'ok'.
+- **Netlify no publica desde el 29-sep 05:11 UTC** ("Skipped due to account credit usage exceeded"): los commits fbea19a →
+  d39fc52 están en main pero el sitio sigue con 8452bcc (28-sep). Base, funciones y sincronización sí están al día (Supabase) y la
+  versión publicada es compatible con ellas. Hace falta recargar créditos o subir de plan en Netlify y volver a publicar.
 
 ## 2026-09-29 · Decisiones A–H: clientes nuevos a Odoo (9b), entregas activas, notas "(GUDS)", productos solo se editan, rol Contador
 
