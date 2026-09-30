@@ -6,8 +6,9 @@ import { round2, stripHtml, txt, jsonbLit, lotes, fechaOdoo } from './util.js';
 
 const nombreDoc = (name, id) => (name && name !== '/' ? txt(name) : `ODOO-${id}`);
 const ESTADO_OC = { draft: 'borrador', sent: 'enviada', 'to approve': 'por_aprobar', purchase: 'confirmada', done: 'bloqueada', cancel: 'cancelada' };
-const estadoPago = (state, ps) => (state === 'cancel' || ps === 'reversed' ? 'anulado' : ps === 'paid' ? 'pagado'
-  : ps === 'partial' || ps === 'in_payment' ? 'parcial' : 'pendiente');
+// "En pago" en Odoo = pagada por completo, con el pago aún sin conciliar con el banco (saldo 0): para GUDS está pagada
+const estadoPago = (state, ps) => (state === 'cancel' || ps === 'reversed' ? 'anulado' : ps === 'paid' || ps === 'in_payment' ? 'pagado'
+  : ps === 'partial' ? 'parcial' : 'pendiente');
 const estadoPagoProv = (s) => (s === 'paid' || s === 'in_process' ? 'verificado' : s === 'draft' ? 'pendiente' : 'rechazado');
 const estadoRet = (s) => (s === 'cancel' ? 'anulado' : s === 'draft' ? 'borrador' : 'confirmado');
 

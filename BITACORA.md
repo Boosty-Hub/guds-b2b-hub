@@ -10,6 +10,29 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-09-29 · Repaso completo de la sincronización con Odoo y letra Plus Jakarta Sans (decisión F)
+
+- **Repaso Odoo ↔ GUDS** (solo lectura): `cuadre-odoo.mjs` 68/68 tras el arreglo de abajo (montos, saldos, cobros, compras,
+  existencias, lotes, transferencias, extractos y coherencia entre empresas); nuevo `scripts/repaso-odoo.mjs` sin huérfanos en
+  productos, facturas, transferencias, cobros y clientes; órdenes por estado, facturas por estado de pago y documentos de entrega
+  abiertos iguales en ambas empresas; saldo de las 26 cuentas de banco y caja igual al de Odoo; lo último modificado en Odoo está
+  reflejado. Cron: 149 corridas correctas en 72 h, sin fallas en 7 días, 55–85 s por corrida (fotos < 1 s).
+- **Arreglos**:
+  - Órdenes borradas en Odoo (S00921 y S00922, cotizaciones en borrador) seguían "pendientes" en GUDS: el importador las marca
+    canceladas con `estado_odoo = 'eliminada'` (tope de seguridad si faltan demasiadas) y la línea de tiempo dice "Eliminada en
+    Odoo" sin avisar al cliente si nació en Odoo (`…20u_ordenes_eliminadas_odoo.sql`).
+  - Facturas "en pago" en Odoo (pagadas, con el cobro sin conciliar con el banco) figuraban "parciales": ahora "pagado" en
+    facturas de clientes (1.258) y de proveedores (249); Cuentas por pagar ya no muestra pagadas como parciales.
+  - Una corrida que la función no llega a cerrar (p. ej. por un despliegue) queda "interrumpida" en la siguiente, en vez de
+    "en curso" para siempre.
+  - Pantallas: "Clientes con deuda" usa la deuda neta en Cuentas por cobrar y en el dashboard (antes 187 y 184); el dashboard
+    muestra "agotados" con la definición de Inventario (antes "poco stock" con un umbral fijo de 10 unidades).
+- Cifras en pantalla cotejadas con Odoo por empresa y en "Ambas": por cobrar, por pagar, bancos y entregas listas.
+- **Letra**: Plus Jakarta Sans servida desde el sitio (`public/fonts`, licencia OFL): recorte propio de 17 KB con los
+  caracteres del español y grosores 400–700, precargado y con caché de un año. Lighthouse móvil 89–93 (±1 frente a sin letra).
+- Verificado: pruebas de base (399 casos; la de stock comprometido no aplica hoy por falta de datos), `tsc`, `vite build`,
+  Playwright (letra en admin, vendedor y portal; indicadores corregidos) y corrida de sincronización 'ok'.
+
 ## 2026-09-29 · Decisiones A–H: clientes nuevos a Odoo (9b), entregas activas, notas "(GUDS)", productos solo se editan, rol Contador
 
 - **Fase 9b completa** (`…20s_clientes_nuevos_odoo.sql`, agente): al aprobar un registro, si ya existe en GUDS (mismo RIF

@@ -2,7 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+/* Plus Jakarta Sans (decisión F, 29-sep), servida desde el propio sitio, licencia OFL (public/fonts/OFL-PlusJakartaSans.txt).
+   plus-jakarta-sans-es-v1: recorte propio con los caracteres del español (ASCII, Latin-1, comillas, rayas, €, flechas) y el
+   eje de grosor acotado a 400–700 (17 KB); se precarga en index.html. El extendido (Google, 200–800) solo se descarga si
+   aparece un carácter de su rango. Si se cambia el archivo, cambiar el nombre (-v2): tiene caché de un año.
+   (Antes un @import después de @tailwind la descartaba y nunca cargó.) */
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/plus-jakarta-sans-es-v1.woff2') format('woff2');
+  unicode-range: U+0020-007E, U+00A0-00FF, U+2010-2027, U+2030, U+2032-2033, U+2039-203A, U+20AC, U+2122, U+2190-2193, U+2212;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/plus-jakarta-sans-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 /* Barra de scroll delgada y discreta ("flotante") para los contenedores de tablas */
 .table-scroll {
@@ -182,7 +202,7 @@ html.densidad-comoda {
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   }
 }
 

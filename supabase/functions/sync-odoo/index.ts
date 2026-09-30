@@ -110,6 +110,11 @@ async function sincronizar(simular: boolean) {
     // Limpieza: trazas y simulaciones de más de 2 días, corridas de más de 60
     await sql(`delete from sync_corridas where (modo in ('traza', 'simulacion') and iniciado_en < now() - interval '2 days')
       or iniciado_en < now() - interval '60 days'`);
+    // Corridas que quedaron "en curso" porque la función terminó sin cerrarlas (despliegue, límite de tiempo): se cierran
+    // como interrumpidas para que el historial y el indicador no las den por vivas
+    await sql(`update sync_corridas set estado = 'error', terminado_en = now(),
+        error = coalesce(error, 'Interrumpida: la función terminó antes de cerrar la corrida (despliegue o límite de tiempo)')
+      where estado = 'en_curso' and iniciado_en < now() - interval '15 minutes'`);
     // Traza de progreso (etapa, segundos, memoria) para ver hasta dónde llega si la plataforma corta la función
     [{ id: trazaId }] = await sql(`insert into sync_corridas (modo, origen, estado, resumen) values ('traza', 'edge-cron', 'en_curso',
       jsonb_build_object('simular', ${simular}, 'etapas', '[]'::jsonb)) returning id`) as { id: string }[];

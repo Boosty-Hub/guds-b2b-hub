@@ -313,7 +313,8 @@ const CuentasPorCobrar = () => {
           tono: "negativo",
           detalle: Math.abs(totalAFavor) > 0.009 ? `Facturas ${formatPrice(totalPorCobrar)} · a favor ${formatPrice(totalAFavor)}` : undefined,
         },
-        { label: "Clientes con deuda", valor: deudores.length, tono: "alerta" },
+        // Deuda neta (facturas menos notas de crédito), igual que "Por cobrar (neto)" y el dashboard
+        { label: "Clientes con deuda", valor: deudores.filter((d) => d.neto > 0.009).length, tono: "alerta" },
         { label: "Cobros registrados", valor: cobros.length, tono: "positivo" },
         { label: "Anticipos sin aplicar", valor: formatPrice(anticipos.reduce((s, a) => s + Number(a.disponible), 0)), tono: "primario" },
       ]} />

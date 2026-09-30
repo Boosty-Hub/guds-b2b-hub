@@ -435,3 +435,6 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
 | 52 | Los clientes que GUDS crea en Odoo no llevan posición fiscal (el contribuyente especial va en el comentario); las posiciones fiscales tienen nombres cruzados entre compañías ("75 % Contribuyente Ordinario" en GUDS, "75 % contribuyente especial" en Quirutec) | Contabilidad asigna la posición fiscal en Odoo; si se unifican los nombres, GUDS podría asignarla |
 | 53 | Datos de contacto de relleno en la landing, el registro, Soporte y Privacidad (teléfonos, correos y horario inventados) | ✅ 29-sep: se muestran solo el teléfono, correo y ciudad reales de la empresa (tabla `empresas`, hoy vacíos: cargarlos en Configuración → Empresas) |
 | 54 | Términos y Condiciones y Política de Privacidad son textos de plantilla (Términos dice "Diciembre 2024"; Privacidad muestra la fecha del día) | Que el dueño o su asesor legal los revisen |
+| 55 | ~~Órdenes borradas en Odoo seguían "pendientes" en GUDS~~ (S00921, S00922) | ✅ 20u: canceladas con `estado_odoo = eliminada`, sin borrar en GUDS |
+| 56 | ~~Facturas "en pago" en Odoo (pagadas, sin conciliar con el banco) figuraban "parciales"~~ | ✅ 29-sep: "pagado" en clientes y proveedores |
+| 57 | ~~Una corrida cortada por un despliegue quedaba "en curso" para siempre~~ | ✅ 29-sep: la siguiente corrida la cierra como interrumpida |

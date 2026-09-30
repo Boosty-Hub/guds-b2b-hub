@@ -61,8 +61,9 @@ function estadoOrden(state, delivery) {
 }
 function estadoPagoFactura(state, ps) {
   if (state === 'cancel') return 'anulado';
-  if (ps === 'paid') return 'pagado';
-  if (ps === 'partial' || ps === 'in_payment') return 'parcial';
+  // "En pago" en Odoo = pagada por completo, con el cobro aún sin conciliar con el banco (saldo 0): para GUDS está pagada
+  if (ps === 'paid' || ps === 'in_payment') return 'pagado';
+  if (ps === 'partial') return 'parcial';
   if (ps === 'reversed') return 'anulado';
   return 'pendiente';
 }
@@ -905,6 +906,22 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           is distinct from (excluded.empresa_id, excluded.numero, excluded.cliente_id, excluded.subtotal, excluded.impuesto, excluded.total,
             excluded.estado, excluded.estado_odoo, excluded.moneda_original, excluded.fecha_pedido, excluded.vendedor_odoo,
             coalesce(excluded.vendedor_id, ordenes.vendedor_id), excluded.notas)`);
+      }
+      // Órdenes borradas en Odoo (Odoo solo deja borrar borradores o canceladas): en GUDS no se borran (trazabilidad),
+      // quedan canceladas con estado_odoo 'eliminada' (20u). Tope de seguridad: si faltan demasiadas, la lectura pudo quedar
+      // incompleta y no se toca nada.
+      {
+        const idsOdoo = `array[${ordenes.map((o) => o.odoo_id).join(',') || 0}]::int[]`;
+        const [{ n: faltan }] = await sql(`select count(*)::int n from ordenes where empresa_id = '${E}' and odoo_id is not null
+          and odoo_id <> all (${idsOdoo}) and coalesce(estado_odoo, '') <> 'eliminada'`);
+        if (faltan && faltan <= Math.max(10, Math.round(ordenes.length * 0.02))) {
+          await escribir(`
+            update ordenes set estado = 'cancelado', estado_odoo = 'eliminada', odoo_sync_at = '${ts}', updated_at = now()
+            where empresa_id = '${E}' and odoo_id is not null and odoo_id <> all (${idsOdoo}) and coalesce(estado_odoo, '') <> 'eliminada'`);
+          log(`    ${emp.nombre_corto}: ${faltan} orden(es) borrada(s) en Odoo quedan canceladas en GUDS ("eliminada")`);
+        } else if (faltan) {
+          log(`    AVISO ${emp.nombre_corto}: ${faltan} órdenes de GUDS no aparecen en Odoo; son demasiadas para marcarlas solas (¿lectura incompleta?)`);
+        }
       }
       for (const lote of lotes(lineas, 1000)) {
         await escribir(`

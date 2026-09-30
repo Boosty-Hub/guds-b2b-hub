@@ -106,8 +106,8 @@ const Index = () => {
       supabase.from('clientes').select('id', { count: 'exact' }).gte('created_at', startOfWeek),
       // Total productos
       supabase.from('productos').select('id', { count: 'exact' }).eq('activo', true),
-      // Productos bajo stock
-      supabase.from('productos').select('id', { count: 'exact', head: true }).lt('stock_actual', 10).eq('activo', true).eq('controla_stock', true),
+      // Productos agotados: misma definición que Inventario (almacenables activos con existencia en cero)
+      supabase.from('productos').select('id', { count: 'exact', head: true }).lte('stock_actual', 0).eq('activo', true).or('controla_stock.is.null,controla_stock.eq.true'),
       // Ventas del mes
       supabase.from('ordenes').select('total').gte('created_at', startOfMonth),
       // Ventas mes anterior
@@ -189,7 +189,7 @@ const Index = () => {
         { label: "Cartera de vendedores", valor: formatPrice(stats.carteraVendedores), onClick: () => navigate("/admin/vendedores") },
         { label: "Anticipos sin aplicar", valor: formatPrice(stats.anticiposSinAplicar), onClick: () => navigate("/admin/cuentas-por-cobrar") },
         { label: "Clientes activos", valor: stats.clientesActivos, detalle: `+${stats.clientesNuevosSemana} esta semana`, onClick: () => navigate("/admin/clientes") },
-        { label: "Productos", valor: stats.totalProductos, detalle: `${stats.productosBajoStock} con poco stock`, tono: stats.productosBajoStock > 0 ? "alerta" : "normal", onClick: () => navigate("/admin/inventario") },
+        { label: "Productos", valor: stats.totalProductos, detalle: `${stats.productosBajoStock} agotados`, tono: stats.productosBajoStock > 0 ? "alerta" : "normal", onClick: () => navigate("/admin/inventario") },
       ]} />
       {op && (
         <KpiStrip items={[

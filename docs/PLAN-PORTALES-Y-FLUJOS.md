@@ -233,7 +233,7 @@ el detalle. "Facturado" y "NC" están inflados por facturas erróneas revertidas
 | C | **Entregas**: a Odoo solo cantidades entregadas y estado entregado; foto, firma y reprogramación viven en GUDS | ✅ `odoo_escritura_entregas` = activo desde el 29-sep 07:02 |
 | D | **Notas "(GUDS)"** en Odoo | ✅ 20s: nota interna (sin correos) en clientes, productos, documentos de entrega y pedidos |
 | E | **Productos nacen en Odoo** y se editan en GUDS; nombre, código, categoría e IVA quedan bloqueados | ✅ 20t: sin crear, importar ni borrar en GUDS |
-| F | **Letra de la plataforma** | Pendiente: se mostró la comparación (letra del sistema frente a Plus Jakarta Sans) |
+| F | **Letra de la plataforma**: Plus Jakarta Sans | ✅ Servida desde el sitio (17 KB, recorte con los caracteres del español); Lighthouse móvil 89–93 |
 | G | **Rol Contador** con lo financiero y sus ediciones | ✅ 20t |
 | H | **S00927** (cotización de prueba) | Se deja como está en Odoo |
 
