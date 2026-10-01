@@ -2910,6 +2910,67 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
         where tipo = 'cliente_contacto' and referencia_id = '${cliOdoo}' order by created_at desc limit 1) t`));
 }
 
+// ── Fase 21e: listas de precios de GUDS (precio por producto, historial, asignación, RLS de precios por cliente) ──
+{
+  const L = '21e00000-0000-4000-8000-000000000001';
+  const prodQ = (await sql(`select id from productos where empresa_id = '${qrt.id}' and activo order by nombre limit 2`)).map((r) => r.id);
+  const prodG = (await sql(`select id from productos where empresa_id = '${guds.id}' and activo limit 1`))[0].id;
+  const cliQ = (await sql(`select id from clientes where empresa_id = '${qrt.id}' and activo and not es_empleado limit 1`))[0].id;
+  const listaOdooQ = (await sql(`select id from listas_precios where empresa_id = '${qrt.id}' and odoo_id is not null limit 1`))[0].id;
+  const cliDeUser = cliUser ? (await sql(`select cliente_id from usuarios where auth_id = '${cliUser}'`))[0]?.cliente_id : null;
+  const empCliUser = cliDeUser ? (await sql(`select empresa_id from clientes where id = '${cliDeUser}'`))[0]?.empresa_id : null;
+  const Qa = { empresa: qrt.id };
+  const crear = (emp = qrt.id, id = L) => `insert into listas_precios (id, nombre, empresa_id, moneda, activo, es_default, porcentaje_descuento)
+    values ('${id}', 'Prueba 21e', '${emp}', 'USD', true, false, 0);`;
+  const comoAdmin = (emp) => `perform set_config('request.jwt.claims', '${claimsAdmin}', true); perform set_config('request.headers', '${hdr(emp)}', true);`;
+  const items = (arr) => lit(JSON.stringify(arr)) + '::jsonb';
+
+  await caso('Listas 21e: guardar precios a mano deja historial (2 nuevos, 1 cambiado, 1 quitado)', (r) => r?.n === 1 && r?.precio === 11 && r?.hist === 4 && r?.origenes === 'manual',
+    como({ ...Qa, previo: crear() + comoAdmin(qrt.id) + `
+      perform public.guardar_precios_lista('${L}', ${items([{ producto_id: prodQ[0], precio: 10 }, { producto_id: prodQ[1], precio: 5.5 }])});
+      perform public.guardar_precios_lista('${L}', ${items([{ producto_id: prodQ[0], precio: 11 }, { producto_id: prodQ[1], precio: null }])});` },
+      `select row_to_json(t)::text from (select (select count(*) from precios_lista where lista_precios_id = '${L}') n,
+        (select precio::float from precios_lista where lista_precios_id = '${L}' and producto_id = '${prodQ[0]}') precio,
+        (select count(*) from precios_lista_historial where lista_precios_id = '${L}') hist,
+        (select string_agg(distinct origen, ',') from precios_lista_historial where lista_precios_id = '${L}') origenes) t`));
+  await caso('Listas 21e: una lista de Odoo no se edita en GUDS', 'viene de Odoo',
+    como(Qa, `select public.guardar_precios_lista('${listaOdooQ}', ${items([{ producto_id: prodQ[0], precio: 1 }])})::text`));
+  await caso('Listas 21e: un producto de otra empresa se rechaza', 'otra empresa',
+    como({ ...Qa, previo: crear() }, `select public.guardar_precios_lista('${L}', ${items([{ producto_id: prodG, precio: 1 }])})::text`));
+  await caso('Listas 21e: un precio negativo se rechaza', 'Precio no válido',
+    como({ ...Qa, previo: crear() }, `select public.guardar_precios_lista('${L}', ${items([{ producto_id: prodQ[0], precio: -1 }])})::text`));
+  await caso('Listas 21e: la importación queda registrada con sus no encontrados', (r) => r?.cargas === 1 && r?.ne === 1 && r?.cambio === true,
+    como({ ...Qa, previo: crear() + comoAdmin(qrt.id) + `
+      perform public.guardar_precios_lista('${L}', ${items([{ producto_id: prodQ[0], precio: 8 }])}, 'importacion', 'lista.xlsx', '[{"fila": 3, "codigo": "X"}]'::jsonb);` },
+      `select row_to_json(t)::text from (select count(*) cargas, max(jsonb_array_length(no_encontrados)) ne,
+        bool_and(exists (select 1 from precios_lista_historial h where h.carga_id = c.id)) cambio from precios_lista_cargas c where lista_precios_id = '${L}') t`));
+  await caso('Listas 21e: no se asigna la lista a un cliente de otra empresa', 'otra empresa',
+    como({ ...Qa, previo: crear() }, `select public.asignar_lista_clientes('${L}', array['${cliOdoo}']::uuid[])::text`));
+  await caso('Listas 21e: asignar la lista cambia el precio efectivo del cliente', (r) => r?.asignados === 1 && r?.efectivo === 10,
+    como({ ...Qa, previo: crear() + comoAdmin(qrt.id) + `
+      perform public.guardar_precios_lista('${L}', ${items([{ producto_id: prodQ[0], precio: 10 }])});
+      perform public.asignar_lista_clientes('${L}', array['${cliQ}']::uuid[]);` },
+      `select row_to_json(t)::text from (select (select count(*) from clientes where lista_precios_id = '${L}') asignados,
+        public.precio_efectivo('${prodQ[0]}', null, '${cliQ}')::float efectivo) t`));
+  if (vendGuds) {
+    await caso('Listas 21e: un vendedor no edita precios de listas', 'No tienes permiso',
+      como({ uid: vendGuds, empresa: guds.id, previo: crear(guds.id) }, `select public.guardar_precios_lista('${L}', ${items([{ producto_id: prodG, precio: 1 }])})::text`));
+  }
+  await caso('Listas 21e: anónimo no ejecuta las funciones de listas', (r, err) => /permission denied/.test(err || ''),
+    como({ rol: 'anon', uid: null }, `select public.guardar_precios_lista('${L}', '[]'::jsonb)::text`));
+  if (cliUser && cliDeUser && empCliUser) {
+    // Lista con precio asignada a OTRO cliente: el usuario del portal no la ve; asignada a SU cliente, sí
+    const precio = `insert into precios_lista (lista_precios_id, producto_id, precio, empresa_id)
+      select '${L}', p.id, 1, '${empCliUser}' from productos p where (p.empresa_id = '${empCliUser}' or p.empresa_id is null) and p.activo limit 1;`;
+    await caso('Listas 21e: un cliente del portal no lee la lista de precios de otro cliente', (r) => r?.precios === 0 && r?.listas === 0,
+      como({ uid: cliUser, previo: crear(empCliUser) + precio + `update clientes set lista_precios_id = '${L}' where id = (select id from clientes where empresa_id = '${empCliUser}' and id <> '${cliDeUser}' and public.normalizar_rif(coalesce(rif, '')) is distinct from (select public.normalizar_rif(rif) from clientes where id = '${cliDeUser}') limit 1);` },
+        `select row_to_json(t)::text from (select (select count(*) from precios_lista where lista_precios_id = '${L}') precios, (select count(*) from listas_precios where id = '${L}') listas) t`));
+    await caso('Listas 21e: un cliente del portal sí lee la lista que tiene asignada', (r) => r?.precios === 1,
+      como({ uid: cliUser, previo: crear(empCliUser) + precio + `update clientes set lista_precios_id = '${L}' where id = '${cliDeUser}';` },
+        `select row_to_json(t)::text from (select count(*) precios from precios_lista where lista_precios_id = '${L}') t`));
+  }
+}
+
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {
   const pol = await sql(String.raw`select tablename || '.' || policyname p, coalesce(qual,'') || ' ' || coalesce(with_check,'') t from pg_policies where schemaname = 'public'`);

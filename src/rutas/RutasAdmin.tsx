@@ -31,6 +31,7 @@ const TransferenciaDetalle = pagina(["transferencias/:transferenciaId"], () => i
 const LoteDetalle = pagina(["lotes/:loteId"], () => import("../pages/LoteDetalle"));
 const Consignacion = pagina(["consignacion"], () => import("../pages/Consignacion"));
 const Precios = pagina(["precios"], () => import("../pages/Precios"));
+const ListaPreciosDetalle = pagina(["precios/listas/:listaId"], () => import("../pages/ListaPreciosDetalle"));
 const Cuentas = pagina(["cuentas"], () => import("../pages/Cuentas"));
 const CuentaDetalle = pagina(["cuentas/:clienteId"], () => import("../pages/CuentaDetalle"));
 const Pagos = pagina(["pagos"], () => import("../pages/Pagos"));
@@ -100,6 +101,7 @@ export default function RutasAdmin() {
       <Route path="lotes/:loteId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><LoteDetalle /></ProtectedRoute>} />
       <Route path="consignacion" element={<ProtectedRoute allowedRoles={["admin"]} modulo="inventario"><Consignacion /></ProtectedRoute>} />
       <Route path="precios" element={<ProtectedRoute allowedRoles={["admin"]} modulo="precios"><Precios /></ProtectedRoute>} />
+      <Route path="precios/listas/:listaId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="precios"><ListaPreciosDetalle /></ProtectedRoute>} />
       <Route path="cuentas" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Cuentas /></ProtectedRoute>} />
       <Route path="cuentas/:clienteId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><CuentaDetalle /></ProtectedRoute>} />
       <Route path="pagos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Pagos /></ProtectedRoute>} />

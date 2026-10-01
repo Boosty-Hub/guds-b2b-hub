@@ -676,6 +676,10 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
             is distinct from (excluded.empresa_id, excluded.nombre, excluded.moneda, excluded.activo)`);
       }
 
+      // Lista de precios: la de Odoo, salvo que el cliente tenga una lista creada en GUDS (odoo_id vacío, fase 21e),
+      // que Odoo todavía no conoce y no se pisa.
+      const LISTA_CLIENTE = `case when exists (select 1 from listas_precios lg where lg.id = clientes.lista_precios_id and lg.odoo_id is null)
+              then clientes.lista_precios_id else coalesce(excluded.lista_precios_id, clientes.lista_precios_id) end`;
       for (const lote of lotes(clientes, 500)) {
         await escribir(`
           insert into clientes (odoo_id, empresa_id, codigo, nombre_negocio, rif, cedula, email, telefono, celular, direccion, calle, complemento, ciudad,
@@ -695,7 +699,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
             longitud = excluded.longitud, es_empresa = excluded.es_empresa, tipo_negocio = excluded.tipo_negocio,
             tipo_residencia = excluded.tipo_residencia, vendedor_odoo = excluded.vendedor_odoo,
             vendedor_asignado_id = coalesce(excluded.vendedor_asignado_id, clientes.vendedor_asignado_id),
-            lista_precios_id = coalesce(excluded.lista_precios_id, clientes.lista_precios_id),
+            lista_precios_id = ${LISTA_CLIENTE},
             condicion_pago = excluded.condicion_pago, dias_credito = excluded.dias_credito,
             limite_credito = case when clientes.limite_credito_pendiente then clientes.limite_credito else excluded.limite_credito end,
             licencia_actividad = excluded.licencia_actividad, sitio_web = excluded.sitio_web, notas = excluded.notas,
@@ -709,7 +713,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
             excluded.tipo_residencia, excluded.vendedor_odoo, coalesce(excluded.vendedor_asignado_id, clientes.vendedor_asignado_id),
             excluded.condicion_pago, excluded.dias_credito, case when clientes.limite_credito_pendiente then clientes.limite_credito else excluded.limite_credito end,
             excluded.licencia_actividad, excluded.sitio_web,
-            excluded.notas, excluded.activo, coalesce(excluded.lista_precios_id, clientes.lista_precios_id))`);
+            excluded.notas, excluded.activo, ${LISTA_CLIENTE})`);
       }
 
       // Clasificación comercial de Odoo (R2 · 20q): tipo de cliente (Industria), canal, segmento y etiquetas del contacto.

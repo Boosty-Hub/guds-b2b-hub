@@ -10,6 +10,32 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-01 · Listas de precios de GUDS producto por producto (fase 5 / 21e, sin escritura en Odoo)
+
+- **Pedido del usuario:** listas personalizadas con un precio distinto por producto, escrito a mano: la lista completa de
+  productos desplegada con el campo editable. Nueva pantalla `/admin/precios/listas/:id`: todos los productos vendibles de
+  la empresa (sin paginar), precio por unidad en USD editable por fila (Enter/↓ pasa a la siguiente, Esc deshace),
+  cambios resaltados hasta "Guardar", diferencia vs precio base, filtros por categoría y estado; ajuste masivo (% sobre
+  base o lista, precio fijo, quitar), copiar de otra lista, importar Excel/CSV con vista previa (código y luego nombre;
+  nuevo/sube/baja/no encontrado) y exportar (sirve de plantilla); pestañas Clientes (agregar por búsqueda/vendedor,
+  quitar) e Historial (cada cambio con origen y quién, e importaciones).
+- **Base (`…fase21e_listas_precios.sql`):** historial y registro de cargas; RPC `guardar_precios_lista` y
+  `asignar_lista_clientes` (permiso `precios`, empresa, solo listas de GUDS). Lista de GUDS = `odoo_id` vacío.
+- **Seguridad:** `precios_lista` y `listas_precios` eran legibles por cualquier usuario con sesión (un cliente habría
+  visto los precios negociados de otros; hoy las listas estaban vacías). Ahora: personal con permiso o la lista de sus
+  clientes (`listas_del_usuario()`).
+- **Sync:** `importar.js` ya no pisa la lista de un cliente si es de GUDS (antes la cambiaba cada 15 min por la de Odoo).
+  `sync-odoo` redesplegado; corrida `ok` conservando la lista asignada.
+- El precio ya llegaba solo a todos lados: `precio_efectivo()` usa la lista en portal, vendedor y pedidos, y la
+  cotización a Odoo lleva `price_unit` por línea. Se quitó el "% descuento" de la lista, que el cálculo nunca usó.
+- **Verificación:** Playwright en Quirutec 12/12 (crear, 41 filas = SQL, Enter, guardar, masivo, importar CSV, asignar,
+  precio efectivo, RLS, sync, 390 px sin desborde) y limpieza; suite multiempresa con bloque 21e.
+- **Pendiente:** 5.4/5.5 escribir listas y asignaciones en Odoo (necesita autorización); primera carga con las listas
+  del equipo.
+- También hoy: métricas de cobranza de la cartera en la ficha del vendedor (21b).
+
+---
+
 ## 2026-10-01 · Plan de revisión 30-sep: fases 0–4 y 6 (21a–21d) cerradas tras el corte de la noche
 
 - **Contexto:** el 30-sep a las 22:31 se cayó la base de producción (db/rest UNHEALTHY; incidente de red de Supabase en el
