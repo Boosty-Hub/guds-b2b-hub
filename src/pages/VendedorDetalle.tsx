@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ArrowLeft, Loader2, Users, Edit, Mail } from "lucide-react";
+import { ArrowLeft, Loader2, Users, Edit, Mail, Gauge } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
@@ -18,6 +18,8 @@ import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { OdooBadge } from "@/components/OdooBadge";
 import { Badge } from "@/components/ui/badge";
 import { VendedorAccesoDialog, esCorreoRelleno } from "@/components/vendedores/VendedorAccesoDialog";
+import { useMetricasCobranza, dsoAlto, tendencia, textoDso, IconoTendencia, SelectorVentana, type MetricaCliente, type VentanaDso } from "@/components/cuentas/metricas";
+import { cn } from "@/lib/utils";
 
 interface Vendedor { id: string; nombre: string; apellido: string | null; email: string; telefono: string | null; activo: boolean; odoo_login?: string | null; }
 // Otros vendedores para "Reasignar a": solo los de la empresa del cliente (vendedores_empresa, sin usuarios de prueba)
@@ -68,6 +70,31 @@ const VendedorDetalle = () => {
 
   const pagination = usePagination(clientes, 50);
   const totalSaldo = clientes.reduce((s, c) => s + c.saldo, 0);
+
+  // Métricas de cobranza de la cartera (21b): metricas_cobranza por cliente, sumadas como reporte_dso (DSO = deuda ÷ venta
+  // diaria de la ventana; mora ponderada por monto). Interno: nunca va al cliente.
+  const [ventana, setVentana] = useState<VentanaDso>(90);
+  const { datos: metricas, cargando: cargandoMet } = useMetricasCobranza(ventana, null, !loading && clientes.length > 0);
+  const metricaDe = useMemo(() => {
+    const ids = new Set(clientes.map((c) => c.id));
+    return new Map((metricas?.clientes ?? []).filter((m) => ids.has(m.cliente_id)).map((m) => [m.cliente_id, m]));
+  }, [metricas, clientes]);
+  const umbral = metricas?.alerta_dso ?? 60;
+  const resumen = useMemo(() => {
+    const ms = [...metricaDe.values()];
+    const sum = (f: (m: MetricaCliente) => number) => ms.reduce((s, m) => s + f(m), 0);
+    const deuda = sum((m) => m.deuda), venta = sum((m) => m.venta), deudaAnt = sum((m) => m.deuda_ant), ventaAnt = sum((m) => m.venta_ant);
+    const dso = deuda > 0.009 && venta > 0.009 ? Math.round(deuda / (venta / ventana)) : null;
+    const dsoAnt = deudaAnt > 0.009 && ventaAnt > 0.009 ? Math.round(deudaAnt / (ventaAnt / ventana)) : null;
+    const mora = deuda > 0.009 ? Math.round(sum((m) => m.mora * m.deuda) / deuda) : 0;
+    const moraAnt = deudaAnt > 0.009 ? Math.round(sum((m) => m.mora_ant * m.deuda_ant) / deudaAnt) : 0;
+    const agregado = { deuda, deuda_ant: deudaAnt, dso, dso_ant: dsoAnt, mora, mora_ant: moraAnt } as MetricaCliente;
+    return {
+      deuda, vencido: sum((m) => m.vencido), venta, dso, dsoAnt, mora, moraAnt, t: tendencia(agregado),
+      aFavor: sum((m) => m.a_favor_nc), conNc: ms.filter((m) => m.a_favor_nc > 0.009).length,
+      altos: ms.filter((m) => dsoAlto(m, umbral)).length,
+    };
+  }, [metricaDe, ventana, umbral]);
 
   const reasignar = async (clienteId: string, nuevoVendedorId: string | null) => {
     const { error } = await supabase.from("clientes").update({ vendedor_asignado_id: nuevoVendedorId }).eq("id", clienteId);
@@ -125,6 +152,45 @@ const VendedorDetalle = () => {
         </div>
       </div>
 
+      {clientes.length > 0 && (
+        <div className="mb-3 rounded-lg border border-border bg-card" data-testid="vd-metricas">
+          <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
+            <div className="flex items-center gap-2">
+              <div className="rounded-lg bg-primary/10 p-1.5"><Gauge className="h-4 w-4 text-primary" /></div>
+              <h2 className="text-[13px] font-semibold">Cobranza de la cartera (interno)</h2>
+              {cargandoMet && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+            </div>
+            <SelectorVentana valor={ventana} onCambio={setVentana} />
+          </div>
+          {!metricas && cargandoMet ? <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div> : (
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 p-3 text-xs sm:grid-cols-4">
+              <div>
+                <dt className="text-muted-foreground">Días de venta adeudados (DSO)</dt>
+                <dd className={cn("flex items-center gap-1 text-base font-semibold tabular-nums", resumen.dso != null && resumen.dso > umbral && "text-destructive")} data-testid="vd-dso">
+                  {resumen.deuda <= 0.009 ? "Sin deuda" : resumen.dso == null ? "Sin ventas" : `${resumen.dso} d`}<IconoTendencia t={resumen.t} />
+                </dd>
+                <dd className="text-[11px] text-muted-foreground">mes anterior {resumen.dsoAnt == null ? "—" : `${resumen.dsoAnt} d`} · venta {ventana} d {formatPrice(resumen.venta)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Mora ponderada</dt>
+                <dd className="text-base font-semibold tabular-nums" data-testid="vd-mora">{resumen.mora} d</dd>
+                <dd className="text-[11px] text-muted-foreground">mes anterior {resumen.moraAnt} d · vencido {formatPrice(resumen.vencido)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Clientes con DSO alto</dt>
+                <dd className={cn("text-base font-semibold tabular-nums", resumen.altos > 0 && "text-destructive")} data-testid="vd-altos">{resumen.altos}</dd>
+                <dd className="text-[11px] text-muted-foreground">sobre {umbral} días o con vencido sin ventas</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">A favor por aplicar (NC)</dt>
+                <dd className={cn("text-base font-semibold tabular-nums", resumen.aFavor > 0.009 && "text-success")} data-testid="vd-nc">{formatPrice(resumen.aFavor)}</dd>
+                <dd className="text-[11px] text-muted-foreground">{resumen.conNc} cliente{resumen.conNc === 1 ? "" : "s"} · por cruzar en Odoo</dd>
+              </div>
+            </dl>
+          )}
+        </div>
+      )}
+
       <div className="rounded-lg border border-border bg-card">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/30 px-3 py-1.5">
           <h2 className="text-[13px] font-semibold">Clientes asignados ({clientes.length})
@@ -136,12 +202,17 @@ const VendedorDetalle = () => {
         ) : (
           <>
             <Table>
-              <TableHeader><TableRow><TableHead>Cliente</TableHead><TableHead className="text-right">Saldo</TableHead><TableHead className="w-56">Reasignar a</TableHead></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>Cliente</TableHead><TableHead className="text-right">Saldo</TableHead><TableHead className="hidden text-right sm:table-cell">DSO</TableHead><TableHead className="w-56">Reasignar a</TableHead></TableRow></TableHeader>
               <TableBody>
                 {pagination.pageItems.map((c) => (
                   <TableRow key={c.id}>
                     <TableCell><p className="flex items-center gap-1.5 font-medium">{c.nombre_negocio}{c.odoo_id && <OdooBadge />}</p><p className="text-xs text-muted-foreground">{c.codigo}</p></TableCell>
                     <TableCell className={`text-right font-semibold ${c.saldo > 0.009 ? "text-destructive" : ""}`}>{formatPrice(c.saldo)}</TableCell>
+                    {(() => { const m = metricaDe.get(c.id); return (
+                      <TableCell className={cn("hidden whitespace-nowrap text-right tabular-nums sm:table-cell", m && dsoAlto(m, umbral) ? "font-semibold text-destructive" : "text-muted-foreground")} data-testid="vd-dso-cliente">
+                        <span className="inline-flex items-center justify-end gap-1">{m ? textoDso(m) : "—"}{m && <IconoTendencia t={tendencia(m)} />}</span>
+                      </TableCell>
+                    ); })()}
                     <TableCell>
                       {c.odoo_id && c.vendedor_odoo ? (
                         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">

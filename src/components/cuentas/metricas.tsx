@@ -86,7 +86,7 @@ export function SelectorVentana({ valor, onCambio, className }: { valor: Ventana
     <div className={cn("flex rounded-md border border-border bg-background p-0.5", className)} role="group" aria-label="Ventana de venta promedio">
       {([30, 90, 180] as VentanaDso[]).map((v) => (
         <button key={v} type="button" onClick={() => onCambio(v)} aria-pressed={valor === v} title={`Venta promedio de los últimos ${v} días`}
-          className={cn("rounded px-1.5 py-0.5 text-[11px] tabular-nums", valor === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>{v} d</button>
+          className={cn("whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] tabular-nums", valor === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>{v} d</button>
       ))}
     </div>
   );
