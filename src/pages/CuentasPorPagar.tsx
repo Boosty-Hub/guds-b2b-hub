@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,26 +14,32 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { useColumnas } from "@/components/datos/columnas";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, contadorFiltrado,
+  type DefFiltro, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 interface FacturaProv {
   id: string; numero: string; referencia: string | null; tipo: string; es_nota_debito: boolean; proveedor_id: string | null;
   fecha_emision: string | null; fecha_vencimiento: string | null; moneda: string; total: number; total_usd: number; saldo_usd: number;
-  estado_pago: string; estado: string; proveedor?: { nombre: string } | null;
+  estado_pago: string; estado: string; empresa_id: string | null; proveedor?: { nombre: string } | null;
 }
 interface PagoProv {
   id: string; numero: string; tipo: string; monto: number; moneda: string; monto_moneda: number | null; estado: string; fecha: string | null;
-  referencia: string | null; proveedor?: { nombre: string } | null; banco?: { nombre: string } | null;
+  referencia: string | null; proveedor_id: string | null; banco_id: string | null; empresa_id: string | null;
+  proveedor?: { nombre: string } | null; banco?: { nombre: string } | null;
 }
 interface OrdenCompra {
   id: string; numero: string; referencia_proveedor: string | null; fecha_orden: string | null; estado: string; estado_recepcion: string | null;
-  estado_facturacion: string | null; moneda: string | null; total: number; total_usd: number; proveedor?: { nombre: string } | null;
+  estado_facturacion: string | null; moneda: string | null; total: number; total_usd: number; proveedor_id: string | null; empresa_id: string | null;
+  proveedor?: { nombre: string } | null;
 }
 interface RetEmitida {
   id: string; tipo: string; numero: string; fecha: string | null; periodo: string | null; porcentaje: number | null; base_imponible: number;
-  total: number; estado: string; proveedor?: { nombre: string } | null;
+  total: number; estado: string; proveedor_id: string | null; empresa_id: string | null; proveedor?: { nombre: string } | null;
 }
 interface Acreedor {
-  proveedor_id: string; nombre: string; docs: number; saldo: number;
+  proveedor_id: string; empresa_id: string | null; nombre: string; docs: number; saldo: number;
   porVencer: number; d30: number; d60: number; d90: number; mas90: number; aFavor: number; neto: number;
 }
 const TRAMOS = [
@@ -48,6 +54,13 @@ const ESTADO_OC: Record<string, string> = {
   borrador: "Borrador", enviada: "Enviada", por_aprobar: "Por aprobar", confirmada: "Confirmada", bloqueada: "Bloqueada", cancelada: "Cancelada",
 };
 const RECEPCION: Record<string, string> = { pending: "Por recibir", partial: "Recepción parcial", full: "Recibida" };
+const FACTURACION: Record<string, string> = { invoiced: "Facturada", "to invoice": "Por facturar", no: "Nada que facturar" };
+const ESTADO_PAGO_PROV: Record<string, string> = { verificado: "Verificado", pendiente: "Pendiente", rechazado: "Rechazado" };
+const ESTADO_RET: Record<string, string> = { confirmado: "Confirmado", borrador: "Borrador", anulado: "Anulado" };
+// Pestañas (en la URL, ?tab=) y filtros propios de cada una: se limpian al cambiar de pestaña; proveedor y empresa se conservan
+const PESTANAS_CXP = ["pagar", "facturas", "pagos", "ordenes", "retenciones"] as const;
+const CLAVES_PESTANA = ["antiguedad", "estado", "tipo", "vence", "fecha", "banco", "moneda", "recepcion", "facturacion", "periodo"];
+const hoyISO = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" });
 const fmtFecha = (d?: string | null) => (d ? new Date(d.length === 10 ? `${d}T00:00:00` : d).toLocaleDateString("es-VE") : "—");
 
 const CuentasPorPagar = () => {
@@ -63,10 +76,10 @@ const CuentasPorPagar = () => {
   useEffect(() => {
     (async () => {
       const [f, p, o, r] = await Promise.all([
-        supabase.from("facturas_proveedor").select("id, numero, referencia, tipo, es_nota_debito, proveedor_id, fecha_emision, fecha_vencimiento, moneda, total, total_usd, saldo_usd, estado_pago, estado, proveedor:proveedores(nombre)").order("fecha_emision", { ascending: false }),
-        supabase.from("pagos_proveedor").select("id, numero, tipo, monto, moneda, monto_moneda, estado, fecha, referencia, proveedor:proveedores(nombre), banco:bancos(nombre)").order("fecha", { ascending: false }),
-        supabase.from("ordenes_compra").select("id, numero, referencia_proveedor, fecha_orden, estado, estado_recepcion, estado_facturacion, moneda, total, total_usd, proveedor:proveedores(nombre)").order("fecha_orden", { ascending: false }),
-        supabase.from("retenciones_emitidas").select("id, tipo, numero, fecha, periodo, porcentaje, base_imponible, total, estado, proveedor:proveedores(nombre)").order("fecha", { ascending: false }),
+        supabase.from("facturas_proveedor").select("id, numero, referencia, tipo, es_nota_debito, proveedor_id, fecha_emision, fecha_vencimiento, moneda, total, total_usd, saldo_usd, estado_pago, estado, empresa_id, proveedor:proveedores(nombre)").order("fecha_emision", { ascending: false }),
+        supabase.from("pagos_proveedor").select("id, numero, tipo, monto, moneda, monto_moneda, estado, fecha, referencia, proveedor_id, banco_id, empresa_id, proveedor:proveedores(nombre), banco:bancos(nombre)").order("fecha", { ascending: false }),
+        supabase.from("ordenes_compra").select("id, numero, referencia_proveedor, fecha_orden, estado, estado_recepcion, estado_facturacion, moneda, total, total_usd, proveedor_id, empresa_id, proveedor:proveedores(nombre)").order("fecha_orden", { ascending: false }),
+        supabase.from("retenciones_emitidas").select("id, tipo, numero, fecha, periodo, porcentaje, base_imponible, total, estado, proveedor_id, empresa_id, proveedor:proveedores(nombre)").order("fecha", { ascending: false }),
       ]);
       setFacturas((f.data as unknown as FacturaProv[]) ?? []);
       setPagos((p.data as unknown as PagoProv[]) ?? []);
@@ -83,7 +96,7 @@ const CuentasPorPagar = () => {
     for (const f of publicadas) {
       const saldo = Number(f.saldo_usd);
       if (!f.proveedor_id || Math.abs(saldo) <= 0.009) continue;
-      const a = m.get(f.proveedor_id) || { proveedor_id: f.proveedor_id, nombre: f.proveedor?.nombre || "—", docs: 0, saldo: 0,
+      const a = m.get(f.proveedor_id) || { proveedor_id: f.proveedor_id, empresa_id: f.empresa_id, nombre: f.proveedor?.nombre || "—", docs: 0, saldo: 0,
         porVencer: 0, d30: 0, d60: 0, d90: 0, mas90: 0, aFavor: 0, neto: 0 };
       if (saldo < 0) a.aFavor += saldo;
       else {
@@ -101,26 +114,113 @@ const CuentasPorPagar = () => {
 
   const neto = publicadas.reduce((s, f) => s + Number(f.saldo_usd || 0), 0);
   const vencidoMas90 = acreedores.reduce((s, a) => s + a.mas90, 0);
-  const totalesTramo = TRAMOS.map((t) => ({ ...t, monto: acreedores.reduce((s, a) => s + a[t.k], 0) }));
   const filtro = q.trim().toLowerCase();
-  const coincide = (...v: (string | null | undefined)[]) => !filtro || v.some((x) => (x || "").toLowerCase().includes(filtro));
+  const buscar = (...v: (string | null | undefined)[]) => !filtro || v.some((x) => (x || "").toLowerCase().includes(filtro));
 
-  const { ordenadas: acrOrdenados, orden: ordenAcr, alternar: alternarAcr } = useOrdenTabla(acreedores.filter((a) => coincide(a.nombre)), {
+  // ---- Pestaña y filtros (en la URL) ----
+  const [params, setParams] = useSearchParams();
+  const tabCxp = (PESTANAS_CXP as readonly string[]).includes(params.get("tab") ?? "") ? params.get("tab")! : "pagar";
+  const setTabCxp = (t: string) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    for (const k of CLAVES_PESTANA) n.delete(k);
+    if (t === "pagar") n.delete("tab"); else n.set("tab", t);
+    return n;
+  }, { replace: true });
+  const hoy = hoyISO();
+  const vencido = (a: Acreedor) => a.d30 + a.d60 + a.d90 + a.mas90;
+  const pruebasAntiguedad: OpcionPrueba<Acreedor>[] = [
+    { valor: "vencido", etiqueta: "Con saldo vencido", prueba: (a) => vencido(a) > 0.009 },
+    { valor: "d30", etiqueta: "Vencido 1–30 días", prueba: (a) => a.d30 > 0.009 },
+    { valor: "d60", etiqueta: "Vencido 31–60 días", prueba: (a) => a.d60 > 0.009 },
+    { valor: "d90", etiqueta: "Vencido 61–90 días", prueba: (a) => a.d90 > 0.009 },
+    { valor: "mas90", etiqueta: "Vencido +90 días", prueba: (a) => a.mas90 > 0.009 },
+    { valor: "al_dia", etiqueta: "Solo por vencer", prueba: (a) => vencido(a) <= 0.009 },
+    { valor: "favor", etiqueta: "Con saldo a favor", prueba: (a) => a.aFavor < -0.009 },
+  ];
+  const venceDe = (f: FacturaProv) => f.fecha_vencimiento || f.fecha_emision;
+  const pruebasVence: OpcionPrueba<FacturaProv>[] = [
+    { valor: "vencidas", etiqueta: "Vencidas con saldo", prueba: (f) => f.estado === "posted" && Number(f.saldo_usd) > 0.009 && !!venceDe(f) && venceDe(f)! < hoy },
+    { valor: "por_vencer", etiqueta: "Por vencer con saldo", prueba: (f) => f.estado === "posted" && Number(f.saldo_usd) > 0.009 && (!venceDe(f) || venceDe(f)! >= hoy) },
+    { valor: "sin_saldo", etiqueta: "Sin saldo", prueba: (f) => !(Number(f.saldo_usd) > 0.009) },
+  ];
+  const pruebasTipoFac: OpcionPrueba<FacturaProv>[] = [
+    { valor: "factura", etiqueta: "Facturas", prueba: (f) => f.tipo === "factura" && !f.es_nota_debito },
+    { valor: "nota_credito", etiqueta: "Notas de crédito", prueba: (f) => f.tipo === "nota_credito" },
+    { valor: "nota_debito", etiqueta: "Notas de débito", prueba: (f) => !!f.es_nota_debito },
+  ];
+  const periodoRet = (r: RetEmitida) => r.periodo || (r.fecha ? r.fecha.slice(0, 7).replace("-", "/") : null);
+  // Proveedor: el mismo filtro en todas las pestañas (sus documentos, pagos, órdenes y retenciones)
+  const opcionesProveedor = useMemo(() => {
+    const todos = [
+      ...facturas.map((f) => ({ id: f.proveedor_id, nombre: f.proveedor?.nombre })), ...pagos.map((p) => ({ id: p.proveedor_id, nombre: p.proveedor?.nombre })),
+      ...ordenes.map((o) => ({ id: o.proveedor_id, nombre: o.proveedor?.nombre })), ...retenciones.map((r) => ({ id: r.proveedor_id, nombre: r.proveedor?.nombre })),
+    ];
+    const vistos = new Map<string, string>();
+    for (const x of todos) if (x.id && !vistos.has(x.id)) vistos.set(x.id, x.nombre || "—");
+    return opcionesDe([...vistos.entries()], ([id]) => id, ([, nombre]) => nombre).map((o) => ({ ...o, n: undefined }));
+  }, [facturas, pagos, ordenes, retenciones]);
+  const filasEmpresa: { empresa_id: string | null }[] = tabCxp === "pagar" ? acreedores : tabCxp === "facturas" ? facturas : tabCxp === "pagos" ? pagos : tabCxp === "ordenes" ? ordenes : retenciones;
+  const filtroEmpresa = useFiltroEmpresa(filasEmpresa);
+  const defProveedor: DefFiltro = { clave: "proveedor", etiqueta: "Proveedor", todos: "Todos los proveedores", principal: true, opciones: opcionesProveedor };
+  const defsPestana: Record<string, (DefFiltro | null)[]> = {
+    pagar: [{ clave: "antiguedad", etiqueta: "Antigüedad", todos: "Todas", principal: true, opciones: opcionesPrueba(acreedores, pruebasAntiguedad) }],
+    facturas: [
+      { clave: "estado", etiqueta: "Estado", principal: true, opciones: Object.entries(ESTADO_PAGO).map(([valor, e]) => ({ valor, etiqueta: e.label, n: facturas.filter((f) => f.estado_pago === valor).length })) },
+      { clave: "vence", etiqueta: "Vencimiento", todos: "Todas", principal: true, opciones: opcionesPrueba(facturas, pruebasVence) },
+      { clave: "tipo", etiqueta: "Documento", todos: "Todos", opciones: opcionesPrueba(facturas, pruebasTipoFac) },
+      { clave: "fecha", etiqueta: "Emisión", tipo: "fecha" },
+    ],
+    pagos: [
+      { clave: "estado", etiqueta: "Estado", principal: true, opciones: opcionesDe(pagos, (p) => p.estado, (_p, v) => ESTADO_PAGO_PROV[v] ?? v) },
+      { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+      { clave: "banco", etiqueta: "Banco", todos: "Todos los bancos", opciones: opcionesDe(pagos, (p) => p.banco_id, (p) => p.banco?.nombre ?? "—", "Sin banco") },
+      { clave: "moneda", etiqueta: "Moneda", todos: "USD y Bs.", opciones: opcionesDe(pagos, (p) => p.moneda, (_p, v) => (v === "USD" ? "Dólares (USD)" : "Bolívares (Bs.)")) },
+      { clave: "tipo", etiqueta: "Tipo", todos: "Pagos y reintegros", opciones: opcionesDe(pagos, (p) => p.tipo, (_p, v) => (v === "pago" ? "Pagos" : "Reintegros")) },
+    ],
+    ordenes: [
+      { clave: "estado", etiqueta: "Estado", principal: true, opciones: opcionesDe(ordenes, (o) => o.estado, (_o, v) => ESTADO_OC[v] ?? v) },
+      { clave: "recepcion", etiqueta: "Recepción", todos: "Todas", opciones: opcionesDe(ordenes, (o) => o.estado_recepcion, (_o, v) => RECEPCION[v] ?? v, "Sin recepción") },
+      { clave: "facturacion", etiqueta: "Facturación", todos: "Todas", opciones: opcionesDe(ordenes, (o) => o.estado_facturacion, (_o, v) => FACTURACION[v] ?? v) },
+      { clave: "fecha", etiqueta: "Fecha", tipo: "fecha" },
+    ],
+    retenciones: [
+      { clave: "tipo", etiqueta: "Tipo", principal: true, opciones: opcionesDe(retenciones, (r) => r.tipo, (_r, v) => v.toUpperCase()) },
+      { clave: "estado", etiqueta: "Estado", todos: "Todos", opciones: opcionesDe(retenciones, (r) => r.estado, (_r, v) => ESTADO_RET[v] ?? v) },
+      { clave: "periodo", etiqueta: "Período", todos: "Todos", opciones: opcionesDe(retenciones, periodoRet).reverse() },
+      { clave: "fecha", etiqueta: "Fecha", tipo: "fecha" },
+    ],
+  };
+  const f = useFiltros([defProveedor, ...defsPestana[tabCxp], filtroEmpresa]);
+  const emp = (x: { empresa_id: string | null }) => !filtroEmpresa || coincide(x.empresa_id, f.v("empresa"));
+  const acrFiltrados = acreedores.filter((a) => coincide(a.proveedor_id, f.v("proveedor")) && pasaPrueba(pruebasAntiguedad, f.v("antiguedad"), a) && emp(a));
+  const facFiltradas = facturas.filter((x) => coincide(x.proveedor_id, f.v("proveedor")) && coincide(x.estado_pago, f.v("estado")) && pasaPrueba(pruebasVence, f.v("vence"), x)
+    && pasaPrueba(pruebasTipoFac, f.v("tipo"), x) && enRango(x.fecha_emision, f.v("fecha")) && emp(x) && buscar(x.numero, x.referencia, x.proveedor?.nombre));
+  const pagFiltrados = pagos.filter((x) => coincide(x.proveedor_id, f.v("proveedor")) && coincide(x.estado, f.v("estado")) && enRango(x.fecha, f.v("fecha"))
+    && coincide(x.banco_id, f.v("banco")) && coincide(x.moneda, f.v("moneda")) && coincide(x.tipo, f.v("tipo")) && emp(x) && buscar(x.numero, x.referencia, x.proveedor?.nombre));
+  const ocFiltradas = ordenes.filter((x) => coincide(x.proveedor_id, f.v("proveedor")) && coincide(x.estado, f.v("estado")) && coincide(x.estado_recepcion, f.v("recepcion"))
+    && coincide(x.estado_facturacion, f.v("facturacion")) && enRango(x.fecha_orden, f.v("fecha")) && emp(x) && buscar(x.numero, x.referencia_proveedor, x.proveedor?.nombre));
+  const retFiltradas = retenciones.filter((x) => coincide(x.proveedor_id, f.v("proveedor")) && coincide(x.tipo, f.v("tipo")) && coincide(x.estado, f.v("estado"))
+    && coincide(periodoRet(x), f.v("periodo")) && enRango(x.fecha, f.v("fecha")) && emp(x) && buscar(x.numero, x.proveedor?.nombre));
+  // Antigüedad de lo filtrado (sin filtros = la de todos, como antes)
+  const totalesTramo = TRAMOS.map((t) => ({ ...t, monto: acrFiltrados.reduce((s, a) => s + a[t.k], 0) }));
+
+  const { ordenadas: acrOrdenados, orden: ordenAcr, alternar: alternarAcr } = useOrdenTabla(acrFiltrados.filter((a) => buscar(a.nombre)), {
     nombre: (a) => a.nombre, docs: (a) => a.docs, porVencer: (a) => a.porVencer, d30: (a) => a.d30, d60: (a) => a.d60,
     d90: (a) => a.d90, mas90: (a) => a.mas90, saldo: (a) => a.saldo, aFavor: (a) => Math.abs(a.aFavor), neto: (a) => a.neto,
   });
-  const pgAcr = usePagination(acrOrdenados, 50);
+  const pgAcr = usePagination(acrOrdenados, 50, f.firma);
   const exportarAcreedores = () => exportarCSV("cuentas-por-pagar", acrOrdenados, [
     { titulo: "Proveedor", valor: (a) => a.nombre }, { titulo: "Facturas", valor: (a) => a.docs },
     ...TRAMOS.map((t) => ({ titulo: t.label, valor: (a: Acreedor) => Number(a[t.k].toFixed(2)) })),
     { titulo: "Saldo", valor: (a) => Number(a.saldo.toFixed(2)) }, { titulo: "A favor", valor: (a) => Number(Math.abs(a.aFavor).toFixed(2)) },
     { titulo: "Neto", valor: (a) => Number(a.neto.toFixed(2)) },
   ]);
-  const [tabCxp, setTabCxp] = useState("pagar");
-  const pgFac = usePagination(facturas.filter((f) => coincide(f.numero, f.referencia, f.proveedor?.nombre)), 50);
-  const pgPag = usePagination(pagos.filter((p) => coincide(p.numero, p.referencia, p.proveedor?.nombre)), 50);
-  const pgOc = usePagination(ordenes.filter((o) => coincide(o.numero, o.referencia_proveedor, o.proveedor?.nombre)), 50);
-  const pgRet = usePagination(retenciones.filter((r) => coincide(r.numero, r.proveedor?.nombre)), 50);
+  const pgFac = usePagination(facFiltradas, 50, f.firma);
+  const pgPag = usePagination(pagFiltrados, 50, f.firma);
+  const pgOc = usePagination(ocFiltradas, 50, f.firma);
+  const pgRet = usePagination(retFiltradas, 50, f.firma);
+  const enPestana = { pagar: [acrOrdenados.length, acreedores.length], facturas: [facFiltradas.length, facturas.length], pagos: [pagFiltrados.length, pagos.length],
+    ordenes: [ocFiltradas.length, ordenes.length], retenciones: [retFiltradas.length, retenciones.length] }[tabCxp] ?? [0, 0];
 
   const cols = useColumnas("cxp-antiguedad", [{ etiqueta: "Proveedor", fija: true }, { etiqueta: "Facturas" }, ...["Por vencer", "1–30 días", "31–60 días", "61–90 días", "+90 días"].map((etiqueta) => ({ etiqueta })), { etiqueta: "Saldo" }, { etiqueta: "A favor" }, { etiqueta: "Neto" }]);
   return (
@@ -148,6 +248,8 @@ const CuentasPorPagar = () => {
           busqueda={q}
           onBusqueda={setQ}
           placeholder="Buscar proveedor o documento..."
+          filtros={<FiltrosLista filtros={f} resultados={enPestana[0]} />}
+          contador={loading ? undefined : contadorFiltrado(enPestana[0], enPestana[1], f.activos || !!filtro)}
           acciones={<>
             <span className="hidden items-center gap-1.5 text-xs text-muted-foreground 2xl:flex" title="Compras y cuentas por pagar sincronizadas desde Odoo"><OdooBadge /> Sincronizado desde Odoo</span>
             {tabCxp === "pagar" && <>{cols.selector}<BotonExportar soloIcono onClick={exportarAcreedores} total={acrOrdenados.length} /></>}

@@ -15,7 +15,7 @@ const ESCRITORES = {
   cliente_direccion: { fn: escribirCliente, modo: 'odoo_escritura_clientes' },
   producto: { fn: escribirProducto, modo: 'odoo_escritura_productos' },            // foto y descripción (20r)
   cliente_nuevo: { fn: escribirClienteNuevo, modo: 'odoo_escritura_clientes_nuevos' },        // crear o enlazar (20s)
-  persona_contacto: { fn: escribirPersonaContacto, modo: 'odoo_escritura_clientes_nuevos' },  // contactos hijos (20s)
+  persona_contacto: { fn: escribirPersonaContacto, modo: 'odoo_escritura_clientes_nuevos' },  // contactos hijos de clientes y proveedores (20s, 20v)
   cliente_limite: { fn: escribirLimite, modo: 'odoo_escritura_clientes' },                    // límite de crédito (20s)
 };
 

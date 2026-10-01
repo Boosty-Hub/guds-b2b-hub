@@ -49,6 +49,11 @@ import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { FichaCampos } from "@/components/datos/FichaCampos";
 import { useColumnas } from "@/components/datos/columnas";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesTexto, opcionesPrueba, pasaPrueba, coincide, coincideTexto, enRango,
+  contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
+import { estadoVisible, claseTono, type ClaveEstado } from "@/components/pedidos/estadoPedido";
 import { useCotizacion } from "@/hooks/useCotizacion";
 import { ResumenCotizacion } from "@/components/portal/ResumenCotizacion";
 import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
@@ -72,6 +77,8 @@ interface OrdenDB {
   ediciones?: number | null;
   cliente_id: string;
   estado: string;
+  estado_odoo?: string | null;
+  estado_pago?: string | null;
   subtotal: number;
   impuesto: number;
   descuento: number;
@@ -124,7 +131,6 @@ const Ordenes = () => {
   const [ordenes, setOrdenes] = useState<OrdenDB[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
   const [grouped, setGrouped] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const toggleGroup = (k: string) => setOpenGroups((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -138,8 +144,7 @@ const Ordenes = () => {
   const [facturando, setFacturando] = useState(false);
   const [despachos, setDespachos] = useState<{ id: string; numero: string; tipo: string; estado: string; fecha_programada: string | null; fecha_realizada: string | null; ubicacion_origen: string | null }[]>([]);
   const [params, setParams] = useSearchParams();
-  // Aprobación de pedidos de clientes y vendedores (Fase 9b): al aprobar se crean en Odoo como cotización
-  const [soloPorAprobar, setSoloPorAprobar] = useState(params.get("aprobacion") === "pendiente");
+  // Aprobación de pedidos de clientes y vendedores (Fase 9b): al aprobar se crean en Odoo como cotización (filtro ?aprobacion=pendiente)
   const [rechazo, setRechazo] = useState<{ id: string; numero: string } | null>(null);
   // Asignar vendedor a un pedido que no tiene (19x)
   const [asignarVend, setAsignarVend] = useState<OrdenDB | null>(null);
@@ -362,24 +367,66 @@ const Ordenes = () => {
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
+  const fechaOrden = (o: OrdenDB) => o.fecha_pedido || o.created_at;
+
+  // ---- Filtros (en la URL) ----
+  // Estado visible: el mismo contrato que ven el vendedor y el cliente (estadoPedido.ts)
+  const ESTADOS_VISIBLES: { clave: ClaveEstado; etiqueta: string }[] = [
+    { clave: "por_aprobar", etiqueta: "Por aprobar" }, { clave: "registrandose", etiqueta: "Aprobado (registrándose)" },
+    { clave: "cotizacion", etiqueta: "Cotización" }, { clave: "confirmado", etiqueta: "Confirmado" },
+    { clave: "en_preparacion", etiqueta: "En preparación" }, { clave: "despachado_parcial", etiqueta: "Despacho parcial" },
+    { clave: "entregado", etiqueta: "Despachado" }, { clave: "cancelado", etiqueta: "Cancelado" }, { clave: "rechazado", etiqueta: "No aprobado" },
+  ];
+  const pruebasEstado: OpcionPrueba<OrdenDB>[] = ESTADOS_VISIBLES.map((e) => ({ valor: e.clave, etiqueta: e.etiqueta, prueba: (o) => estadoVisible(o).clave === e.clave }));
+  const pruebasAprobacion: OpcionPrueba<OrdenDB>[] = [
+    { valor: "pendiente", etiqueta: "Por aprobar", prueba: (o) => o.aprobacion === "pendiente" },
+    { valor: "aprobada", etiqueta: "Aprobados", prueba: (o) => o.aprobacion === "aprobada" },
+    { valor: "error", etiqueta: "Error al enviar a Odoo", prueba: (o) => o.aprobacion === "aprobada" && !o.odoo_id && !!o.odoo_envio_error },
+    { valor: "rechazada", etiqueta: "Rechazados", prueba: (o) => o.aprobacion === "rechazada" },
+    { valor: "no_aplica", etiqueta: "Sin aprobación (de Odoo)", prueba: (o) => !o.aprobacion },
+  ];
+  const pruebasOrigen: OpcionPrueba<OrdenDB>[] = [
+    { valor: "guds", etiqueta: "Creado en GUDS", prueba: (o) => !o.odoo_id || !!o.numero_guds },
+    { valor: "odoo", etiqueta: "Creado en Odoo", prueba: (o) => !!o.odoo_id && !o.numero_guds },
+  ];
+  const pruebasPago: OpcionPrueba<OrdenDB>[] = [
+    { valor: "pendiente", etiqueta: "Pendiente de pago", prueba: (o) => (o.estado_pago || "pendiente") === "pendiente" },
+    { valor: "parcial", etiqueta: "Pago parcial", prueba: (o) => o.estado_pago === "parcial" },
+    { valor: "pagado", etiqueta: "Pagado", prueba: (o) => o.estado_pago === "pagado" },
+  ];
+  const filtroEmpresa = useFiltroEmpresa(ordenes);
+  const f = useFiltros([
+    { clave: "estado", etiqueta: "Estado", principal: true, opciones: opcionesPrueba(ordenes, pruebasEstado, true) },
+    { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+    { clave: "vendedor", etiqueta: "Vendedor", principal: true, opciones: opcionesTexto(ordenes, (o) => nombreVendedor(o), "Sin vendedor") },
+    { clave: "cliente", etiqueta: "Cliente", todos: "Todos los clientes", opciones: opcionesDe(ordenes, (o) => o.cliente_id, (o) => o.cliente?.nombre_negocio ?? "—") },
+    { clave: "aprobacion", etiqueta: "Aprobación", todos: "Todas", opciones: opcionesPrueba(ordenes, pruebasAprobacion) },
+    { clave: "pago", etiqueta: "Pago", todos: "Todos", opciones: opcionesPrueba(ordenes, pruebasPago) },
+    { clave: "origen", etiqueta: "Origen", todos: "GUDS y Odoo", opciones: opcionesPrueba(ordenes, pruebasOrigen) },
+    filtroEmpresa,
+  ]);
+  const soloPorAprobar = f.v("aprobacion") === "pendiente";
+  const termino = searchTerm.toLowerCase();
   const filteredOrdenes = ordenes.filter(orden => {
-    const matchesSearch = 
-      orden.numero?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      orden.cliente?.nombre_negocio?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === "all" || orden.estado === statusFilter;
-    return matchesSearch && matchesStatus && (!soloPorAprobar || orden.aprobacion === "pendiente");
+    const matchesSearch =
+      orden.numero?.toLowerCase().includes(termino) ||
+      orden.cliente?.nombre_negocio?.toLowerCase().includes(termino);
+    return matchesSearch && pasaPrueba(pruebasEstado, f.v("estado"), orden) && enRango(fechaOrden(orden), f.v("fecha"))
+      && coincideTexto(nombreVendedor(orden), f.v("vendedor")) && coincide(orden.cliente_id, f.v("cliente"))
+      && pasaPrueba(pruebasAprobacion, f.v("aprobacion"), orden) && pasaPrueba(pruebasPago, f.v("pago"), orden)
+      && pasaPrueba(pruebasOrigen, f.v("origen"), orden) && (!filtroEmpresa || coincide(orden.empresa_id, f.v("empresa")));
   });
 
-  const fechaOrden = (o: OrdenDB) => o.fecha_pedido || o.created_at;
   const { ordenadas, orden, alternar } = useOrdenTabla(filteredOrdenes, {
     numero: (o) => o.numero, cliente: (o) => o.cliente?.nombre_negocio, items: (o) => o.items?.length ?? 0,
-    total: (o) => Number(o.total || 0), estado: (o) => o.estado, fecha: (o) => fechaOrden(o), metodo: (o) => o.metodo_pago,
+    total: (o) => Number(o.total || 0), estado: (o) => estadoVisible(o).etiqueta, fecha: (o) => fechaOrden(o), metodo: (o) => o.metodo_pago,
   });
-  const pagination = usePagination(ordenadas, 50);
+  const pagination = usePagination(ordenadas, 50, f.firma);
   const exportar = () => exportarCSV("ordenes", ordenadas, [
     { titulo: "Orden", valor: (o) => o.numero }, { titulo: "Origen", valor: (o) => (o.odoo_id ? "Odoo" : "GUDS") },
     { titulo: "Cliente", valor: (o) => o.cliente?.nombre_negocio }, { titulo: "Items", valor: (o) => o.items?.length ?? 0 },
-    { titulo: "Total USD", valor: (o) => Number(o.total || 0) }, { titulo: "Estado", valor: (o) => statusConfig[o.estado]?.label || o.estado },
+    { titulo: "Total USD", valor: (o) => Number(o.total || 0) }, { titulo: "Estado", valor: (o) => estadoVisible(o).etiqueta },
+    { titulo: "Estado en Odoo", valor: (o) => statusConfig[o.estado]?.label || o.estado }, { titulo: "Pago", valor: (o) => o.estado_pago },
     { titulo: "Fecha", valor: (o) => fechaOrden(o)?.slice(0, 10) }, { titulo: "Método de pago", valor: (o) => o.metodo_pago },
     { titulo: "Vendedor", valor: (o) => nombreVendedor(o) },
   ]);
@@ -423,8 +470,9 @@ const Ordenes = () => {
       <TableCell className="text-right">{orden.items?.length || 0}</TableCell>
       <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(orden.total)}</TableCell>
       <TableCell className="whitespace-nowrap">
-        <Badge variant={statusConfig[orden.estado]?.variant || "secondary"}>
-          {statusConfig[orden.estado]?.label || orden.estado}
+        {/* Estado visible (el mismo que ven el vendedor y el cliente); el estado técnico va en el título */}
+        <Badge variant="outline" className={cn("font-medium", claseTono[estadoVisible(orden).tono])} title={`Estado: ${statusConfig[orden.estado]?.label || orden.estado}`}>
+          {estadoVisible(orden).etiqueta}
         </Badge>
       </TableCell>
       <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(fechaOrden(orden))}</TableCell>
@@ -500,26 +548,14 @@ const Ordenes = () => {
           <>
           <Button type="button" size="sm" variant={soloPorAprobar ? "default" : "outline"}
             className={cn("gap-1.5", !soloPorAprobar && porAprobar > 0 && "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100")}
-            onClick={() => setSoloPorAprobar((v) => !v)} title="Pedidos de clientes y vendedores que esperan aprobación antes de ir a Odoo">
+            onClick={() => f.set("aprobacion", soloPorAprobar ? "" : "pendiente")} aria-pressed={soloPorAprobar}
+            title="Pedidos de clientes y vendedores que esperan aprobación antes de ir a Odoo">
             <Clock className="h-3.5 w-3.5" /> Por aprobar ({porAprobar})
           </Button>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-8 w-40 text-[13px]">
-              <SelectValue placeholder="Estado" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="pendiente">Pendiente</SelectItem>
-              <SelectItem value="confirmado">Confirmado</SelectItem>
-              <SelectItem value="procesando">Procesando</SelectItem>
-              <SelectItem value="enviado">Enviado</SelectItem>
-              <SelectItem value="completado">Completado</SelectItem>
-              <SelectItem value="cancelado">Cancelado</SelectItem>
-            </SelectContent>
-          </Select>
+          <FiltrosLista filtros={f} resultados={filteredOrdenes.length} />
           </>
         }
-        contador={loading ? undefined : `${filteredOrdenes.length} registros`}
+        contador={loading ? undefined : contadorFiltrado(filteredOrdenes.length, ordenes.length, f.activos || !!searchTerm)}
         acciones={
           <>
             {cols.selector}

@@ -58,6 +58,9 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { useColumnas } from "@/components/datos/columnas";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
 import { textoIva } from "@/lib/iva";
 
@@ -93,7 +96,6 @@ const Productos = () => {
   const [loading, setLoading] = useState(true);
   const [params] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState(params.get("q") ?? "");
-  const [categoriaFilter, setCategoriaFilter] = useState("all");
   const [grouped, setGrouped] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const toggleGroup = (k: string) => setOpenGroups((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -368,32 +370,86 @@ const Productos = () => {
     setIsEditOpen(true);
   };
 
-  const filteredProductos = productos.filter(p => {
-    const matchSearch = p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                       p.sku.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchCategoria = categoriaFilter === "all" || p.categoria_id === categoriaFilter;
-    return matchSearch && matchCategoria;
-  });
+  // ---- Filtros (en la URL). Estado de stock con la misma regla que los indicadores y la insignia "Estado" ----
+  const controla = (p: Producto) => p.controla_stock !== false;
+  const pruebasStock: OpcionPrueba<ProductoConRelaciones>[] = [
+    { valor: "disponible", etiqueta: "Disponible", prueba: (p) => controla(p) && p.stock_actual > p.stock_minimo },
+    { valor: "bajo", etiqueta: "Bajo stock", prueba: (p) => controla(p) && p.stock_actual > 0 && p.stock_actual <= p.stock_minimo },
+    { valor: "agotado", etiqueta: "Agotado", prueba: (p) => controla(p) && p.stock_actual <= 0 },
+    { valor: "servicio", etiqueta: "Servicio (sin stock)", prueba: (p) => !controla(p) },
+  ];
+  const siNo = (si: string, no: string, f: (p: ProductoConRelaciones) => boolean): OpcionPrueba<ProductoConRelaciones>[] =>
+    [{ valor: "si", etiqueta: si, prueba: f }, { valor: "no", etiqueta: no, prueba: (p) => !f(p) }];
+  const pruebasActivo = siNo("Activos", "Inactivos", (p) => p.activo);
+  // Visible en la tienda: la misma regla del catálogo del portal (activo, vendible y no oculto)
+  const pruebasTienda = siNo("Visible en la tienda", "No visible", (p) => p.activo && p.vendible !== false && !p.oculto_tienda);
+  const tieneFoto = (p: ProductoConRelaciones) => !!p.imagen_url || (Array.isArray(p.imagenes) && (p.imagenes as unknown[]).length > 0);
+  const pruebasFoto = siNo("Con foto", "Sin foto", tieneFoto);
+  const pruebasIva: OpcionPrueba<ProductoConRelaciones>[] = [
+    { valor: "iva", etiqueta: "Con IVA", prueba: (p) => p.impuesto_pct != null && Number(p.impuesto_pct) > 0 },
+    { valor: "exento", etiqueta: "Exento (0%)", prueba: (p) => p.impuesto_pct != null && Number(p.impuesto_pct) === 0 },
+    { valor: "sin", etiqueta: "Sin sincronizar", prueba: (p) => p.impuesto_pct == null },
+  ];
+  const pruebasTipo: OpcionPrueba<ProductoConRelaciones>[] = [
+    { valor: "almacenable", etiqueta: "Almacenable", prueba: (p) => controla(p) },
+    { valor: "servicio", etiqueta: "Servicio", prueba: (p) => !controla(p) },
+  ];
+  const pruebasPromo: OpcionPrueba<ProductoConRelaciones>[] = [
+    { valor: "destacado", etiqueta: "Destacados", prueba: (p) => !!p.destacado },
+    { valor: "oferta", etiqueta: "En oferta", prueba: (p) => !!p.en_oferta },
+    { valor: "ninguna", etiqueta: "Sin destacar ni oferta", prueba: (p) => !p.destacado && !p.en_oferta },
+  ];
+  const filtroEmpresa = useFiltroEmpresa(productos);
+  const f = useFiltros([
+    { clave: "categoria", etiqueta: "Categoría", todos: "Todas", principal: true, opciones: opcionesDe(productos, (p) => p.categoria_id, (p) => p.categoria?.nombre ?? "—", "Sin categoría") },
+    { clave: "stock", etiqueta: "Stock", principal: true, opciones: opcionesPrueba(productos, pruebasStock) },
+    { clave: "activo", etiqueta: "Situación", todos: "Activos e inactivos", principal: true, opciones: opcionesPrueba(productos, pruebasActivo) },
+    { clave: "tienda", etiqueta: "Tienda", todos: "Todos", opciones: opcionesPrueba(productos, pruebasTienda) },
+    { clave: "foto", etiqueta: "Foto", todos: "Con y sin foto", opciones: opcionesPrueba(productos, pruebasFoto) },
+    { clave: "iva", etiqueta: "IVA", todos: "Todos", opciones: opcionesPrueba(productos, pruebasIva) },
+    { clave: "tipo", etiqueta: "Tipo", todos: "Todos", opciones: opcionesPrueba(productos, pruebasTipo) },
+    { clave: "promo", etiqueta: "Destacado / oferta", todos: "Todos", opciones: opcionesPrueba(productos, pruebasPromo) },
+    filtroEmpresa,
+  ]);
+  const pasaFiltros = (p: ProductoConRelaciones, sinStock = false) =>
+    coincide(p.categoria_id, f.v("categoria")) && (sinStock || pasaPrueba(pruebasStock, f.v("stock"), p))
+    && pasaPrueba(pruebasActivo, f.v("activo"), p) && pasaPrueba(pruebasTienda, f.v("tienda"), p)
+    && pasaPrueba(pruebasFoto, f.v("foto"), p) && pasaPrueba(pruebasIva, f.v("iva"), p)
+    && pasaPrueba(pruebasTipo, f.v("tipo"), p) && pasaPrueba(pruebasPromo, f.v("promo"), p)
+    && (!filtroEmpresa || coincide(p.empresa_id, f.v("empresa")));
+  // Indicadores: todos los filtros salvo el de stock (los KPI de stock lo fijan al pulsarlos). Sin filtros = todos, como antes.
+  const baseKpi = useMemo(() => productos.filter((p) => pasaFiltros(p, true)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [productos, f.firma]);
+  const termino = searchTerm.toLowerCase();
+  const filteredProductos = productos.filter(p =>
+    pasaFiltros(p) && (p.nombre.toLowerCase().includes(termino) || p.sku.toLowerCase().includes(termino)));
 
   const { ordenadas: productosOrdenados, orden, alternar } = useOrdenTabla(filteredProductos, {
     sku: (p) => p.sku, nombre: (p) => p.nombre, categoria: (p) => p.categoria?.nombre, precio: (p) => Number(p.precio_base || 0),
     iva: (p) => (p.impuesto_pct == null ? null : Number(p.impuesto_pct)),
     stock: (p) => Number(p.stock_disponible ?? p.stock_actual ?? 0),
   });
-  const pagination = usePagination(productosOrdenados, 50);
+  const pagination = usePagination(productosOrdenados, 50, f.firma);
   const exportarProductos = () => exportarCSV("productos", productosOrdenados, [
     { titulo: "SKU", valor: (p) => p.sku }, { titulo: "Producto", valor: (p) => p.nombre }, { titulo: "Categoría", valor: (p) => p.categoria?.nombre },
     { titulo: "Precio base", valor: (p) => Number(p.precio_base || 0) }, { titulo: "IVA %", valor: (p) => (p.impuesto_pct == null ? "" : Number(p.impuesto_pct)) },
     { titulo: "Existencia", valor: (p) => p.stock_actual },
     { titulo: "Disponible", valor: (p) => p.stock_disponible ?? p.stock_actual }, { titulo: "Activo", valor: (p) => (p.activo ? "Sí" : "No") },
+    { titulo: "Visible en tienda", valor: (p) => (p.activo && p.vendible !== false && !p.oculto_tienda ? "Sí" : "No") },
+    { titulo: "Foto", valor: (p) => (tieneFoto(p) ? "Sí" : "No") }, { titulo: "Tipo", valor: (p) => (controla(p) ? "Almacenable" : "Servicio") },
   ]);
 
+  // Sin filtros, los mismos números de siempre (sobre todos los productos)
   const stats = {
-    total: productos.length,
-    disponibles: productos.filter(p => p.controla_stock !== false && p.stock_actual > p.stock_minimo).length,
-    bajoStock: productos.filter(p => p.activo && p.controla_stock !== false && p.stock_actual > 0 && p.stock_actual <= p.stock_minimo).length,
-    agotados: productos.filter(p => p.activo && p.controla_stock !== false && p.stock_actual <= 0).length,
+    total: baseKpi.length,
+    disponibles: baseKpi.filter(p => p.controla_stock !== false && p.stock_actual > p.stock_minimo).length,
+    bajoStock: baseKpi.filter(p => p.activo && p.controla_stock !== false && p.stock_actual > 0 && p.stock_actual <= p.stock_minimo).length,
+    agotados: baseKpi.filter(p => p.activo && p.controla_stock !== false && p.stock_actual <= 0).length,
   };
+  // Pulsar un indicador de stock lo fija como filtro (bajo stock y agotados cuentan solo productos activos, como el KPI)
+  const kpiStock = (stock: string, soloActivos: boolean) => () =>
+    f.v("stock") === stock ? f.setVarios({ stock: "", activo: "" }) : f.setVarios({ stock, activo: soloActivos ? "si" : "" });
 
   const getStatus = (p: Producto) => {
     if (p.controla_stock === false) return { label: "Servicio", variant: "outline" as const };
@@ -489,9 +545,9 @@ const Productos = () => {
       <KpiStrip
         items={[
           { label: "Total Productos", valor: stats.total, tono: "primario" },
-          { label: "Disponibles", valor: stats.disponibles, tono: "positivo" },
-          { label: "Bajo Stock", valor: stats.bajoStock, tono: "alerta" },
-          { label: "Agotados", valor: stats.agotados, tono: "negativo" },
+          { label: "Disponibles", valor: stats.disponibles, tono: "positivo", onClick: kpiStock("disponible", false), activo: f.v("stock") === "disponible", titulo: "Ver los disponibles" },
+          { label: "Bajo Stock", valor: stats.bajoStock, tono: "alerta", onClick: kpiStock("bajo", true), activo: f.v("stock") === "bajo", titulo: "Ver los activos con bajo stock" },
+          { label: "Agotados", valor: stats.agotados, tono: "negativo", onClick: kpiStock("agotado", true), activo: f.v("stock") === "agotado", titulo: "Ver los activos agotados" },
         ]}
       />
 
@@ -500,20 +556,8 @@ const Productos = () => {
         busqueda={searchTerm}
         onBusqueda={setSearchTerm}
         placeholder="Buscar producto..."
-        contador={`${filteredProductos.length} registros`}
-        filtros={
-          <Select value={categoriaFilter} onValueChange={setCategoriaFilter}>
-            <SelectTrigger className="h-8 w-44 text-[13px]">
-              <SelectValue placeholder="Categoría" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas</SelectItem>
-              {categorias.map((cat) => (
-                <SelectItem key={cat.id} value={cat.id}>{cat.nombre}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        }
+        contador={loading ? undefined : contadorFiltrado(filteredProductos.length, productos.length, f.activos || !!searchTerm)}
+        filtros={<FiltrosLista filtros={f} resultados={filteredProductos.length} />}
         acciones={
           <>
             {cols.selector}

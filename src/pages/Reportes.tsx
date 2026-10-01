@@ -22,6 +22,7 @@ import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
+import { FiltrosLista, useFiltros, opcionesTexto, opcionesPrueba, pasaPrueba, coincideTexto, type OpcionPrueba } from "@/components/datos/FiltrosLista";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useEmpresa } from "@/contexts/EmpresaContext";
@@ -164,8 +165,8 @@ const Reportes = () => {
   const [cobrosPrev, setCobrosPrev] = useState<FilaCobro[]>([]);
   const [mesesCobro, setMesesCobro] = useState<FilaCobro[]>([]);
   const [inv, setInv] = useState<FilaInv[]>([]);
-  const [diasRot, setDiasRot] = useState(90);
-  const [filtroInv, setFiltroInv] = useState<"todos" | "quiebre" | "inmovilizado">("todos");
+  // Ventana de rotación en la URL (?rotacion=30|60|90|180)
+  const diasRot = [30, 60, 90, 180].includes(Number(params.get("rotacion"))) ? Number(params.get("rotacion")) : 90;
   const [qInv, setQInv] = useState("");
 
   // Pestaña, período y fuente quedan en la URL (para compartir el reporte)
@@ -173,7 +174,14 @@ const Reportes = () => {
     if (valor === porDefecto) params.delete(clave); else params.set(clave, valor);
     setParams(params, { replace: true });
   };
-  const cambiarTab = (t: string) => { setTab(t); enUrl("tab", t, "ventas"); };
+  // Al salir de Inventario se quitan sus filtros de la URL (una sola escritura: dos seguidas se pisan)
+  const cambiarTab = (t: string) => {
+    setTab(t);
+    if (t === "ventas") params.delete("tab"); else params.set("tab", t);
+    if (t !== "inventario") ["situacion", "categoria", "rotacion"].forEach((k) => params.delete(k));
+    setParams(params, { replace: true });
+  };
+  const setDiasRot = (d: number) => enUrl("rotacion", String(d), "90");
   const setPeriodo = (p: Periodo) => { setPeriodoEstado(p); enUrl("periodo", p, "mes"); };
   const setFuente = (f: Fuente) => { setFuenteEstado(f); enUrl("fuente", f, "ambas"); };
 
@@ -297,23 +305,38 @@ const Reportes = () => {
   const varCobros = variacion(totalCobros.monto, cobradoPrev);
 
   // ── Inventario ──
+  // Filtros de la pestaña (en la URL): situación (las mismas reglas que los indicadores) y categoría
+  const pruebasSituacion: OpcionPrueba<FilaInv>[] = [
+    { valor: "sin_disponible", etiqueta: "Sin disponible", prueba: (f) => num(f.disponible) <= 0 },
+    { valor: "quiebre", etiqueta: "Riesgo de quiebre (< 15 días)", prueba: (f) => f.cobertura_dias !== null && num(f.cobertura_dias) < 15 },
+    { valor: "inmovilizado", etiqueta: "Inmovilizado (sin ventas)", prueba: (f) => num(f.vendido_unidades) <= 0 && num(f.existencia) > 0 },
+  ];
+  const fInv = useFiltros(tab === "inventario" ? [
+    { clave: "situacion", etiqueta: "Situación", todos: "Todas", principal: true, opciones: opcionesPrueba(inv, pruebasSituacion) },
+    { clave: "categoria", etiqueta: "Categoría", todos: "Todas", principal: true, opciones: opcionesTexto(inv, (f) => f.categoria) },
+  ] : []);
+  const filtroInv = fInv.v("situacion");
+  // Indicadores: por categoría si hay una elegida (sin filtros, los mismos de siempre); la situación la fijan ellos al pulsarlos
+  const invBase = useMemo(() => inv.filter((f) => coincideTexto(f.categoria, fInv.v("categoria"))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [inv, fInv.firma]);
   const invStats = useMemo(() => ({
-    total: inv.length,
-    sinDisponible: inv.filter((f) => num(f.disponible) <= 0).length,
-    quiebre: inv.filter((f) => f.cobertura_dias !== null && num(f.cobertura_dias) < 15).length,
-    inmovilizado: inv.filter((f) => num(f.vendido_unidades) <= 0 && num(f.existencia) > 0).length,
-    vendido: inv.reduce((s, f) => s + num(f.vendido_usd), 0),
-  }), [inv]);
+    total: invBase.length,
+    sinDisponible: invBase.filter((f) => num(f.disponible) <= 0).length,
+    quiebre: invBase.filter((f) => f.cobertura_dias !== null && num(f.cobertura_dias) < 15).length,
+    inmovilizado: invBase.filter((f) => num(f.vendido_unidades) <= 0 && num(f.existencia) > 0).length,
+    vendido: invBase.reduce((s, f) => s + num(f.vendido_usd), 0),
+  }), [invBase]);
+  const setFiltroInv = (s: string) => fInv.set("situacion", filtroInv === s ? "" : s);
   const textoInv = qInv.trim().toLowerCase();
-  const invFiltrado = inv.filter((f) =>
-    (filtroInv === "todos" || (filtroInv === "quiebre" ? f.cobertura_dias !== null && num(f.cobertura_dias) < 15 : num(f.vendido_unidades) <= 0 && num(f.existencia) > 0)) &&
+  const invFiltrado = invBase.filter((f) => pasaPrueba(pruebasSituacion, filtroInv, f) &&
     (!textoInv || f.nombre.toLowerCase().includes(textoInv) || (f.sku || "").toLowerCase().includes(textoInv) || f.categoria.toLowerCase().includes(textoInv)));
   const { ordenadas: invOrden, orden: ordenInv, alternar: alternarInv } = useOrdenTabla(invFiltrado, {
     sku: (f) => f.sku, nombre: (f) => f.nombre, categoria: (f) => f.categoria, existencia: (f) => num(f.existencia), comprometido: (f) => num(f.comprometido),
     disponible: (f) => num(f.disponible), vendido: (f) => num(f.vendido_unidades), usd: (f) => num(f.vendido_usd), ultima: (f) => f.ultima_venta,
     cobertura: (f) => (f.cobertura_dias === null ? null : num(f.cobertura_dias)),
   });
-  const pgInv = usePagination(invOrden, 50);
+  const pgInv = usePagination(invOrden, 50, fInv.firma);
   const porCategoria = useMemo(() => {
     const m = new Map<string, { categoria: string; productos: number; existencia: number; disponible: number; vendido: number; usd: number }>();
     for (const f of inv) {
@@ -368,10 +391,13 @@ const Reportes = () => {
       <Tabs value={tab} onValueChange={cambiarTab}>
         <BarraLista pestanas={<div className="-mx-1 w-[calc(100%+0.5rem)] overflow-x-auto px-1 [scrollbar-width:none] sm:mx-0 sm:w-auto sm:px-0">{pestanas}</div>}
           filtros={tab === "inventario" ? (
-            <Select value={String(diasRot)} onValueChange={(v) => setDiasRot(Number(v))}>
-              <SelectTrigger className="h-8 w-52 text-[13px]" aria-label="Ventana de rotación"><SelectValue /></SelectTrigger>
-              <SelectContent>{[30, 60, 90, 180].map((d) => <SelectItem key={d} value={String(d)}>Rotación: ventas de {d} días</SelectItem>)}</SelectContent>
-            </Select>
+            <>
+              <Select value={String(diasRot)} onValueChange={(v) => setDiasRot(Number(v))}>
+                <SelectTrigger className="h-8 w-52 text-[13px]" aria-label="Ventana de rotación"><SelectValue /></SelectTrigger>
+                <SelectContent>{[30, 60, 90, 180].map((d) => <SelectItem key={d} value={String(d)}>Rotación: ventas de {d} días</SelectItem>)}</SelectContent>
+              </Select>
+              <FiltrosLista filtros={fInv} resultados={invFiltrado.length} />
+            </>
           ) : tab === "profit" || tab === "calidad" ? null : selectorPeriodo}
           acciones={cargando ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             : <span className="text-[11px] text-muted-foreground">{tab === "calidad" ? "Solo lectura · se corrige en Odoo"
@@ -563,8 +589,8 @@ const Reportes = () => {
 
         <TabsContent value="inventario" className="mt-0">
           <KpiStrip items={[
-            { label: "Productos almacenables", valor: fmtN(invStats.total), tono: "primario", onClick: () => setFiltroInv("todos"), activo: filtroInv === "todos" },
-            { label: "Sin disponible", valor: fmtN(invStats.sinDisponible), tono: invStats.sinDisponible ? "negativo" : "normal" },
+            { label: "Productos almacenables", valor: fmtN(invStats.total), tono: "primario", onClick: () => fInv.set("situacion", ""), activo: !filtroInv },
+            { label: "Sin disponible", valor: fmtN(invStats.sinDisponible), tono: invStats.sinDisponible ? "negativo" : "normal", onClick: () => setFiltroInv("sin_disponible"), activo: filtroInv === "sin_disponible" },
             { label: "Riesgo de quiebre", valor: fmtN(invStats.quiebre), detalle: "cobertura menor a 15 días", tono: invStats.quiebre ? "alerta" : "normal", onClick: () => setFiltroInv("quiebre"), activo: filtroInv === "quiebre" },
             { label: "Inmovilizado", valor: fmtN(invStats.inmovilizado), detalle: `con existencia y sin ventas en ${diasRot} días`, tono: invStats.inmovilizado ? "alerta" : "normal", onClick: () => setFiltroInv("inmovilizado"), activo: filtroInv === "inmovilizado" },
             { label: `Vendido en ${diasRot} días`, valor: formatPrice(invStats.vendido), tono: "positivo" },

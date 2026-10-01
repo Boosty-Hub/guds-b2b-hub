@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { AlertCircle, ChevronRight, FileText, RefreshCw, Search, X } from "lucide-react";
+import { AlertCircle, ChevronRight, FileText, RefreshCw, Search } from "lucide-react";
 import { PortalPagina } from "@/components/portal/PortalPagina";
 import { EstadoVacio, Segmentado, SkeletonFilas, fechaCorta, normalizar } from "@/components/portal/sistema";
 import { NavFinanzas, PillDocumento } from "@/components/portal/finanzas";
@@ -13,6 +13,7 @@ import {
   TOLERANCIA, TRAMOS, conSigno, cuentaEnDeuda, diasEntre, esClaveTramo, estadoDocumento, etiquetaTipoDoc, hoyLocal, tramoDe,
   type DocumentoCliente,
 } from "@/hooks/useFinanzasPortal";
+import { FiltrosLista, useFiltros, opcionesPrueba, pasaPrueba, enRango, type OpcionPrueba } from "@/components/datos/FiltrosLista";
 
 // Facturas del cliente (F5): facturas, notas de débito y de crédito de su ficha en la empresa activa, con su estado de
 // cobro (pagada / parcial / vencida / por pagar / anulada). "Por pagar" usa la misma regla que Cuentas por Cobrar del
@@ -21,6 +22,18 @@ import {
 type Vista = "por_pagar" | "vencidas" | "pagadas" | "todas";
 const VISTAS: Vista[] = ["por_pagar", "vencidas", "pagadas", "todas"];
 const POR_PAGINA = 30;
+// Estados que ve el cliente en cada fila (los de estadoDocumento)
+const ESTADOS_DOC: [string, string][] = [
+  ["por_pagar", "Por pagar"], ["parcial", "Pago parcial"], ["vencida", "Vencida"], ["pagada", "Pagada"],
+  ["anulada", "Anulada"], ["a_favor", "A favor"], ["aplicada", "Aplicada"],
+];
+
+// Tipo de documento, con la misma etiqueta que se ve en cada fila
+const PRUEBAS_TIPO: OpcionPrueba<DocumentoCliente>[] = [
+  { valor: "factura", etiqueta: "Facturas", prueba: (d) => d.tipo !== "nota_credito" && !d.es_nota_debito },
+  { valor: "nota_debito", etiqueta: "Notas de débito", prueba: (d) => d.tipo !== "nota_credito" && !!d.es_nota_debito },
+  { valor: "nota_credito", etiqueta: "Notas de crédito", prueba: (d) => d.tipo === "nota_credito" },
+];
 
 const PortalFacturas = () => {
   const { user } = useAuth();
@@ -34,7 +47,8 @@ const PortalFacturas = () => {
   const [visibles, setVisibles] = useState(POR_PAGINA);
 
   const verParam = params.get("ver");
-  const tramo = esClaveTramo(params.get("tramo")) ? params.get("tramo") : null;
+  const tramoUrl = params.get("tramo");
+  const tramo = esClaveTramo(tramoUrl) ? tramoUrl : null;
   const vista: Vista = tramo ? "por_pagar" : VISTAS.includes(verParam as Vista) ? (verParam as Vista) : "por_pagar";
 
   const cargar = async () => {
@@ -51,7 +65,6 @@ const PortalFacturas = () => {
     setDocs(((data as DocumentoCliente[]) ?? []).map((d) => ({ ...d, total_usd: Number(d.total_usd ?? 0), saldo_usd: Number(d.saldo_usd ?? 0) })));
   };
   useEffect(() => { cargar(); }, [user?.cliente_id]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setVisibles(POR_PAGINA); }, [vista, tramo, q]);
 
   const grupos = useMemo(() => {
     const todos = docs ?? [];
@@ -63,9 +76,24 @@ const PortalFacturas = () => {
     return { por_pagar: porPagar, vencidas, pagadas, todas: todos };
   }, [docs, hoy]);
 
+  // ---- Filtros (en la URL: ?tramo= —el de siempre, solo en "Por pagar"—, ?tipo=, ?estado=, ?emision=) ----
+  // El estado es el que ve el cliente en cada fila (pagada, parcial, vencida, por pagar, anulada; a favor o aplicada en las NC)
+  // Lista fija: un estado que hoy no tiene documentos (p. ej. en un enlace compartido) filtra a 0 en vez de ignorarse
+  const pruebasEstado: OpcionPrueba<DocumentoCliente>[] = useMemo(() => ESTADOS_DOC.map(([valor, etiqueta]) =>
+    ({ valor, etiqueta, prueba: (d: DocumentoCliente) => estadoDocumento(d, hoy).clave === valor })), [hoy]);
+  const f = useFiltros([
+    { clave: "tramo", etiqueta: "Antigüedad", todos: "Todas", opciones: TRAMOS.map((t) => ({ valor: t.k, etiqueta: t.etiqueta,
+      n: grupos.por_pagar.filter((d) => tramoDe(d.fecha_vencimiento || d.fecha_emision, hoy) === t.k).length })) },
+    { clave: "tipo", etiqueta: "Tipo de documento", opciones: opcionesPrueba(grupos[vista], PRUEBAS_TIPO, true) },
+    { clave: "estado", etiqueta: "Estado", opciones: opcionesPrueba(grupos[vista], pruebasEstado).filter((o) => (o.n ?? 0) > 0 || o.valor === params.get("estado")) },
+    { clave: "emision", etiqueta: "Fecha de emisión", tipo: "fecha" },
+  ]);
+  useEffect(() => { setVisibles(POR_PAGINA); }, [vista, tramo, q, f.firma]);
+
   const lista = useMemo(() => {
     let l = grupos[vista];
     if (tramo) l = l.filter((d) => tramoDe(d.fecha_vencimiento || d.fecha_emision, hoy) === tramo);
+    l = l.filter((d) => pasaPrueba(PRUEBAS_TIPO, f.v("tipo"), d) && pasaPrueba(pruebasEstado, f.v("estado"), d) && enRango(d.fecha_emision, f.v("emision")));
     const t = normalizar(q.trim());
     if (t) l = l.filter((d) => normalizar(d.numero).includes(t));
     if (vista === "por_pagar" || vista === "vencidas") {
@@ -73,25 +101,23 @@ const PortalFacturas = () => {
       l = [...l].sort((a, b) => (a.fecha_vencimiento || a.fecha_emision || "").localeCompare(b.fecha_vencimiento || b.fecha_emision || ""));
     }
     return l;
-  }, [grupos, vista, tramo, q, hoy]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grupos, vista, tramo, q, hoy, f.firma, pruebasEstado]);
 
   const totalSaldo = lista.reduce((s, d) => s + (cuentaEnDeuda(d) ? Number(d.saldo_usd) : 0), 0);
   const enPantalla = lista.slice(0, visibles);
 
+  // Cambiar de pestaña quita el tramo (solo aplica a "Por pagar") y el estado (depende de la pestaña)
   const cambiarVista = (v: Vista) => {
     const n = new URLSearchParams(params);
     n.delete("tramo");
+    n.delete("estado");
     if (v === "por_pagar") n.delete("ver"); else n.set("ver", v);
     setParams(n, { replace: true });
   };
-  const quitarTramo = () => {
-    const n = new URLSearchParams(params);
-    n.delete("tramo");
-    setParams(n, { replace: true });
-  };
 
-  const etiquetaTramo = TRAMOS.find((t) => t.k === tramo)?.etiqueta;
-  const vacio = {
+  const conSaldo = !!tramo || vista === "por_pagar" || vista === "vencidas";
+  const vacio = f.activos > 0 ? { titulo: "Ningún documento coincide con los filtros", desc: "Prueba con otras fechas o quita algún filtro." } : {
     por_pagar: { titulo: "No tienes facturas por pagar", desc: "Cuando tengas facturas con saldo pendiente, aparecerán aquí." },
     vencidas: { titulo: "No tienes facturas vencidas", desc: "Todo al día." },
     pagadas: { titulo: "Aún no hay facturas pagadas", desc: undefined },
@@ -129,21 +155,16 @@ const PortalFacturas = () => {
           </div>
         </div>
 
-        {(tramo || ((vista === "por_pagar" || vista === "vencidas") && docs && lista.length > 0)) && (
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {tramo ? (
-              <button type="button" onClick={quitarTramo}
-                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-sm hover:bg-muted" data-testid="chip-tramo">
-                Antigüedad: {etiquetaTramo}<X className="h-3.5 w-3.5" aria-label="Quitar filtro" />
-              </button>
-            ) : <span />}
-            {docs && lista.length > 0 && (
-              <p className="text-sm text-muted-foreground">
-                {lista.length} {lista.length === 1 ? "documento" : "documentos"} · saldo <span className="font-semibold tabular-nums text-foreground" data-testid="facturas-total">{formatPrice(totalSaldo)}</span>
-              </p>
-            )}
-          </div>
-        )}
+        {/* Filtros (con sus chips debajo) y el total de lo que se ve */}
+        <div className="flex flex-wrap items-center gap-2">
+          <FiltrosLista portal filtros={f} resultados={lista.length} />
+          {docs && lista.length > 0 && (
+            <p className="ml-auto text-sm text-muted-foreground">
+              <span data-contador="">{lista.length} {lista.length === 1 ? "documento" : "documentos"}</span>
+              {(conSaldo || f.activos > 0) && <> · saldo <span className="font-semibold tabular-nums text-foreground" data-testid="facturas-total">{formatPrice(totalSaldo)}</span></>}
+            </p>
+          )}
+        </div>
 
         {error ? (
           <div className="rounded-xl border border-border bg-card">
@@ -154,7 +175,8 @@ const PortalFacturas = () => {
           <SkeletonFilas n={6} alto="h-16" />
         ) : lista.length === 0 ? (
           <div className="rounded-xl border border-border bg-card">
-            <EstadoVacio icono={FileText} titulo={q ? `No hay documentos con «${q}»` : vacio.titulo} descripcion={q ? undefined : vacio.desc} />
+            <EstadoVacio icono={FileText} titulo={q ? `No hay documentos con «${q}»` : vacio.titulo} descripcion={q ? undefined : vacio.desc}
+              accion={f.activos > 0 ? <Button variant="outline" onClick={f.limpiar}>Limpiar filtros</Button> : undefined} />
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-border bg-card">

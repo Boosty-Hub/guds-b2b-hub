@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertCircle, CalendarRange, CheckCircle, Clock, Download, FileText, Printer, Plus, RefreshCw, Wallet } from "lucide-react";
+import { AlertCircle, CalendarRange, CheckCircle, Clock, Download, FileText, Plus, RefreshCw, Wallet } from "lucide-react";
 import { PortalPagina } from "@/components/portal/PortalPagina";
 import { EstadoVacio, Kpi, Panel, Segmentado, SkeletonFilas, fechaCorta } from "@/components/portal/sistema";
 import {
-  Antiguedad, DocumentoMovimiento, EstadoCuentaImpreso, NavFinanzas, conceptoMovimiento, exportarEstadoCuentaCSV,
+  Antiguedad, DocumentoMovimiento, NavFinanzas, conceptoMovimiento, exportarEstadoCuentaCSV,
 } from "@/components/portal/finanzas";
+import { BotonPdfEstadoCuenta } from "@/components/estado-cuenta/BotonPdfEstadoCuenta";
+import type { EstadoCuentaCompleto } from "@/components/estado-cuenta/tipos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +17,7 @@ import { conSigno, condicionPagoTexto, hoyLocal, sumarDias, useEstadoCuenta, typ
 
 // Estado de cuenta del cliente (F5): saldo, vencido, por vencer y a favor con la regla de Cuentas por Cobrar del admin
 // (función estado_cuenta_portal), antigüedad por tramos, crédito y los movimientos del período con saldo corrido.
-// Descarga en CSV e impresión limpia (Guardar como PDF).
+// Descarga en CSV y en PDF con diseño (el mismo documento del admin y del enlace público, fase 20w).
 
 type Rango = "30" | "90" | "anio" | "todo" | "fechas";
 const POR_PAGINA = 40;
@@ -39,18 +41,8 @@ const PortalEstadoCuenta = () => {
   const periodo = useMemo(() => periodoDe(rango, hoy, aplicadas), [rango, hoy, aplicadas]);
   const { datos, cargando, error, recargar } = useEstadoCuenta(periodo);
   const [visibles, setVisibles] = useState(POR_PAGINA);
-  const [imprimiendo, setImprimiendo] = useState(false);
 
   useEffect(() => { setVisibles(POR_PAGINA); }, [periodo.desde, periodo.hasta]);
-
-  // Imprimir: se monta la versión imprimible, se abre el diálogo del navegador y se desmonta al terminar
-  useEffect(() => {
-    if (!imprimiendo) return;
-    const fin = () => setImprimiendo(false);
-    window.addEventListener("afterprint", fin);
-    const t = setTimeout(() => window.print(), 50);
-    return () => { clearTimeout(t); window.removeEventListener("afterprint", fin); };
-  }, [imprimiendo]);
 
   const r = datos?.resumen;
   const primeraCarga = cargando && !datos;
@@ -65,9 +57,7 @@ const PortalEstadoCuenta = () => {
       <Button variant="outline" className="gap-2" onClick={() => datos && exportarEstadoCuentaCSV(datos)} disabled={!datos} data-testid="ec-csv">
         <Download className="h-4 w-4" />CSV
       </Button>
-      <Button variant="outline" className="gap-2" onClick={() => setImprimiendo(true)} disabled={!datos} data-testid="ec-imprimir">
-        <Printer className="h-4 w-4" />Imprimir
-      </Button>
+      <BotonPdfEstadoCuenta datos={datos as EstadoCuentaCompleto | null} etiqueta="PDF" />
       <Button asChild className="gap-2"><Link to="/portal/pagos?declarar=1"><Plus className="h-4 w-4" />Declarar pago</Link></Button>
     </>
   );
@@ -107,9 +97,7 @@ const PortalEstadoCuenta = () => {
             <Button variant="outline" className="h-11 gap-2" onClick={() => datos && exportarEstadoCuentaCSV(datos)} disabled={!datos}>
               <Download className="h-4 w-4" />Descargar CSV
             </Button>
-            <Button variant="outline" className="h-11 gap-2" onClick={() => setImprimiendo(true)} disabled={!datos}>
-              <Printer className="h-4 w-4" />Imprimir o PDF
-            </Button>
+            <BotonPdfEstadoCuenta datos={datos as EstadoCuentaCompleto | null} className="h-11" data-testid="ec-pdf-movil" />
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
@@ -191,12 +179,11 @@ const PortalEstadoCuenta = () => {
           </Panel>
 
           {currency === "BS" && (
-            <p className="text-center text-xs text-muted-foreground">Los montos se muestran en bolívares a la tasa del día. El CSV y la versión impresa van en USD.</p>
+            <p className="text-center text-xs text-muted-foreground">Los montos se muestran en bolívares a la tasa del día. El CSV y el PDF van en USD.</p>
           )}
         </div>
       )}
 
-      {imprimiendo && datos && <EstadoCuentaImpreso datos={datos} />}
     </PortalPagina>
   );
 };

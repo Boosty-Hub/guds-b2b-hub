@@ -11,6 +11,7 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { OdooBadge } from "@/components/OdooBadge";
+import { ContactosEntidad } from "@/components/contactos/ContactosEntidad";
 
 interface Proveedor {
   id: string; odoo_id: number | null; odoo_sync_at: string | null; codigo: string; nombre: string; rif: string | null;
@@ -45,6 +46,7 @@ const ProveedorDetalle = () => {
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([]);
   const [retenciones, setRetenciones] = useState<RetEmitida[]>([]);
   const [loading, setLoading] = useState(true);
+  const [nContactos, setNContactos] = useState<number | null>(null);
 
   useEffect(() => {
     let activo = true;
@@ -57,6 +59,9 @@ const ProveedorDetalle = () => {
         supabase.from("ordenes_compra").select("id, numero, referencia_proveedor, fecha_orden, estado, estado_recepcion, total_usd").eq("proveedor_id", proveedorId).order("fecha_orden", { ascending: false }),
         supabase.from("retenciones_emitidas").select("id, tipo, numero, fecha, porcentaje, base_imponible, total, estado").eq("proveedor_id", proveedorId).order("fecha", { ascending: false }),
       ]);
+      // Contactos del proveedor (20v): solo el conteo para la pestaña; la lista la carga ContactosEntidad
+      const { count } = await supabase.from("cliente_contactos").select("id", { count: "exact", head: true }).eq("proveedor_id", proveedorId);
+      if (activo) setNContactos(count ?? 0);
       if (activo) {
         setProv((p as Proveedor) ?? null);
         setFacturas((f as FacturaProv[]) ?? []);
@@ -154,6 +159,7 @@ const ProveedorDetalle = () => {
           <TabsTrigger value="pagos">Pagos ({pagos.length})</TabsTrigger>
           <TabsTrigger value="ordenes">Órdenes de compra ({ordenes.length})</TabsTrigger>
           <TabsTrigger value="retenciones">Retenciones ({retenciones.length})</TabsTrigger>
+          <TabsTrigger value="contactos">Contactos{nContactos != null ? ` (${nContactos})` : ""}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="cuenta" className="mt-4">
@@ -292,6 +298,9 @@ const ProveedorDetalle = () => {
             </Table>
             <DataTablePagination pagination={pgRet} />
           </div>
+        </TabsContent>
+        <TabsContent value="contactos" className="mt-4">
+          <ContactosEntidad tipo="proveedor" entidadId={prov.id} entidadNombre={prov.nombre} onCambio={setNContactos} />
         </TabsContent>
       </Tabs>
     </MainLayout>

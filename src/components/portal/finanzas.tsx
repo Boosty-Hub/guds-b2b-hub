@@ -1,18 +1,16 @@
-import { useEffect, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { Link, useLocation } from "react-router-dom";
 import { Boxes, FileText, Landmark, LineChart, Receipt, Wallet, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { METODO_LABEL } from "@/hooks/useCuentasPago";
 import { exportarCSV } from "@/components/datos/tabla";
-import { PillTono, fechaCorta } from "@/components/portal/sistema";
+import { PillTono } from "@/components/portal/sistema";
 import {
-  TRAMOS, condicionPagoTexto, estadoDocumento, type DocumentoCliente, type EstadoCuenta, type Movimiento, type ResumenCuenta,
+  TRAMOS, estadoDocumento, type DocumentoCliente, type EstadoCuenta, type Movimiento, type ResumenCuenta,
 } from "@/hooks/useFinanzasPortal";
 
 // Piezas compartidas de Finanzas del portal del cliente (F5): navegación de la sección, barra de antigüedad, etiquetas de
-// los movimientos, estado de un documento, exportación a CSV y la versión imprimible del estado de cuenta.
+// los movimientos, estado de un documento y exportación a CSV. El PDF del estado de cuenta está en components/estado-cuenta.
 
 const DESTINOS: { etiqueta: string; ruta: string; icono: LucideIcon }[] = [
   { etiqueta: "Estado de cuenta", ruta: "/portal/finanzas", icono: LineChart },
@@ -52,9 +50,10 @@ export const NavFinanzas = ({ className }: { className?: string }) => {
   );
 };
 
-/** Barra apilada de antigüedad + filas por tramo (cada una lleva a sus facturas). */
-export const Antiguedad = ({ resumen, enlaces = true }: { resumen: ResumenCuenta; enlaces?: boolean }) => {
-  const { formatPrice } = useCurrency();
+/** Barra apilada de antigüedad + filas por tramo (cada una lleva a sus facturas). `formato`: p. ej. siempre USD (enlace público). */
+export const Antiguedad = ({ resumen, enlaces = true, formato }: { resumen: ResumenCuenta; enlaces?: boolean; formato?: (n: number) => string }) => {
+  const { formatPrice: formatoMoneda } = useCurrency();
+  const formatPrice = formato ?? formatoMoneda;
   const total = Number(resumen.saldo) || 0;
   return (
     <div>
@@ -133,7 +132,6 @@ export const DocumentoMovimiento = ({ m, className }: { m: Movimiento; className
     <span className={cn("tabular-nums text-muted-foreground", className)}>{m.tipo === "redondeo" ? "—" : m.documento || "—"}</span>
   );
 
-const fmtUsd = (n: number) => `${n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const n2 = (n: number) => Number(Number(n).toFixed(2));
 
 /** Descarga el estado de cuenta del período en CSV (montos en USD, separador punto y coma, para Excel). */
@@ -159,112 +157,4 @@ export const exportarEstadoCuentaCSV = (d: EstadoCuenta) => {
     { titulo: "Abono (USD)", valor: (f) => f.abono },
     { titulo: "Saldo (USD)", valor: (f) => f.saldo },
   ]);
-};
-
-/**
- * Versión imprimible del estado de cuenta (Imprimir / Guardar como PDF del navegador). Se monta fuera de la app (portal en
- * <body>) y al imprimir es lo único visible: sin barra lateral, navegación, widgets ni tema oscuro.
- */
-export const EstadoCuentaImpreso = ({ datos }: { datos: EstadoCuenta }) => {
-  useEffect(() => {
-    const estilo = document.createElement("style");
-    estilo.setAttribute("data-impresion-portal", "");
-    estilo.textContent = `
-      @media screen { .impresion-portal { display: none !important; } }
-      @media print {
-        html, body { background: #fff !important; }
-        body > *:not(.impresion-portal) { display: none !important; }
-        .impresion-portal { display: block !important; }
-        @page { size: A4; margin: 14mm 12mm; }
-      }`;
-    document.head.appendChild(estilo);
-    return () => { estilo.remove(); };
-  }, []);
-
-  const r = datos.resumen;
-  const periodo = datos.periodo.desde
-    ? `Del ${fechaCorta(datos.periodo.desde)} al ${fechaCorta(datos.periodo.hasta ?? datos.hoy)}`
-    : `Todos los movimientos hasta el ${fechaCorta(datos.periodo.hasta ?? datos.hoy)}`;
-  const condicion = condicionPagoTexto(datos.cliente.condicion_pago, datos.cliente.dias_credito);
-  const celda = "border-b border-neutral-300 px-2 py-1.5";
-
-  const doc: ReactNode = (
-    <div className="impresion-portal bg-white font-sans text-[11px] leading-snug text-black" aria-hidden>
-      <header className="flex items-start justify-between gap-6 border-b-2 border-black pb-3">
-        <div>
-          <p className="text-base font-bold">{datos.empresa?.nombre ?? "GUDS"}</p>
-          {datos.empresa?.rif && <p>RIF {datos.empresa.rif}</p>}
-        </div>
-        <div className="text-right">
-          <p className="text-lg font-bold uppercase tracking-wide">Estado de cuenta</p>
-          <p>Emitido el {fechaCorta(datos.hoy)}</p>
-          <p>{periodo}</p>
-        </div>
-      </header>
-
-      <section className="mt-3 grid grid-cols-2 gap-6">
-        <div>
-          <p className="text-[10px] font-semibold uppercase text-neutral-600">Cliente</p>
-          <p className="text-sm font-semibold">{datos.cliente.nombre}</p>
-          <p>{[datos.cliente.rif && `RIF ${datos.cliente.rif}`, datos.cliente.codigo && `Código ${datos.cliente.codigo}`].filter(Boolean).join(" · ")}</p>
-          {condicion && <p>Condición de pago: {condicion}</p>}
-        </div>
-        <table className="w-full border-collapse self-start">
-          <tbody>
-            <tr><td className={celda}>Saldo por pagar</td><td className={cn(celda, "text-right font-semibold tabular-nums")}>{fmtUsd(r.saldo)}</td></tr>
-            <tr><td className={celda}>Vencido</td><td className={cn(celda, "text-right tabular-nums")}>{fmtUsd(r.vencido)}</td></tr>
-            <tr><td className={celda}>Por vencer</td><td className={cn(celda, "text-right tabular-nums")}>{fmtUsd(r.por_vencer)}</td></tr>
-            <tr><td className={celda}>A favor (notas de crédito y anticipos)</td><td className={cn(celda, "text-right tabular-nums")}>{fmtUsd(-r.a_favor)}</td></tr>
-            <tr><td className="px-2 py-1.5 font-bold">Saldo neto</td><td className="px-2 py-1.5 text-right font-bold tabular-nums">{fmtUsd(r.neto)}</td></tr>
-          </tbody>
-        </table>
-      </section>
-
-      <section className="mt-4">
-        <p className="mb-1 text-[10px] font-semibold uppercase text-neutral-600">Antigüedad del saldo</p>
-        <table className="w-full border-collapse">
-          <thead><tr>{TRAMOS.map((t) => <th key={t.k} className={cn(celda, "text-right font-semibold")}>{t.etiqueta}</th>)}<th className={cn(celda, "text-right font-semibold")}>Total</th></tr></thead>
-          <tbody><tr>{TRAMOS.map((t) => <td key={t.k} className={cn(celda, "text-right tabular-nums")}>{fmtUsd(Number(r[t.k]))}</td>)}<td className={cn(celda, "text-right font-semibold tabular-nums")}>{fmtUsd(r.saldo)}</td></tr></tbody>
-        </table>
-      </section>
-
-      <section className="mt-4">
-        <p className="mb-1 text-[10px] font-semibold uppercase text-neutral-600">Movimientos</p>
-        <table className="w-full border-collapse">
-          <thead className="[display:table-header-group]">
-            <tr>
-              <th className={cn(celda, "text-left font-semibold")}>Fecha</th>
-              <th className={cn(celda, "text-left font-semibold")}>Documento</th>
-              <th className={cn(celda, "text-left font-semibold")}>Concepto</th>
-              <th className={cn(celda, "text-right font-semibold")}>Cargo</th>
-              <th className={cn(celda, "text-right font-semibold")}>Abono</th>
-              <th className={cn(celda, "text-right font-semibold")}>Saldo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {datos.periodo.desde && (
-              <tr><td className={celda}>{fechaCorta(datos.periodo.desde)}</td><td className={celda} /><td className={cn(celda, "italic")}>Saldo anterior</td><td className={celda} /><td className={celda} /><td className={cn(celda, "text-right tabular-nums")}>{fmtUsd(datos.saldo_inicial)}</td></tr>
-            )}
-            {datos.movimientos.map((m, i) => (
-              <tr key={i} className="[break-inside:avoid]">
-                <td className={cn(celda, "whitespace-nowrap")}>{fechaCorta(m.fecha)}</td>
-                <td className={cn(celda, "tabular-nums")}>{m.tipo === "redondeo" ? "" : m.documento}</td>
-                <td className={celda}>{conceptoMovimiento(m)}</td>
-                <td className={cn(celda, "text-right tabular-nums")}>{m.monto > 0 ? fmtUsd(m.monto) : ""}</td>
-                <td className={cn(celda, "text-right tabular-nums")}>{m.monto < 0 ? fmtUsd(-m.monto) : ""}</td>
-                <td className={cn(celda, "text-right tabular-nums")}>{fmtUsd(m.saldo)}</td>
-              </tr>
-            ))}
-            <tr><td className="px-2 py-1.5">{fechaCorta(datos.periodo.hasta ?? datos.hoy)}</td><td /><td className="px-2 py-1.5 font-bold">Saldo final</td><td /><td /><td className="px-2 py-1.5 text-right font-bold tabular-nums">{fmtUsd(datos.saldo_final)}</td></tr>
-          </tbody>
-        </table>
-      </section>
-
-      <footer className="mt-4 border-t border-neutral-300 pt-2 text-[10px] text-neutral-600">
-        Montos en dólares (USD). Los documentos en bolívares se expresan en USD a la tasa de cada documento. Este estado de cuenta
-        refleja lo registrado a la fecha de emisión; los pagos declarados quedan pendientes hasta su verificación.
-      </footer>
-    </div>
-  );
-  return createPortal(doc, document.body);
 };

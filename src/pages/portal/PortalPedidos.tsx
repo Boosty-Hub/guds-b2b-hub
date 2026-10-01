@@ -16,6 +16,7 @@ import { EditorPedidoPendiente } from "@/components/portal/EditorPedidoPendiente
 import { type ResultadoEdicion } from "@/components/portal/pedidoEditable";
 import { textoPagoEdicion } from "@/components/portal/ResumenPagoPedido";
 import { EstadoPill, EstadoVacio, Segmentado, SkeletonFilas, fechaCorta, normalizar, useEsEscritorio } from "@/components/portal/sistema";
+import { FiltrosLista, useFiltros, opcionesPrueba, pasaPrueba, enRango, contadorFiltrado, type OpcionPrueba } from "@/components/datos/FiltrosLista";
 
 // Mis pedidos (F4). Escritorio: maestro-detalle (lista a la izquierda, detalle a la derecha). Móvil: lista y hoja.
 // Enlace directo: /portal/pedidos?pedido=<id> abre ese pedido (así llegan las notificaciones de confirmado, despachado y
@@ -48,6 +49,21 @@ const grupo = (clave: ClaveEstado): Pestana =>
 
 const fechaDe = (o: FilaPedido) => o.fecha_pedido ?? o.created_at;
 const POR_PAGINA = 20;
+
+// Filtros (en la URL: ?estado=&pago=&fecha=). El estado es el mismo que ve el cliente en la insignia de cada pedido.
+const ESTADOS_VISIBLES: { clave: ClaveEstado; etiqueta: string }[] = [
+  { clave: "por_aprobar", etiqueta: "Por aprobar" }, { clave: "registrandose", etiqueta: "Aprobado" },
+  { clave: "cotizacion", etiqueta: "Cotización" }, { clave: "confirmado", etiqueta: "Confirmado" },
+  { clave: "en_preparacion", etiqueta: "En preparación" }, { clave: "despachado_parcial", etiqueta: "Despacho parcial" },
+  { clave: "entregado", etiqueta: "Despachado" }, { clave: "cancelado", etiqueta: "Cancelado" }, { clave: "rechazado", etiqueta: "No aprobado" },
+];
+const PRUEBAS_ESTADO: OpcionPrueba<FilaPedido>[] = ESTADOS_VISIBLES.map((e) => ({ valor: e.clave, etiqueta: e.etiqueta, prueba: (o) => estadoVisible(o).clave === e.clave }));
+const PRUEBAS_PAGO: OpcionPrueba<FilaPedido>[] = [
+  { valor: "pendiente", etiqueta: "Pendiente de pago", prueba: (o) => (o.estado_pago || "pendiente") === "pendiente" },
+  { valor: "parcial", etiqueta: "Pago parcial", prueba: (o) => o.estado_pago === "parcial" },
+  { valor: "pagado", etiqueta: "Pagado", prueba: (o) => o.estado_pago === "pagado" },
+];
+const esClaveEstado = (v: string): v is ClaveEstado => ESTADOS_VISIBLES.some((e) => e.clave === v);
 
 const PortalPedidos = () => {
   const [sp, setSp] = useSearchParams();
@@ -99,7 +115,22 @@ const PortalPedidos = () => {
 
   const seleccionado = sp.get("pedido");
 
-  const conEstado = useMemo(() => ordenes.map((o) => ({ o, ev: estadoVisible(o) })), [ordenes]);
+  const f = useFiltros([
+    { clave: "estado", etiqueta: "Estado", opciones: opcionesPrueba(ordenes, PRUEBAS_ESTADO, true) },
+    { clave: "pago", etiqueta: "Pago", opciones: opcionesPrueba(ordenes, PRUEBAS_PAGO, true) },
+    { clave: "fecha", etiqueta: "Fecha del pedido", tipo: "fecha" },
+  ]);
+  const estadoFiltro = esClaveEstado(f.v("estado")) ? f.v("estado") as ClaveEstado : null;
+  // Con un estado elegido, la pestaña es la de ese estado; al cambiar a otra pestaña, el estado se quita
+  const pestanaVista: Pestana = estadoFiltro ? grupo(estadoFiltro) : pestana;
+  const cambiarPestana = (p: Pestana) => { setPestana(p); if (estadoFiltro && grupo(estadoFiltro) !== p) f.set("estado", ""); };
+
+  const conEstado = useMemo(() => ordenes
+    .filter((o) => pasaPrueba(PRUEBAS_PAGO, f.v("pago"), o) && enRango(fechaDe(o), f.v("fecha")))
+    .map((o) => ({ o, ev: estadoVisible(o) })),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [ordenes, f.firma]);
+  // Las pestañas cuentan con fecha y pago aplicados (sin filtros, lo mismo de siempre)
   const porPestana = useMemo(() => ({
     curso: conEstado.filter((x) => grupo(x.ev.clave) === "curso"),
     entregados: conEstado.filter((x) => grupo(x.ev.clave) === "entregados"),
@@ -115,10 +146,11 @@ const PortalPedidos = () => {
     if (x) setPestana(grupo(x.ev.clave));
   }, [seleccionado, loading, conEstado]);
 
-  useEffect(() => { setLimite(POR_PAGINA); }, [pestana, busqueda]);
+  useEffect(() => { setLimite(POR_PAGINA); }, [pestanaVista, busqueda, f.firma]);
 
   const q = normalizar(busqueda.trim());
-  const lista = porPestana[pestana].filter(({ o }) => !q || normalizar(o.numero).includes(q) || normalizar(o.numero_guds).includes(q));
+  const lista = porPestana[pestanaVista].filter(({ o, ev }) => (!estadoFiltro || ev.clave === estadoFiltro)
+    && (!q || normalizar(o.numero).includes(q) || normalizar(o.numero_guds).includes(q)));
   const visibles = lista.slice(0, limite);
 
   // En escritorio siempre hay un pedido a la vista (el elegido o el primero de la lista)
@@ -201,9 +233,11 @@ const PortalPedidos = () => {
     { valor: "cancelados" as const, etiqueta: "Cancelados y rechazados", n: porPestana.cancelados.length },
   ];
 
-  const vacio = pestana === "curso"
+  const vacio = f.activos > 0
+    ? { titulo: "Ningún pedido coincide con los filtros", desc: "Prueba con otras fechas o quita algún filtro." }
+    : pestanaVista === "curso"
     ? { titulo: "No tienes pedidos en curso", desc: "Cuando hagas un pedido, aquí verás cada paso hasta la entrega." }
-    : pestana === "entregados"
+    : pestanaVista === "entregados"
       ? { titulo: "Todavía no tienes pedidos entregados", desc: undefined }
       : { titulo: "No tienes pedidos cancelados ni rechazados", desc: undefined };
 
@@ -216,18 +250,26 @@ const PortalPedidos = () => {
       <div className="lg:grid lg:grid-cols-[minmax(320px,400px)_minmax(0,1fr)] lg:items-start lg:gap-6">
         {/* Lista */}
         <div className="space-y-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar pedido por número"
-              aria-label="Buscar pedido por número"
-              className="h-10 bg-card pl-9"
-            />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar pedido por número"
+                aria-label="Buscar pedido por número"
+                className="h-10 bg-card pl-9"
+              />
+            </div>
+            <FiltrosLista portal filtros={f} resultados={lista.length} />
           </div>
-          <Segmentado<Pestana> opciones={tabs} valor={pestana} onCambio={setPestana} etiqueta="Estado de los pedidos" />
+          <Segmentado<Pestana> opciones={tabs} valor={pestanaVista} onCambio={cambiarPestana} etiqueta="Estado de los pedidos" />
+          {!loading && (f.activos > 0 || !!q) && (
+            <p className="text-sm text-muted-foreground" aria-live="polite" data-contador="">
+              {contadorFiltrado(lista.length, ordenes.length, true, lista.length === 1 && ordenes.length === 1 ? "pedido" : "pedidos")}
+            </p>
+          )}
 
           {loading ? (
             <SkeletonFilas n={5} alto="h-[76px]" />
@@ -237,7 +279,8 @@ const PortalPedidos = () => {
                 icono={ClipboardList}
                 titulo={q ? `Sin pedidos que coincidan con «${busqueda.trim()}»` : vacio.titulo}
                 descripcion={q ? "Prueba con otro número o revisa las otras pestañas." : vacio.desc}
-                accion={pestana === "curso" && !q ? <Button asChild><Link to="/portal/catalogo">Hacer un pedido</Link></Button> : undefined}
+                accion={f.activos > 0 ? <Button variant="outline" onClick={f.limpiar}>Limpiar filtros</Button>
+                  : pestanaVista === "curso" && !q ? <Button asChild><Link to="/portal/catalogo">Hacer un pedido</Link></Button> : undefined}
               />
             </div>
           ) : (

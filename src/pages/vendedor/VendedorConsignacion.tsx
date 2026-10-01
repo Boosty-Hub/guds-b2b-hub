@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { VendedorLayout } from "@/components/vendedor/VendedorLayout";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -8,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { DeclararVentaForm, type StockConsignacion } from "@/components/consignacion/DeclararVentaForm";
+import { FiltrosLista, useFiltros, opcionesDe, coincide, enRango, contadorFiltrado } from "@/components/datos/FiltrosLista";
 
 interface ClienteConsig { cliente_id: string; nombre: string; almacen_id: string; almacen_nombre: string; }
 interface Declaracion {
@@ -25,7 +27,9 @@ const VendedorConsignacion = () => {
   const { user } = useAuth();
   const { formatPrice } = useCurrency();
   const [clientes, setClientes] = useState<ClienteConsig[]>([]);
-  const [clienteId, setClienteId] = useState("");
+  // El cliente elegido va en la URL (?cliente=): sobrevive a recargar y se puede compartir
+  const [params, setParams] = useSearchParams();
+  const clienteId = params.get("cliente") ?? "";
   const [stock, setStock] = useState<StockConsignacion[]>([]);
   const [declaraciones, setDeclaraciones] = useState<Declaracion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,9 +65,24 @@ const VendedorConsignacion = () => {
     setDeclaraciones((decs as unknown as Declaracion[]) ?? []);
   };
 
-  const elegirCliente = (cid: string) => { setClienteId(cid); cargarDetalle(cid); };
+  const elegirCliente = (cid: string) => {
+    setParams((p) => { const n = new URLSearchParams(p); n.set("cliente", cid); n.delete("estado"); n.delete("fecha"); return n; }, { replace: true });
+  };
+  // Detalle del cliente de la URL (al elegirlo o al recargar)
+  useEffect(() => {
+    if (clienteId && clientes.some((c) => c.cliente_id === clienteId)) cargarDetalle(clienteId);
+    else { setStock([]); setDeclaraciones([]); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteId, clientes]);
 
   const clienteSel = clientes.find((c) => c.cliente_id === clienteId);
+
+  // Filtros de las declaraciones del cliente (en la URL)
+  const f = useFiltros([
+    { clave: "estado", etiqueta: "Estado", principal: true, opciones: opcionesDe(declaraciones, (d) => d.estado, (_d, v) => ESTADO[v]?.label ?? v) },
+    { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+  ]);
+  const declFiltradas = declaraciones.filter((d) => coincide(d.estado, f.v("estado")) && enRango(d.fecha, f.v("fecha")));
 
   return (
     <VendedorLayout title="Consignación">
@@ -93,9 +112,19 @@ const VendedorConsignacion = () => {
               </div>
 
               <div className="rounded-lg border border-border bg-card">
-                <div className="border-b border-border bg-muted/30 px-3 py-1.5"><h2 className="text-[13px] font-semibold">Declaraciones de {clienteSel.nombre} ({declaraciones.length})</h2></div>
+                <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
+                  <h2 className="mr-auto text-[13px] font-semibold">Declaraciones de {clienteSel.nombre}{" "}
+                    <span className="font-normal text-muted-foreground" data-contador="">({contadorFiltrado(declFiltradas.length, declaraciones.length, f.activos, "declaraciones")})</span>
+                  </h2>
+                  {declaraciones.length > 0 && <FiltrosLista filtros={f} resultados={declFiltradas.length} />}
+                </div>
                 {declaraciones.length === 0 ? (
                   <p className="p-5 text-center text-sm text-muted-foreground">Sin declaraciones todavía.</p>
+                ) : declFiltradas.length === 0 ? (
+                  <p className="p-5 text-center text-sm text-muted-foreground">
+                    Ninguna declaración con esos filtros.
+                    <button type="button" className="ml-2 font-medium text-primary hover:underline" onClick={f.limpiar}>Limpiar filtros</button>
+                  </p>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -106,7 +135,7 @@ const VendedorConsignacion = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {declaraciones.map((d) => (
+                      {declFiltradas.map((d) => (
                         <TableRow key={d.id}>
                           <TableCell className="font-mono text-sm text-primary">{d.numero}</TableCell>
                           <TableCell className="text-muted-foreground">{new Date(d.fecha).toLocaleDateString("es-VE")}</TableCell>

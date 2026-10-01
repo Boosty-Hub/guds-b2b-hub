@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,16 +18,30 @@ import { DeclararRetencionForm } from "@/components/retenciones/DeclararRetencio
 import type { FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
 import { OdooBadge } from "@/components/OdooBadge";
 import { BarraLista } from "@/components/datos/BarraLista";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, contadorFiltrado,
+  type OpcionFiltro, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 interface Retencion {
   id: string; numero: string; tipo: string; estado: string; fecha: string; total: number;
   base_imponible: number; porcentaje: number | null; comprobante_url: string | null; notas: string | null;
-  rol_declarante: string; odoo_id: number | null;
+  rol_declarante: string; odoo_id: number | null; cliente_id: string | null; empresa_id?: string | null;
   cliente?: { nombre_negocio: string } | null;
   concepto?: { concepto: string } | null;
 }
 interface ItemRow { id: string; monto_aplicado: number; factura?: { numero: string; saldo_usd: number } | null; }
 interface ClienteLite { id: string; nombre_negocio: string; }
+
+const TIPO: Record<string, string> = { iva: "IVA", islr: "ISLR", municipal: "Municipal" };
+const DECLARANTE: Record<string, string> = { admin: "Administración", cliente: "Cliente", vendedor: "Vendedor" };
+const PESTANAS = ["pendientes", "aprobadas", "rechazadas"] as const;
+/** "2026-09" → "Septiembre 2026" */
+const textoPeriodo = (p: string) => {
+  const [y, m] = p.split("-").map(Number);
+  const t = new Date(y, m - 1, 1).toLocaleDateString("es-VE", { month: "long", year: "numeric" });
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
 
 const ESTADO: Record<string, { label: string; variant: "default" | "secondary" | "destructive" }> = {
   pendiente: { label: "Pendiente", variant: "secondary" },
@@ -39,6 +54,7 @@ const Retenciones = () => {
   const { toast } = useToast();
   const [retenciones, setRetenciones] = useState<Retencion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busqueda, setBusqueda] = useState("");
   const [detalle, setDetalle] = useState<Retencion | null>(null);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [notas, setNotas] = useState("");
@@ -55,19 +71,51 @@ const Retenciones = () => {
     // nulo) — antes se excluían las migradas y el módulo mostraba 0 aunque hubiera
     // histórico real de retenciones de clientes.
     const { data } = await supabase.from("retenciones")
-      .select("id, numero, tipo, estado, fecha, total, base_imponible, porcentaje, comprobante_url, notas, rol_declarante, odoo_id, cliente:clientes(nombre_negocio), concepto:conceptos_retencion_islr(concepto)")
+      .select("id, numero, tipo, estado, fecha, total, base_imponible, porcentaje, comprobante_url, notas, rol_declarante, odoo_id, cliente_id, empresa_id, cliente:clientes(nombre_negocio), concepto:conceptos_retencion_islr(concepto)")
       .order("created_at", { ascending: false });
     setRetenciones((data as unknown as Retencion[]) ?? []);
     setLoading(false);
   };
   useEffect(() => { fetchAll(); }, []);
 
-  const pendientes = retenciones.filter((r) => r.estado === "pendiente");
-  const aprobadas = retenciones.filter((r) => r.estado === "aprobado");
-  const rechazadas = retenciones.filter((r) => r.estado === "rechazado");
-  const pgPend = usePagination(pendientes, 50);
-  const pgApr = usePagination(aprobadas, 50);
-  const pgRech = usePagination(rechazadas, 50);
+  // ---- Pestaña (estado) y filtros en la URL. Los filtros valen para las tres pestañas ----
+  const [params, setParams] = useSearchParams();
+  const tab = (PESTANAS as readonly string[]).includes(params.get("estado") ?? "") ? params.get("estado")! : "pendientes";
+  const setTab = (t: string) => setParams((p) => { const n = new URLSearchParams(p); if (t === "pendientes") n.delete("estado"); else n.set("estado", t); return n; }, { replace: true });
+  const pruebasOrigen: OpcionPrueba<Retencion>[] = [
+    { valor: "odoo", etiqueta: "Odoo", prueba: (r) => !!r.odoo_id }, { valor: "guds", etiqueta: "Registrada en GUDS", prueba: (r) => !r.odoo_id },
+  ];
+  // Período fiscal = mes de la retención (los más recientes primero)
+  const opcionesPeriodo: OpcionFiltro[] = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of retenciones) { const p = (r.fecha || "").slice(0, 7); if (p) m.set(p, (m.get(p) ?? 0) + 1); }
+    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([p, n]) => ({ valor: p, etiqueta: textoPeriodo(p), n }));
+  }, [retenciones]);
+  const filtroEmpresa = useFiltroEmpresa(retenciones);
+  const f = useFiltros([
+    { clave: "tipo", etiqueta: "Tipo", todos: "Todos", principal: true, opciones: opcionesDe(retenciones, (r) => r.tipo, (_r, v) => TIPO[v] ?? v.toUpperCase()) },
+    { clave: "periodo", etiqueta: "Período", todos: "Todos", principal: true, opciones: opcionesPeriodo },
+    { clave: "cliente", etiqueta: "Cliente", todos: "Todos los clientes", principal: true, opciones: opcionesDe(retenciones, (r) => r.cliente_id, (r) => r.cliente?.nombre_negocio ?? "—") },
+    { clave: "origen", etiqueta: "Origen", todos: "Odoo y GUDS", opciones: opcionesPrueba(retenciones, pruebasOrigen) },
+    { clave: "declarante", etiqueta: "Declarado por", todos: "Todos", opciones: opcionesDe(retenciones, (r) => r.rol_declarante, (_r, v) => DECLARANTE[v] ?? v) },
+    filtroEmpresa,
+  ]);
+  const filtradas = useMemo(() => retenciones.filter((r) =>
+    coincide(r.tipo, f.v("tipo")) && (!f.v("periodo") || (r.fecha || "").slice(0, 7) === f.v("periodo"))
+    && coincide(r.cliente_id, f.v("cliente")) && pasaPrueba(pruebasOrigen, f.v("origen"), r)
+    && coincide(r.rol_declarante, f.v("declarante")) && (!filtroEmpresa || coincide(r.empresa_id, f.v("empresa")))
+    && (!busqueda.trim() || [r.numero, r.cliente?.nombre_negocio].some((v) => (v || "").toLowerCase().includes(busqueda.trim().toLowerCase())))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [retenciones, f.firma, busqueda]);
+  const pendientes = filtradas.filter((r) => r.estado === "pendiente");
+  const aprobadas = filtradas.filter((r) => r.estado === "aprobado");
+  const rechazadas = filtradas.filter((r) => r.estado === "rechazado");
+  const pgPend = usePagination(pendientes, 50, f.firma);
+  const pgApr = usePagination(aprobadas, 50, f.firma);
+  const pgRech = usePagination(rechazadas, 50, f.firma);
+  const estadoTab: Record<string, string> = { pendientes: "pendiente", aprobadas: "aprobado", rechazadas: "rechazado" };
+  const enTab = { pendientes, aprobadas, rechazadas }[tab as (typeof PESTANAS)[number]];
+  const totalTab = retenciones.filter((r) => r.estado === estadoTab[tab]).length;
 
   const abrirDetalle = async (r: Retencion) => {
     setDetalle(r);
@@ -115,7 +163,7 @@ const Retenciones = () => {
   const renderTabla = (rows: Retencion[], pg: ReturnType<typeof usePagination<Retencion>>, accionable: boolean) => (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
       {rows.length === 0 ? (
-        <p className="p-6 text-center text-sm text-muted-foreground">Sin retenciones en esta categoría.</p>
+        <p className="p-6 text-center text-sm text-muted-foreground">{f.activos || busqueda.trim() ? "Ninguna retención de esta categoría coincide con la búsqueda o los filtros." : "Sin retenciones en esta categoría."}</p>
       ) : (
         <>
           <Table>
@@ -134,10 +182,10 @@ const Retenciones = () => {
                   <TableCell className="font-medium">
                     <span className="block max-w-[260px] truncate" title={r.cliente?.nombre_negocio || undefined}>{r.cliente?.nombre_negocio || "—"}</span>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap uppercase text-muted-foreground">{r.tipo}</TableCell>
-                  <TableCell className="whitespace-nowrap capitalize text-muted-foreground">{r.rol_declarante}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{TIPO[r.tipo] ?? r.tipo.toUpperCase()}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{DECLARANTE[r.rol_declarante] ?? r.rol_declarante}</TableCell>
                   <TableCell className="whitespace-nowrap">{r.odoo_id ? <OdooBadge /> : <Badge variant="outline" className="px-1 py-0 text-[10px]">GUDS</Badge>}</TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(r.fecha).toLocaleDateString("es-VE")}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(`${r.fecha.slice(0, 10)}T00:00:00`).toLocaleDateString("es-VE")}</TableCell>
                   <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(r.total)}</TableCell>
                   {accionable && (
                     <TableCell className="whitespace-nowrap text-right">
@@ -157,7 +205,7 @@ const Retenciones = () => {
   return (
     <MainLayout title="Retenciones">
       {/* Pestañas, contador y acciones en una sola fila */}
-      <Tabs defaultValue="pendientes">
+      <Tabs value={tab} onValueChange={setTab}>
         <BarraLista
           pestanas={
             <TabsList>
@@ -166,7 +214,11 @@ const Retenciones = () => {
               <TabsTrigger value="rechazadas">Rechazadas ({rechazadas.length})</TabsTrigger>
             </TabsList>
           }
-          contador={loading ? undefined : `${retenciones.length} registros`}
+          busqueda={busqueda}
+          onBusqueda={setBusqueda}
+          placeholder="Buscar número o cliente..."
+          filtros={<FiltrosLista filtros={f} resultados={enTab.length} />}
+          contador={loading ? undefined : contadorFiltrado(enTab.length, totalTab, f.activos || !!busqueda.trim())}
           acciones={<Button size="sm" className="gap-1.5" onClick={abrirNueva}><Plus className="h-3.5 w-3.5" /> Registrar retención</Button>}
         />
         {loading ? (
@@ -190,7 +242,7 @@ const Retenciones = () => {
                 <div><span className="text-muted-foreground">Cliente:</span> <span className="font-medium">{detalle.cliente?.nombre_negocio}</span></div>
                 <div><span className="text-muted-foreground">Tipo:</span> <span className="uppercase">{detalle.tipo}</span></div>
                 {detalle.concepto && <div className="col-span-2"><span className="text-muted-foreground">Concepto:</span> {detalle.concepto.concepto} ({detalle.porcentaje}%)</div>}
-                <div><span className="text-muted-foreground">Fecha:</span> {new Date(detalle.fecha).toLocaleDateString("es-VE")}</div>
+                <div><span className="text-muted-foreground">Fecha:</span> {new Date(`${detalle.fecha.slice(0, 10)}T00:00:00`).toLocaleDateString("es-VE")}</div>
                 <div><span className="text-muted-foreground">Declarado por:</span> <span className="capitalize">{detalle.rol_declarante}</span></div>
               </div>
               {detalle.comprobante_url && (

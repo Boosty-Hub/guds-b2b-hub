@@ -5,7 +5,7 @@
 //     · sale.order: pedidos aprobados en GUDS (Fase 9b).
 //     · res.partner, en tres formas, cada una con su lista de campos:
 //         dirección de entrega hija de un cliente (parent_id + type delivery/other, 19w);
-//         persona de contacto hija de un cliente (parent_id + type contact), marcada "(GUDS)" en las notas (20s);
+//         persona de contacto hija de un cliente o de un proveedor (parent_id + type contact), marcada "(GUDS)" en las notas (20s, 20v);
 //         cliente nuevo (sin parent_id, customer_rank 1, con su compañía), marcado "(GUDS)" en las notas (20s).
 // - `escribir`: solo `write`, solo en los modelos y CAMPOS de ESCRITURA_PERMITIDA (decisiones del dueño, 28 y 29-sep):
 //     · res.partner: dirección y teléfonos del cliente, editados en GUDS; límite de crédito (flanco 28); nombre, cargo y correo
@@ -66,7 +66,7 @@ export function formaAltaPartner(vals) {
     if (!Number.isInteger(vals.parent_id)) throw new Error('Bloqueado: parent_id inválido');
     if (TIPOS_DIRECCION.has(vals.type)) forma = 'direccion';
     else if (vals.type === 'contact') forma = 'contacto';
-    else throw new Error('Bloqueado: en res.partner solo se crean direcciones de entrega o personas de contacto hijas de un cliente');
+    else throw new Error('Bloqueado: en res.partner solo se crean direcciones de entrega o personas de contacto hijas de un cliente o proveedor');
   } else {
     forma = 'cliente';
     if (vals.customer_rank !== 1 || !Number.isInteger(vals.company_id) || typeof vals.name !== 'string' || !vals.name.trim()) {
@@ -141,7 +141,7 @@ export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 
   async function crear(model, vals, empresaActiva) {
     if (!CREACION_PERMITIDA.has(model)) throw new Error(`Bloqueado: GUDS no crea registros de "${model}" en Odoo`);
     if (!vals || typeof vals !== 'object' || Array.isArray(vals)) throw new Error('crear: se espera un solo registro');
-    // res.partner: dirección de entrega o persona de contacto hija de un cliente, o cliente nuevo marcado "(GUDS)"
+    // res.partner: dirección de entrega, persona de contacto hija de un cliente o proveedor, o cliente nuevo marcado "(GUDS)"
     if (model === 'res.partner') formaAltaPartner(vals);
     if (!uid) await autenticar();
     return rpc('object', 'execute_kw', [db, uid, apiKey, model, 'create', [vals], { context: contextoEmpresa(empresaActiva) }]);

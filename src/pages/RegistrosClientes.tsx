@@ -30,7 +30,7 @@ import {
   FileText,
   ExternalLink,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, RegistroCliente } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -39,7 +39,10 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
+import { FiltrosLista, useFiltros, opcionesDe, opcionesTexto, coincide, coincideTexto, enRango, contadorFiltrado } from "@/components/datos/FiltrosLista";
 import { AprobarRegistroDialog } from "@/components/clientes/AprobarRegistroDialog";
+import { IconoWhatsApp } from "@/components/iconos/IconoWhatsApp";
+import { enlaceWhatsApp, telefonoLlamar, telefonoWhatsApp } from "@/components/vendedor/contacto";
 
 const statusConfig = {
   pendiente: { label: "Pendiente", color: "bg-yellow-500", icon: Clock },
@@ -53,7 +56,10 @@ const RegistrosClientes = () => {
   useEffect(() => { refreshRegistros(); }, [refreshRegistros]);
   const { empresas } = useEmpresa();
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  // Estado de la solicitud en la URL (?estado=pendiente): los botones de la barra lo cambian
+  const [params, setParams] = useSearchParams();
+  const statusFilter = ["pendiente", "aprobado", "rechazado"].includes(params.get("estado") ?? "") ? params.get("estado")! : "all";
+  const setStatusFilter = (s: string) => setParams((p) => { const n = new URLSearchParams(p); if (s === "all") n.delete("estado"); else n.set("estado", s); return n; }, { replace: true });
   const [selectedRegistro, setSelectedRegistro] = useState<RegistroCliente | null>(null);
   const [isViewOpen, setIsViewOpen] = useState(false);
   const [isRejectOpen, setIsRejectOpen] = useState(false);
@@ -65,16 +71,25 @@ const RegistrosClientes = () => {
 
   const pendingCount = getPendingRegistros().length;
 
+  // Filtros de la lista (en la URL): fecha de la solicitud, ciudad, tipo de negocio y empresa con la que quiere comprar
+  const f = useFiltros([
+    { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+    { clave: "ciudad", etiqueta: "Ciudad", todos: "Todas las ciudades", opciones: opcionesTexto(registros, (r) => r.ciudad, "Sin ciudad") },
+    { clave: "tipo", etiqueta: "Tipo de negocio", todos: "Todos", opciones: opcionesDe(registros, (r) => r.tipoNegocio, undefined, "Sin tipo") },
+    ...(empresas.length > 1 ? [{ clave: "empresa", etiqueta: "Quiere comprar con", todos: "Todas", opciones: opcionesDe(registros, (r) => r.empresaId,
+      (_r, v) => empresas.find((e) => e.id === v)?.nombre_corto ?? "—", "Sin indicar") }] : []),
+  ]);
   const filteredRegistros = registros.filter((reg) => {
-    const matchesSearch = 
+    const matchesSearch =
       reg.nombreNegocio.toLowerCase().includes(searchTerm.toLowerCase()) ||
       reg.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       reg.nombreContacto.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === "all" || reg.estado === statusFilter;
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && enRango(reg.fechaRegistro, f.v("fecha")) && coincideTexto(reg.ciudad, f.v("ciudad"))
+      && coincide(reg.tipoNegocio, f.v("tipo")) && coincide(reg.empresaId, f.v("empresa"));
   });
 
-  const pagination = usePagination(filteredRegistros, 50);
+  const pagination = usePagination(filteredRegistros, 50, `${f.firma}&estado=${statusFilter}`);
 
   const handleApprove = async ({ estado, vendedorId }: { estado: string | null; vendedorId: string | null }) => {
     if (!selectedRegistro) return;
@@ -156,9 +171,9 @@ const RegistrosClientes = () => {
         busqueda={searchTerm}
         onBusqueda={setSearchTerm}
         placeholder="Buscar por negocio, email o contacto..."
-        contador={`${filteredRegistros.length} registros`}
-        filtros={
-          <div className="flex flex-wrap gap-1.5">
+        contador={contadorFiltrado(filteredRegistros.length, registros.length, f.activos || statusFilter !== "all" || !!searchTerm)}
+        filtros={<>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Estado de la solicitud">
             {["all", "pendiente", "aprobado", "rechazado"].map((status) => (
               <Button
                 key={status}
@@ -174,7 +189,8 @@ const RegistrosClientes = () => {
               </Button>
             ))}
           </div>
-        }
+          <FiltrosLista filtros={f} resultados={filteredRegistros.length} />
+        </>}
       />
 
       {/* Table */}
@@ -334,7 +350,25 @@ const RegistrosClientes = () => {
                   </div>
                   <div>
                     <p className="text-muted-foreground">Teléfono</p>
-                    <p className="font-medium">{selectedRegistro.telefono}</p>
+                    {selectedRegistro.telefono ? (
+                      <div className="flex items-center gap-1.5">
+                        <a href={`tel:${telefonoLlamar(selectedRegistro.telefono)}`} className="font-medium text-primary hover:underline" title="Llamar">
+                          {selectedRegistro.telefono}
+                        </a>
+                        {telefonoWhatsApp(selectedRegistro.telefono) && (
+                          <a
+                            href={enlaceWhatsApp(selectedRegistro.telefono, `Hola${selectedRegistro.nombreContacto ? ` ${selectedRegistro.nombreContacto}` : ""}, le escribimos de GUDS por la solicitud de registro de ${selectedRegistro.nombreNegocio}. Queremos confirmar algunos datos antes de aprobarla.`)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#1a8f4e] hover:bg-[#25d366]/15 dark:text-[#25d366]"
+                            title="Escribir por WhatsApp"
+                            aria-label={`Escribir por WhatsApp a ${selectedRegistro.nombreContacto || selectedRegistro.nombreNegocio}`}
+                          >
+                            <IconoWhatsApp className="h-4 w-4" />
+                          </a>
+                        )}
+                      </div>
+                    ) : <p className="font-medium">—</p>}
                   </div>
                   <div className="col-span-2">
                     <p className="text-muted-foreground">Email</p>

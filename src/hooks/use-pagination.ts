@@ -18,10 +18,15 @@ export interface Pagination<T> {
  *   const pg = usePagination(filasFiltradas, 25);
  *   pg.pageItems.map(...)        // renderizar solo la página actual
  *   <DataTablePagination pagination={pg} />
+ * `reinicio` (opcional, p. ej. la firma de los filtros): al cambiar, vuelve a la página 1.
  */
-export function usePagination<T>(items: T[], defaultPageSize = 25): Pagination<T> {
+export function usePagination<T>(items: T[], defaultPageSize = 25, reinicio?: string): Pagination<T> {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSizeState] = useState(defaultPageSize);
+
+  useEffect(() => {
+    if (reinicio !== undefined) setPage(1);
+  }, [reinicio]);
 
   const total = items.length;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));

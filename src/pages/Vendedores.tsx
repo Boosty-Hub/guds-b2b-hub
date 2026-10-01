@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,11 +19,20 @@ import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { MetasVendedoresPanel } from "@/components/vendedores/MetasVendedoresPanel";
+import {
+  FiltrosLista, useFiltros, opcionesDe, opcionesTexto, opcionesPrueba, pasaPrueba, coincide, coincideTexto, contadorFiltrado, type DefFiltro, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
+import { useEmpresa } from "@/contexts/EmpresaContext";
+import { estadoVe } from "@/components/clientes/odooCliente";
 
 interface Vendedor {
   id: string; nombre: string; apellido: string | null; email: string; telefono: string | null; activo: boolean;
+  empresas?: { empresa_id: string }[] | null;
 }
-interface ClienteLite { id: string; nombre_negocio: string; codigo: string | null; vendedor_asignado_id: string | null; }
+interface ClienteLite { id: string; nombre_negocio: string; codigo: string | null; vendedor_asignado_id: string | null; ciudad: string | null; estado: string | null; }
+// Pestañas (en la URL, ?tab=) y sus filtros: los de una pestaña se limpian al pasar a otra
+const PESTANAS_VEND = ["vendedores", "sin-asignar", "metas"] as const;
+const CLAVES_PESTANA = ["empresa", "meta", "activo", "cartera", "estado", "ciudad", "saldo"];
 interface FacturaSaldoRow { cliente_id: string; saldo_usd: number; }
 
 const Vendedores = () => {
@@ -35,6 +44,9 @@ const Vendedores = () => {
   const [saldoPorCliente, setSaldoPorCliente] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // Vendedores con meta cargada en el mes en curso (empresa activa o ambas)
+  const [conMeta, setConMeta] = useState<Set<string>>(new Set());
+  const { empresas } = useEmpresa();
 
   const [openNuevo, setOpenNuevo] = useState(false);
   const [form, setForm] = useState({ nombre: "", apellido: "", email: "", telefono: "", password: "" });
@@ -47,12 +59,15 @@ const Vendedores = () => {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [{ data: vends }, { data: clis }, { data: facs }] = await Promise.all([
-      supabase.from("usuarios").select("id, nombre, apellido, email, telefono, activo").eq("role", "vendedor").order("nombre"),
-      supabase.from("clientes").select("id, nombre_negocio, codigo, vendedor_asignado_id").eq("activo", true).order("nombre_negocio"),
+    const [anio, mes] = new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" }).slice(0, 7).split("-").map(Number);
+    const [{ data: vends }, { data: clis }, { data: facs }, { data: metas }] = await Promise.all([
+      supabase.from("usuarios").select("id, nombre, apellido, email, telefono, activo, empresas:usuario_empresas(empresa_id)").eq("role", "vendedor").order("nombre"),
+      supabase.from("clientes").select("id, nombre_negocio, codigo, vendedor_asignado_id, ciudad, estado").eq("activo", true).order("nombre_negocio"),
       supabase.from("facturas").select("cliente_id, saldo_usd").eq("estado", "posted"),
+      supabase.from("metas_vendedor").select("vendedor_id, meta_ventas").eq("anio", anio).eq("mes", mes).gt("meta_ventas", 0),
     ]);
     setVendedores((vends as Vendedor[]) ?? []);
+    setConMeta(new Set(((metas as { vendedor_id: string }[] | null) ?? []).map((m) => m.vendedor_id)));
     setClientes((clis as ClienteLite[]) ?? []);
     const saldoMap: Record<string, number> = {};
     for (const f of (facs as FacturaSaldoRow[]) ?? []) {
@@ -77,10 +92,52 @@ const Vendedores = () => {
 
   const sinAsignar = useMemo(() => clientes.filter((c) => !c.vendedor_asignado_id), [clientes]);
 
+  // ---- Pestaña y filtros (en la URL) ----
+  const [params, setParams] = useSearchParams();
+  const tab = (PESTANAS_VEND as readonly string[]).includes(params.get("tab") ?? "") ? params.get("tab")! : "vendedores";
+  const setTab = (t: string) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    for (const k of CLAVES_PESTANA) n.delete(k);
+    if (t === "vendedores") n.delete("tab"); else n.set("tab", t);
+    return n;
+  }, { replace: true });
+  const siNo = <T,>(si: string, no: string, fn: (x: T) => boolean): OpcionPrueba<T>[] =>
+    [{ valor: "si", etiqueta: si, prueba: fn }, { valor: "no", etiqueta: no, prueba: (x) => !fn(x) }];
+  const pruebasEmpresa: OpcionPrueba<Vendedor>[] = empresas.map((e) => ({
+    valor: e.id, etiqueta: e.nombre_corto || e.nombre, prueba: (v: Vendedor) => (v.empresas ?? []).some((x) => x.empresa_id === e.id),
+  }));
+  const pruebasMeta = siNo<Vendedor>("Con meta este mes", "Sin meta este mes", (v) => conMeta.has(v.id));
+  const pruebasActivo = siNo<Vendedor>("Activos", "Inactivos", (v) => v.activo);
+  const pruebasCartera: OpcionPrueba<Vendedor>[] = [
+    { valor: "con", etiqueta: "Con clientes asignados", prueba: (v) => (statsPorVendedor.get(v.id)?.clientes ?? 0) > 0 },
+    { valor: "deuda", etiqueta: "Con cartera por cobrar", prueba: (v) => (statsPorVendedor.get(v.id)?.saldo ?? 0) > 0.009 },
+    { valor: "sin", etiqueta: "Sin clientes", prueba: (v) => !(statsPorVendedor.get(v.id)?.clientes ?? 0) },
+  ];
+  const pruebasSaldo = siNo<ClienteLite>("Con saldo por cobrar", "Sin saldo", (c) => (saldoPorCliente[c.id] || 0) > 0.009);
+  const defsPestana: Record<string, DefFiltro[]> = {
+    vendedores: [
+      ...(empresas.length > 1 ? [{ clave: "empresa", etiqueta: "Empresa", todos: "Todas", principal: true, opciones: opcionesPrueba(vendedores, pruebasEmpresa) }] : []),
+      { clave: "meta", etiqueta: "Meta", todos: "Con y sin meta", principal: true, opciones: opcionesPrueba(vendedores, pruebasMeta) },
+      { clave: "activo", etiqueta: "Situación", todos: "Activos e inactivos", principal: true, opciones: opcionesPrueba(vendedores, pruebasActivo) },
+      { clave: "cartera", etiqueta: "Cartera", todos: "Todas", opciones: opcionesPrueba(vendedores, pruebasCartera) },
+    ],
+    "sin-asignar": [
+      { clave: "estado", etiqueta: "Estado", todos: "Todos los estados", principal: true, opciones: opcionesDe(sinAsignar, (c) => estadoVe(c.estado) ?? c.estado, undefined, "Sin estado") },
+      { clave: "ciudad", etiqueta: "Ciudad", todos: "Todas las ciudades", principal: true, opciones: opcionesTexto(sinAsignar, (c) => c.ciudad, "Sin ciudad") },
+      { clave: "saldo", etiqueta: "Saldo", todos: "Todos", principal: true, opciones: opcionesPrueba(sinAsignar, pruebasSaldo) },
+    ],
+    metas: [],
+  };
+  const f = useFiltros(defsPestana[tab]);
+
   const filtrados = vendedores.filter((v) =>
-    `${v.nombre} ${v.apellido || ""}`.toLowerCase().includes(search.toLowerCase()) || v.email.toLowerCase().includes(search.toLowerCase()));
-  const pagination = usePagination(filtrados, 50);
-  const pgSinAsignar = usePagination(sinAsignar, 50);
+    (`${v.nombre} ${v.apellido || ""}`.toLowerCase().includes(search.toLowerCase()) || v.email.toLowerCase().includes(search.toLowerCase()))
+    && pasaPrueba(pruebasEmpresa, f.v("empresa"), v) && pasaPrueba(pruebasMeta, f.v("meta"), v) && pasaPrueba(pruebasActivo, f.v("activo"), v)
+    && pasaPrueba(pruebasCartera, f.v("cartera"), v));
+  const sinAsignarFiltrados = sinAsignar.filter((c) => coincide(estadoVe(c.estado) ?? c.estado, f.v("estado")) && coincideTexto(c.ciudad, f.v("ciudad"))
+    && pasaPrueba(pruebasSaldo, f.v("saldo"), c));
+  const pagination = usePagination(filtrados, 50, f.firma);
+  const pgSinAsignar = usePagination(sinAsignarFiltrados, 50, f.firma);
 
   const toggleActivo = async (v: Vendedor) => {
     const { error } = await supabase.from("usuarios").update({ activo: !v.activo }).eq("id", v.id);
@@ -126,7 +183,6 @@ const Vendedores = () => {
     });
   };
 
-  const [tab, setTab] = useState<string>("vendedores");
   const pestanas = (
     <TabsList>
       <TabsTrigger value="vendedores">Vendedores ({vendedores.length})</TabsTrigger>
@@ -156,7 +212,8 @@ const Vendedores = () => {
               busqueda={search}
               onBusqueda={setSearch}
               placeholder="Buscar vendedor..."
-              contador={`${filtrados.length} registros`}
+              filtros={<FiltrosLista filtros={f} resultados={filtrados.length} />}
+              contador={contadorFiltrado(filtrados.length, vendedores.length, f.activos || !!search.trim())}
               acciones={
                 <Button size="sm" className="gap-1.5" onClick={() => setOpenNuevo(true)}><UserPlus className="h-3.5 w-3.5" /> Nuevo vendedor</Button>
               }
@@ -164,8 +221,11 @@ const Vendedores = () => {
           ) : tab === "sin-asignar" ? (
             <BarraLista
               pestanas={pestanas}
-              filtros={<p className="text-xs text-muted-foreground">Elegí clientes y asignalos a un vendedor.</p>}
-              contador={`${sinAsignar.length} registros`}
+              filtros={<>
+                <FiltrosLista filtros={f} resultados={sinAsignarFiltrados.length} />
+                <p className="hidden text-xs text-muted-foreground xl:block">Elegí clientes y asignalos a un vendedor.</p>
+              </>}
+              contador={contadorFiltrado(sinAsignarFiltrados.length, sinAsignar.length, f.activos)}
               acciones={
                 <>
                   <Select value={asignarMasivo} onValueChange={setAsignarMasivo}>
@@ -223,8 +283,11 @@ const Vendedores = () => {
 
           <TabsContent value="sin-asignar" className="mt-2">
             <div className="rounded-lg border border-border bg-card">
-              {sinAsignar.length === 0 ? (
-                <p className="p-6 text-center text-sm text-muted-foreground">Todos los clientes activos tienen vendedor asignado.</p>
+              {sinAsignarFiltrados.length === 0 ? (
+                <p className="p-6 text-center text-sm text-muted-foreground">
+                  {sinAsignar.length === 0 ? "Todos los clientes activos tienen vendedor asignado." : "Ningún cliente sin vendedor coincide con los filtros."}
+                  {f.activos > 0 && <button type="button" className="ml-2 text-xs font-medium text-primary hover:underline" onClick={f.limpiar}>Limpiar filtros</button>}
+                </p>
               ) : (
                 <>
                   <Table>

@@ -32,6 +32,8 @@ const Registro = lazy(() => import("./pages/Registro"));
 const TerminosCondiciones = lazy(() => import("./pages/TerminosCondiciones"));
 const Soporte = lazy(() => import("./pages/Soporte"));
 const PoliticasPrivacidad = lazy(() => import("./pages/PoliticasPrivacidad"));
+// Estado de cuenta público por enlace (sin sesión, revocable): fase 20w
+const EstadoCuentaPublico = lazyRuta(["/estado-cuenta/:token"], () => import("./pages/EstadoCuentaPublico"));
 
 // Panel de administración: tabla de rutas y páginas en su propio módulo (fuera del paquete principal de los portales)
 const RutasAdmin = lazyRuta(["/admin/*"], () => import("./rutas/RutasAdmin"));
@@ -164,6 +166,7 @@ const App = () => (
                 <Route path="/terminos" element={<TerminosCondiciones />} />
                 <Route path="/soporte" element={<Soporte />} />
                 <Route path="/privacidad" element={<PoliticasPrivacidad />} />
+                <Route path="/estado-cuenta/:token" element={<EstadoCuentaPublico />} />
                 
                 {/* Panel de administración (solo admin): sus rutas y páginas se descargan aparte (rutas/RutasAdmin) */}
                 <Route path="/admin/*" element={<RutasAdmin />} />

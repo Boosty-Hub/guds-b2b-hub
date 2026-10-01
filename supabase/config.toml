@@ -9,3 +9,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.sync-odoo]
 verify_jwt = false
+[functions.enviar-estado-cuenta]
+verify_jwt = false

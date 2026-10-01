@@ -2189,6 +2189,400 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
   }
 }
 
+// ── Estado de cuenta público, PDF y correo (20w): enlace revocable por token, solo ese cliente, ND cuadradas, permisos ──
+{
+  const MSG20W = 'Este enlace no es válido o ya no está disponible';
+  const token20w = () => Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+  // Cliente real con notas de débito con saldo (y ajustes cambiarios de 0,00 USD), y otro cliente de su misma empresa
+  const c20w = (await sql(`select c.id, c.empresa_id, c.nombre_negocio from clientes c
+    where c.empresa_id is not null
+      and exists (select 1 from facturas f where f.cliente_id = c.id and f.estado = 'posted' and f.es_nota_debito and f.saldo_usd > 0.009)
+    order by (select count(*) from facturas f where f.cliente_id = c.id and f.estado = 'posted' and f.es_nota_debito and abs(f.total_usd) < 0.005) desc, c.codigo
+    limit 1`))[0];
+  const otro20w = c20w && (await sql(`select c.id from clientes c where c.empresa_id = '${c20w.empresa_id}' and c.id <> '${c20w.id}'
+    and exists (select 1 from facturas f where f.cliente_id = c.id and f.estado = 'posted') order by c.codigo limit 1`))[0];
+  if (c20w && otro20w) {
+    const E20w = { empresa: c20w.empresa_id };
+    const Anon20w = (previo = '') => ({ rol: 'anon', uid: null, empresa: c20w.empresa_id, previo });
+    // Enlace de prueba insertado como postgres (dentro del bloque, que siempre se deshace). Antes deja sin activo al cliente.
+    const enlace20w = (cliente, token, extra = {}) => {
+      const cols = { cliente_id: `'${cliente}'`, empresa_id: `'${c20w.empresa_id}'`, token: lit(token), ...extra };
+      return `update public.estado_cuenta_enlaces set revocado_at = now(), revocado_motivo = 'reemplazado' where cliente_id = '${cliente}' and revocado_at is null;
+        insert into public.estado_cuenta_enlaces (${Object.keys(cols).join(', ')}) values (${Object.values(cols).join(', ')});`;
+    };
+    const ayudantes20w = `create function pg_temp.acc20w(p text) returns int language sql security definer as $f$ select accesos from public.estado_cuenta_enlaces where token = p $f$;
+      create function pg_temp.ult20w(p text) returns boolean language sql security definer as $f$ select ultimo_acceso_at is not null from public.estado_cuenta_enlaces where token = p $f$;
+      create function pg_temp.ajenos20w(d jsonb, c uuid) returns int language sql security definer as $f$
+        select count(*)::int from jsonb_array_elements(d->'movimientos') m
+         where m->>'tipo' in ('factura', 'nota_debito', 'nota_credito')
+           and not exists (select 1 from public.facturas f where f.numero = m->>'documento' and f.cliente_id = c) $f$;`;
+
+    const t1 = token20w();
+    await caso('Enlace 20w: anónimo con un token válido ve el estado de cuenta de ese cliente, sin identificadores internos', (x) =>
+      x?.nombre === c20w.nombre_negocio && x?.n > 0 && x?.ids === false && x?.ajenos === 0,
+      como(Anon20w(enlace20w(c20w.id, t1) + ayudantes20w), `select json_build_object('nombre', d->'cliente'->>'nombre', 'n', jsonb_array_length(d->'movimientos'),
+          'ids', (d->'cliente' ? 'id') or (d->'empresa' ? 'id') or exists (select 1 from jsonb_array_elements(d->'movimientos') m where m ? 'factura_id')
+                 or exists (select 1 from jsonb_array_elements(d->'abiertos') a where a ? 'factura_id'),
+          'ajenos', pg_temp.ajenos20w(d, '${c20w.id}'))::text
+        from (select public.estado_cuenta_publico(${lit(t1)}) d) t`));
+    const t2 = token20w();
+    await caso('Enlace 20w: cada apertura suma un acceso y la recarga automática (p_contar=false) solo actualiza el último acceso', (x) =>
+      x?.antes === 0 && x?.despues === 1 && x?.ultimo === true && !!x?.nombre,
+      como(Anon20w(enlace20w(c20w.id, t2) + ayudantes20w), `select json_build_object('antes', pg_temp.acc20w(${lit(t2)}),
+          'nombre', public.estado_cuenta_publico(${lit(t2)})->'cliente'->>'nombre',
+          'recarga', public.estado_cuenta_publico(${lit(t2)}, null, null, false)->'resumen'->>'saldo',
+          'despues', pg_temp.acc20w(${lit(t2)}), 'ultimo', pg_temp.ult20w(${lit(t2)}))::text`));
+    const t3 = token20w(), t4 = token20w();
+    await caso('Enlace 20w: un token revocado da el error genérico', MSG20W,
+      como(Anon20w(enlace20w(c20w.id, t3, { revocado_at: 'now()', revocado_motivo: `'revocado'` })), `select public.estado_cuenta_publico(${lit(t3)})::text`));
+    await caso('Enlace 20w: un token vencido da el mismo error genérico', MSG20W,
+      como(Anon20w(enlace20w(otro20w.id, t4, { creado_at: `now() - interval '3 days'`, vence_at: `now() - interval '1 day'` })),
+        `select public.estado_cuenta_publico(${lit(t4)})::text`));
+    await caso('Enlace 20w: un token inventado (bien formado) da el mismo error genérico', MSG20W,
+      como(Anon20w(), `select public.estado_cuenta_publico(${lit(token20w())})::text`));
+    await caso('Enlace 20w: un token mal formado da el mismo error genérico', MSG20W,
+      como(Anon20w(), `select public.estado_cuenta_publico('abc'' or 1=1 --')::text`));
+
+    // ND presentes y cuadradas contra la base: todas las ND con valor, ninguna de 0,00 USD, abiertas con su saldo
+    const nd20w = (await sql(`select count(*) filter (where abs(total_usd) >= 0.005)::int n, coalesce(round(sum(total_usd) filter (where abs(total_usd) >= 0.005), 2), 0)::float8 total,
+        count(*) filter (where saldo_usd > 0.009)::int abiertas, coalesce(round(sum(saldo_usd) filter (where saldo_usd > 0.009), 2), 0)::float8 saldo
+      from facturas where cliente_id = '${c20w.id}' and estado = 'posted' and es_nota_debito and (empresa_id is null or empresa_id = '${c20w.empresa_id}')`))[0];
+    const ceros20w = (await sql(`select count(*)::int n from facturas where cliente_id = '${c20w.id}' and estado = 'posted' and (es_nota_debito or tipo = 'nota_credito')
+      and abs(total_usd) < 0.005 and abs(saldo_usd) < 0.005 and (empresa_id is null or empresa_id = '${c20w.empresa_id}')`))[0].n;
+    const t5 = token20w();
+    const pub20w = await como(Anon20w(enlace20w(c20w.id, t5)), `select json_build_object(
+        'nd_n', (select count(*) from jsonb_array_elements(d->'movimientos') m where m->>'tipo' = 'nota_debito'),
+        'nd_total', (select round(sum((m->>'monto')::numeric), 2) from jsonb_array_elements(d->'movimientos') m where m->>'tipo' = 'nota_debito'),
+        'nd_cero', (select count(*) from jsonb_array_elements(d->'movimientos') m where m->>'tipo' = 'nota_debito' and abs((m->>'monto')::numeric) < 0.005),
+        'ab_n', (select count(*) from jsonb_array_elements(d->'abiertos') a where a->>'tipo' = 'nota_debito'),
+        'ab_saldo', (select round(sum((a->>'saldo')::numeric), 2) from jsonb_array_elements(d->'abiertos') a where a->>'tipo' = 'nota_debito'),
+        'ajustes', d->'ajustes_cambiarios', 'resumen', d->'resumen', 'saldo_final', d->'saldo_final', 'diferencia', d->'diferencia',
+        'movs', jsonb_array_length(d->'movimientos'))::text
+      from (select public.estado_cuenta_publico(${lit(t5)}) d) t`);
+    const p20w = pub20w.ok ? JSON.parse(pub20w.ok) : null;
+    const resuelto20w = (obj) => Promise.resolve(obj.error ? obj : { ok: JSON.stringify(obj) });
+    await caso('ND 20w: el estado de cuenta lista todas las notas de débito con valor y su monto cuadra con la base', (x) => x?.ok === true,
+      resuelto20w(pub20w.error ? pub20w : { ok: p20w.nd_n === nd20w.n && Number(p20w.nd_total) === nd20w.total && nd20w.n > 0,
+        lista: p20w.nd_n, base: nd20w.n, total: p20w.nd_total, esperado: nd20w.total }));
+    await caso('ND 20w: las ND abiertas llevan su saldo y los ajustes cambiarios de 0,00 USD no ensucian el libro (solo se cuentan)', (x) => x?.ok === true,
+      resuelto20w(pub20w.error ? pub20w : { ok: p20w.ab_n === nd20w.abiertas && Number(p20w.ab_saldo) === nd20w.saldo
+        && Number(p20w.resumen.notas_debito_saldo) === nd20w.saldo && p20w.nd_cero === 0 && p20w.ajustes === ceros20w
+        && Number(p20w.diferencia) === 0 && Number(p20w.saldo_final) === Number(p20w.resumen.neto),
+        abiertas: p20w.ab_n, saldo: p20w.ab_saldo, ajustes: p20w.ajustes, ceros: ceros20w }));
+    // Misma fuente que el portal del cliente y que el admin
+    const qa20w = (await sql(`select id from auth.users where email = 'qa.cliente@guds.test'`))[0]?.id;
+    if (qa20w) {
+      const portal20w = await como({ uid: qa20w, empresa: c20w.empresa_id,
+        previo: `insert into public.usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${qa20w}', 'qa.cliente@guds.test', 'QA', 'cliente', '${c20w.id}', true);` },
+        `select json_build_object('resumen', d->'resumen', 'saldo_final', d->'saldo_final', 'movs', jsonb_array_length(d->'movimientos'), 'ajustes', d->'ajustes_cambiarios',
+          'nd_total', (select round(sum((m->>'monto')::numeric), 2) from jsonb_array_elements(d->'movimientos') m where m->>'tipo' = 'nota_debito'))::text
+         from (select public.estado_cuenta_portal() d) t`);
+      const q20w = portal20w.ok ? JSON.parse(portal20w.ok) : null;
+      await caso('ND 20w: el enlace público da lo mismo que estado_cuenta_portal (resumen, saldo final, movimientos y ND)', (x) => x?.ok === true,
+        resuelto20w(portal20w.error || pub20w.error ? (portal20w.error ? portal20w : pub20w)
+          : { ok: JSON.stringify(q20w.resumen) === JSON.stringify(p20w.resumen) && Number(q20w.saldo_final) === Number(p20w.saldo_final)
+              && q20w.movs === p20w.movs && Number(q20w.nd_total) === Number(p20w.nd_total) && q20w.ajustes === p20w.ajustes }));
+      await caso('Enlace 20w: un cliente del portal no crea enlaces', 'No tienes permiso',
+        como({ uid: qa20w, empresa: c20w.empresa_id,
+          previo: `insert into public.usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${qa20w}', 'qa.cliente@guds.test', 'QA', 'cliente', '${c20w.id}', true);` },
+          `select public.crear_enlace_estado_cuenta('${c20w.id}')::text`));
+    }
+    const admin20w = await como(E20w, `select json_build_object('resumen', d->'resumen', 'saldo_final', d->'saldo_final', 'movs', jsonb_array_length(d->'movimientos'))::text
+      from (select public.estado_cuenta_cliente('${c20w.id}') d) t`);
+    const a20w = admin20w.ok ? JSON.parse(admin20w.ok) : null;
+    await caso('ND 20w: CuentaDetalle (estado_cuenta_cliente) usa la misma fuente que el enlace y el portal', (x) => x?.ok === true,
+      resuelto20w(admin20w.error || pub20w.error ? (admin20w.error ? admin20w : pub20w)
+        : { ok: JSON.stringify(a20w.resumen) === JSON.stringify(p20w.resumen) && a20w.movs === p20w.movs && Number(a20w.saldo_final) === Number(p20w.saldo_final) }));
+
+    // Crear, reutilizar, reemplazar y revocar (administración con 'cuentas' editar)
+    const sinActivo20w = `update public.estado_cuenta_enlaces set revocado_at = now(), revocado_motivo = 'reemplazado' where cliente_id = '${c20w.id}' and revocado_at is null;`;
+    await caso('Enlace 20w: administración crea un token de 43 caracteres url-safe y reutiliza el activo en vez de crear otro', (x) =>
+      /^[A-Za-z0-9_-]{43}$/.test(x?.a ?? '') && x?.a === x?.b && x?.reutilizado === 'true' && x?.primero === 'false',
+      como({ ...E20w, previo: sinActivo20w }, `select json_build_object('a', a->>'token', 'primero', a->>'reutilizado', 'b', b->>'token', 'reutilizado', b->>'reutilizado')::text
+        from (select public.crear_enlace_estado_cuenta('${c20w.id}') a) x, lateral (select public.crear_enlace_estado_cuenta('${c20w.id}') b where x.a is not null) y`));
+    await caso('Enlace 20w: pedir uno nuevo revoca el anterior (queda "reemplazado") y deja uno solo activo', (x) =>
+      x?.distinto === true && x?.activos === 1 && x?.motivo === 'reemplazado',
+      como({ ...E20w, previo: sinActivo20w + `create function pg_temp.activos20w(c uuid) returns int language sql security definer as $f$
+          select count(*)::int from public.estado_cuenta_enlaces where cliente_id = c and revocado_at is null $f$;
+        create function pg_temp.motivo20w(i uuid) returns text language sql security definer as $f$ select revocado_motivo from public.estado_cuenta_enlaces where id = i $f$;` },
+        `select json_build_object('distinto', a->>'token' <> b->>'token',
+          'activos', pg_temp.activos20w('${c20w.id}'), 'motivo', pg_temp.motivo20w((a->>'id')::uuid))::text
+        from (select public.crear_enlace_estado_cuenta('${c20w.id}') a) x, lateral (select public.crear_enlace_estado_cuenta('${c20w.id}', true) b where x.a is not null) y`));
+    await caso('Enlace 20w: revocar lo apaga al instante (activo = false, motivo "revocado")', (x) => x?.activo === false && x?.revocado_motivo === 'revocado' && x?.token === null,
+      como({ ...E20w, previo: sinActivo20w }, `select public.revocar_enlace_estado_cuenta((public.crear_enlace_estado_cuenta('${c20w.id}')->>'id')::uuid)::text`));
+    await caso('Enlace 20w: el vencimiento no puede ser pasado ni de más de un año', 'entre hoy y un año',
+      como(E20w, `select public.crear_enlace_estado_cuenta('${c20w.id}', true, current_date - 3)::text`));
+    await caso('Enlace 20w: en "Ambas empresas" no se crean enlaces (modo consulta)', 'Modo consulta',
+      como({ empresa: 'todas' }, `select public.crear_enlace_estado_cuenta('${c20w.id}')::text`));
+    await caso('Enlace 20w: personal sin "cuentas" editar (rol Almacén) no crea enlaces', 'No tienes permiso',
+      como({ ...E20w, previo: `update public.usuarios set rol_id = (select id from public.roles where nombre = 'Almacén') where auth_id = '${admin}';` },
+        `select public.crear_enlace_estado_cuenta('${c20w.id}')::text`));
+    await caso('Enlace 20w: el rol Contador (cuentas editar) sí crea enlaces', (x) => /^[A-Za-z0-9_-]{43}$/.test(x?.token ?? ''),
+      como({ ...E20w, previo: `update public.usuarios set rol_id = (select id from public.roles where nombre = 'Contador') where auth_id = '${admin}';` + sinActivo20w },
+        `select public.crear_enlace_estado_cuenta('${c20w.id}')::text`));
+    await caso('Correo 20w: personal sin "cuentas" editar no pide los datos del correo', 'No tienes permiso',
+      como({ ...E20w, previo: `update public.usuarios set rol_id = (select id from public.roles where nombre = 'Almacén') where auth_id = '${admin}';` },
+        `select public.datos_correo_estado_cuenta('${c20w.id}')::text`));
+
+    // Vendedor: solo los clientes de su cartera
+    const v20w = (await sql(`select u.auth_id, c.id cliente, c.empresa_id from clientes c join usuarios u on u.id = c.vendedor_asignado_id
+      join usuario_empresas ue on ue.usuario_id = u.id and ue.empresa_id = c.empresa_id
+      where u.role = 'vendedor' and u.auth_id is not null and coalesce(u.activo, true) and c.empresa_id is not null order by c.codigo limit 1`))[0];
+    if (v20w) {
+      const ajeno20w = (await sql(`select c.id from clientes c where c.empresa_id = '${v20w.empresa_id}'
+        and c.vendedor_asignado_id is distinct from (select id from usuarios where auth_id = '${v20w.auth_id}') order by c.codigo limit 1`))[0];
+      await caso('Enlace 20w: el vendedor crea el enlace de un cliente de su cartera', (x) => /^[A-Za-z0-9_-]{43}$/.test(x?.token ?? ''),
+        como({ uid: v20w.auth_id, empresa: v20w.empresa_id, previo: `update public.estado_cuenta_enlaces set revocado_at = now(), revocado_motivo = 'reemplazado' where cliente_id = '${v20w.cliente}' and revocado_at is null;` },
+          `select public.crear_enlace_estado_cuenta('${v20w.cliente}')::text`));
+      if (ajeno20w) {
+        await caso('Enlace 20w: el vendedor no crea enlaces de un cliente fuera de su cartera', 'No tienes permiso',
+          como({ uid: v20w.auth_id, empresa: v20w.empresa_id }, `select public.crear_enlace_estado_cuenta('${ajeno20w.id}')::text`));
+      }
+      await caso('Correo 20w: el vendedor no envía el estado de cuenta por correo (datos del correo solo para administración)', 'No tienes permiso',
+        como({ uid: v20w.auth_id, empresa: v20w.empresa_id }, `select public.datos_correo_estado_cuenta('${v20w.cliente}')::text`));
+    }
+
+    // Envíos: solo la llave de servicio los registra; límite por minuto y correos válidos
+    const uAdmin20w = (await sql(`select id from usuarios where auth_id = '${admin}'`))[0].id;
+    const reg20w = (dest) => `select json_build_object('id', public.registrar_envio_estado_cuenta('${uAdmin20w}', '${c20w.id}', '${c20w.empresa_id}', null, ${dest}, 'Estado de cuenta', null, 'x.pdf', 1000))::text`;
+    await caso('Correo 20w: la función edge (llave de servicio) registra un envío válido', (x) => /^[0-9a-f-]{36}$/.test(x?.id ?? ''),
+      como({ rol: 'service_role', uid: null }, reg20w(`array['delivered@resend.dev']`)));
+    await caso('Correo 20w: un correo con formato inválido se rechaza', 'formato inválido',
+      como({ rol: 'service_role', uid: null }, reg20w(`array['delivered@resend.dev', 'no es un correo']`)));
+    await caso('Correo 20w: más de 5 envíos por minuto del mismo usuario se rechazan', 'Demasiados envíos',
+      como({ rol: 'service_role', uid: null, previo: `insert into public.estado_cuenta_envios (cliente_id, empresa_id, destinatarios, asunto, enviado_por)
+          select '${otro20w.id}', '${c20w.empresa_id}', array['delivered@resend.dev'], 'Prueba', '${uAdmin20w}' from generate_series(1, 5);` },
+        reg20w(`array['delivered@resend.dev']`)));
+    await caso('Correo 20w: un usuario con sesión no registra envíos por su cuenta (solo la función edge)', 'permission denied',
+      como(E20w, reg20w(`array['delivered@resend.dev']`)));
+  }
+
+  // Funciones y tablas cerradas
+  await caso('Enlace 20w: anon solo ejecuta estado_cuenta_publico (ni las internas ni las de administración)', (x) => x?.pub === true && x?.otras === 0,
+    como({}, `select row_to_json(t)::text from (select
+        bool_or(has_function_privilege('anon', p.oid, 'execute')) filter (where p.proname = 'estado_cuenta_publico') pub,
+        count(*) filter (where p.proname <> 'estado_cuenta_publico' and has_function_privilege('anon', p.oid, 'execute')) otras
+      from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('estado_cuenta_publico', 'estado_cuenta_datos', 'estado_cuenta_acceso',
+        'estado_cuenta_enlace_json', 'estado_cuenta_cliente', 'crear_enlace_estado_cuenta', 'revocar_enlace_estado_cuenta', 'enlaces_estado_cuenta',
+        'datos_correo_estado_cuenta', 'registrar_envio_estado_cuenta', 'cerrar_envio_estado_cuenta', 'envios_estado_cuenta')) t`));
+  await caso('Enlace 20w: las funciones internas no se ejecutan con sesión (authenticated); el registro de envíos solo con la llave de servicio', (x) => x?.auth === 0 && x?.servicio === 2,
+    como({}, `select row_to_json(t)::text from (select
+        count(*) filter (where has_function_privilege('authenticated', p.oid, 'execute')) auth,
+        count(*) filter (where p.proname in ('registrar_envio_estado_cuenta', 'cerrar_envio_estado_cuenta') and has_function_privilege('service_role', p.oid, 'execute')) servicio
+      from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('estado_cuenta_datos', 'estado_cuenta_acceso', 'estado_cuenta_enlace_json',
+        'registrar_envio_estado_cuenta', 'cerrar_envio_estado_cuenta')) t`));
+  await caso('Enlace 20w: las tablas de enlaces y envíos tienen RLS y ningún permiso directo para anon ni authenticated', (x) => x?.rls === 2 && x?.permisos === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) filter (where c.relrowsecurity) rls,
+        (select count(*) from information_schema.role_table_grants g where g.table_schema = 'public'
+           and g.table_name in ('estado_cuenta_enlaces', 'estado_cuenta_envios') and g.grantee in ('anon', 'authenticated', 'PUBLIC')) permisos
+      from pg_class c where c.oid in ('public.estado_cuenta_enlaces'::regclass, 'public.estado_cuenta_envios'::regclass)) t`));
+  await caso('Enlace 20w: anon no lee la tabla de enlaces', 'permission denied',
+    como({ rol: 'anon', uid: null }, `select count(*)::text from public.estado_cuenta_enlaces`));
+}
+
+// ── Fase 20v: módulo Contactos (clientes, proveedores y sueltos) y acceso al portal ──
+{
+  const K = (n) => `00000000-0000-0000-0000-0000000${String(n).padStart(2, '0')}20c`;   // ids fijos de prueba (todo en rollback)
+  const AUTH_P = '00000000-0000-0000-0000-00000000f20c';                               // usuario de auth de prueba
+  const adminClaims = JSON.stringify({ sub: admin, role: 'authenticated' }).replace(/'/g, "''");
+  const hdrG = JSON.stringify({ 'x-empresa-id': guds.id }).replace(/'/g, "''");
+  const comoAdmin = `perform set_config('request.jwt.claims', '${adminClaims}', true); perform set_config('request.headers', '${hdrG}', true);`;
+  const G = { empresa: guds.id };
+  const provGuds = (await sql(`select id from proveedores where empresa_id = '${guds.id}' limit 1`))[0].id;
+  const cli2 = (await sql(`select id from clientes where empresa_id = '${guds.id}' and id <> '${cliGuds}' and odoo_id is not null limit 1`))[0].id;
+  const cliOdooId = (await sql(`select odoo_id from clientes where id = '${cliGuds}'`))[0].odoo_id;
+  const nuevoK = (n, extra = '') => `insert into cliente_contactos (id, empresa_id, nombre ${extra ? ', ' + extra.split('|')[0] : ''}) values ('${K(n)}', '${guds.id}', 'Contacto 20v ${n}' ${extra ? ', ' + extra.split('|')[1] : ''});`;
+  const conAcceso = (n, clave = null) => `${nuevoK(n, `cliente_id, email|'${cliGuds}', 'prueba.20v.${n}@guds.test'`)} ${comoAdmin}
+    perform public.crear_acceso_contacto('${K(n)}'${clave ? `, '${clave}', false` : ''});`;
+  // Verificación como postgres (auth.users no es legible para authenticated). Llamar y leer en el mismo statement no ve lo escrito:
+  // las funciones pg_temp (plpgsql, volátiles) llaman y luego leen con un snapshot nuevo.
+  const dar = `create function pg_temp.dar_20v(p uuid, c text, cambio boolean) returns text language plpgsql security definer as $f$
+    declare r record; begin select * into r from public.crear_acceso_contacto(p, c, cambio);
+    return (select row_to_json(t)::text from (select r.password_temporal, u.debe_cambiar_clave debe,
+      a.encrypted_password = extensions.crypt(coalesce(c, r.password_temporal), a.encrypted_password) clave_ok
+      from usuarios u join auth.users a on a.id = u.auth_id where u.id = r.usuario_id) t); end $f$;`;
+  const rest = `create function pg_temp.rest_20v(p uuid, c text, cambio boolean) returns text language plpgsql security definer as $f$
+    declare v text; begin v := public.restablecer_clave_cliente((select id from usuarios where contacto_id = p), c, cambio);
+    return (select row_to_json(t)::text from (select v devuelta, u.debe_cambiar_clave debe from usuarios u where u.contacto_id = p) t); end $f$;`;
+  // Verificación como postgres (auth.users no es legible para authenticated). El bloqueo debe ser una fecha finita: Auth no
+  // sabe leer 'infinity' (la cuenta queda inservible para su API).
+  const verif = `create function pg_temp.acceso_20v(p uuid) returns text language sql security definer as $f$
+    select row_to_json(t)::text from (select u.activo, u.debe_cambiar_clave debe, u.cliente_id = k.cliente_id mismo_cliente,
+      (a.banned_until is not null and a.banned_until <> 'infinity'::timestamptz) baneado, (select count(*) from usuarios x where x.contacto_id = p) usuarios
+      from usuarios u join cliente_contactos k on k.id = u.contacto_id join auth.users a on a.id = u.auth_id where u.contacto_id = p) t $f$;`;
+
+  await caso('Contactos 20v: el admin crea un contacto suelto en la empresa activa (origen GUDS)', (r) => r?.empresa_id === guds.id && r?.origen === 'guds' && !r?.cliente_id,
+    como(G, `with x as (insert into cliente_contactos (nombre, email) values ('Contacto 20v suelto', 'suelto.20v@guds.test') returning empresa_id, origen, cliente_id) select row_to_json(x)::text from x`));
+  await caso('Contactos 20v: en modo "Ambas" no se crea un contacto suelto', 'Modo consulta',
+    como({ empresa: 'todas' }, `with x as (insert into cliente_contactos (nombre) values ('Contacto 20v') returning id) select row_to_json(x)::text from x`));
+  await caso('Contactos 20v: la API no fija origen ni odoo_id', (r) => r?.origen === 'guds' && r?.odoo_id === null,
+    como(G, `with x as (insert into cliente_contactos (nombre, origen, odoo_id) values ('Contacto 20v', 'odoo', 999999) returning origen, odoo_id) select row_to_json(x)::text from x`));
+  await caso('Contactos 20v: un contacto no es a la vez de un cliente y de un proveedor', 'cliente_contactos_un_vinculo',
+    como(G, `with x as (insert into cliente_contactos (nombre, cliente_id, proveedor_id) values ('Contacto 20v', '${cliGuds}', '${provGuds}') returning id) select row_to_json(x)::text from x`));
+  await caso('Contactos 20v: un contacto de proveedor toma la empresa del proveedor', (r) => r?.empresa_id === guds.id && r?.proveedor_id === provGuds,
+    como(G, `with x as (insert into cliente_contactos (nombre, proveedor_id) values ('Contacto 20v prov', '${provGuds}') returning empresa_id, proveedor_id) select row_to_json(x)::text from x`));
+
+  // Acceso al portal: solo con cliente y correo
+  await caso('Contactos 20v: un contacto suelto no recibe acceso al portal', 'ligado a un cliente',
+    como({ ...G, previo: nuevoK(1, `email|'prueba.20v.1@guds.test'`) }, `select row_to_json(t)::text from public.crear_acceso_contacto('${K(1)}') t`));
+  await caso('Contactos 20v: un contacto de proveedor no recibe acceso al portal', 'ligado a un cliente',
+    como({ ...G, previo: nuevoK(2, `proveedor_id, email|'${provGuds}', 'prueba.20v.2@guds.test'`) }, `select row_to_json(t)::text from public.crear_acceso_contacto('${K(2)}') t`));
+  await caso('Contactos 20v: sin correo no hay acceso al portal', 'correo válido',
+    como({ ...G, previo: nuevoK(3, `cliente_id|'${cliGuds}'`) }, `select row_to_json(t)::text from public.crear_acceso_contacto('${K(3)}') t`));
+  await caso('Contactos 20v: el admin establece la contraseña (no se devuelve; sin pedir cambio)', (r) => r?.password_temporal === null && r?.debe === false && r?.clave_ok === true,
+    como({ ...G, previo: nuevoK(4, "cliente_id, email|'" + cliGuds + "', 'prueba.20v.4@guds.test'") + ' ' + dar }, "select pg_temp.dar_20v('" + K(4) + "', 'Portal2026guds', false)"));
+  await caso('Contactos 20v: la contraseña generada es temporal (debe cambiarla al entrar)', (r) => r?.password_temporal?.length >= 8 && r?.debe === true && r?.clave_ok === true,
+    como({ ...G, previo: nuevoK(5, "cliente_id, email|'" + cliGuds + "', 'prueba.20v.5@guds.test'") + ' ' + dar }, "select pg_temp.dar_20v('" + K(5) + "', null, false)"));
+  await caso('Contactos 20v: la contraseña elegida exige 8 caracteres', 'al menos 8',
+    como({ ...G, previo: nuevoK(6, "cliente_id, email|'" + cliGuds + "', 'prueba.20v.6@guds.test'") }, "select row_to_json(t)::text from public.crear_acceso_contacto('" + K(6) + "', 'abc123', true) t"));
+  await caso('Contactos 20v: la contraseña elegida exige letras y números', 'letras y números',
+    como({ ...G, previo: nuevoK(6, "cliente_id, email|'" + cliGuds + "', 'prueba.20v.6@guds.test'") }, "select row_to_json(t)::text from public.crear_acceso_contacto('" + K(6) + "', 'solamenteletras', true) t"));
+  await caso('Contactos 20v: restablecer con una contraseña elegida (no se devuelve; pide cambio si se marca)', (r) => r?.devuelta === null && r?.debe === true,
+    como({ ...G, previo: conAcceso(7, 'Portal2026guds') + ' ' + rest }, "select pg_temp.rest_20v('" + K(7) + "', 'OtraClave2026', true)"));
+  await caso('Contactos 20v: restablecer sin contraseña genera una temporal', (r) => r?.devuelta?.length >= 8 && r?.debe === true,
+    como({ ...G, previo: conAcceso(7, 'Portal2026guds') + ' ' + rest }, "select pg_temp.rest_20v('" + K(7) + "', null, false)"));
+
+  // Desligar: el acceso se desactiva solo
+  await caso('Contactos 20v: al quitarle el cliente (suelto) su acceso se desactiva y queda bloqueado', (r) => r?.activo === false && r?.baneado === true,
+    como({ ...G, previo: `${conAcceso(8)} ${verif} update cliente_contactos set cliente_id = null where id = '${K(8)}';` }, `select pg_temp.acceso_20v('${K(8)}')`));
+  await caso('Contactos 20v: al pasarlo a un proveedor su acceso se desactiva', (r) => r?.activo === false && r?.baneado === true,
+    como({ ...G, previo: `${conAcceso(9)} ${verif} update cliente_contactos set cliente_id = null, proveedor_id = '${provGuds}' where id = '${K(9)}';` }, `select pg_temp.acceso_20v('${K(9)}')`));
+  await caso('Contactos 20v: al pasarlo a otro cliente su acceso se desactiva', (r) => r?.activo === false,
+    como({ ...G, previo: `${conAcceso(10)} ${verif} update cliente_contactos set cliente_id = '${cli2}' where id = '${K(10)}';` }, `select pg_temp.acceso_20v('${K(10)}')`));
+  await caso('Contactos 20v: al desactivar el contacto su acceso se desactiva', (r) => r?.activo === false,
+    como({ ...G, previo: `${conAcceso(11)} ${verif} update cliente_contactos set activo = false where id = '${K(11)}';` }, `select pg_temp.acceso_20v('${K(11)}')`));
+  await caso('Contactos 20v: no se reactiva el acceso de un contacto desligado', 'ya no pertenece',
+    como({ ...G, previo: `${conAcceso(12)} update cliente_contactos set cliente_id = null where id = '${K(12)}';` },
+      `select public.cambiar_acceso_cliente((select id from usuarios where contacto_id = '${K(12)}'), true)::text`));
+  await caso('Contactos 20v: al volver a ligarlo y darle acceso se reutiliza su usuario (activo, del cliente nuevo)', (r) => r?.activo === true && r?.mismo_cliente === true && r?.usuarios === 1 && r?.baneado === false,
+    como({ ...G, previo: `${conAcceso(13)} ${verif} update cliente_contactos set cliente_id = null where id = '${K(13)}';
+      update cliente_contactos set cliente_id = '${cli2}' where id = '${K(13)}'; perform public.crear_acceso_contacto('${K(13)}');` }, `select pg_temp.acceso_20v('${K(13)}')`));
+  await caso('Contactos 20v: con acceso activo, el correo del contacto no se cambia', 'El correo es el usuario del portal',
+    como({ ...G, previo: conAcceso(14) }, `with x as (update cliente_contactos set email = 'otro.20v@guds.test' where id = '${K(14)}' returning id) select row_to_json(x)::text from x`));
+  await caso('Contactos 20v: no se elimina un contacto con usuario del portal', 'tiene usuario del portal',
+    como({ ...G, previo: conAcceso(15) }, `with x as (delete from cliente_contactos where id = '${K(15)}' returning id) select row_to_json(x)::text from x`));
+
+  // Permisos por rol
+  const vendUsuario = vendGuds && (await sql(`select id from usuarios where auth_id = '${vendGuds}'`))[0]?.id;
+  const cliVend = vendUsuario && (await sql(`select id from clientes where vendedor_asignado_id = '${vendUsuario}' and empresa_id = '${guds.id}' limit 1`))[0]?.id;
+  const cliAjeno = vendUsuario && (await sql(`select id from clientes where empresa_id = '${guds.id}' and vendedor_asignado_id is distinct from '${vendUsuario}' limit 1`))[0]?.id;
+  if (vendGuds && cliVend && cliAjeno) {
+    const V = { uid: vendGuds, empresa: guds.id };
+    const permisoVend = (modulo) => `update permisos set puede_ver = true, puede_editar = true, puede_crear = true where rol_id = (select id from roles where nombre = 'Vendedor')
+      and modulo_id = (select id from modulos where codigo = '${modulo}'); insert into permisos (rol_id, modulo_id, puede_ver, puede_crear, puede_editar, puede_eliminar)
+      select r.id, m.id, true, true, true, false from roles r, modulos m where r.nombre = 'Vendedor' and m.codigo = '${modulo}' on conflict (rol_id, modulo_id) do nothing;`;
+    await caso('Contactos 20v: un vendedor (sin permiso de edición) no crea contactos ni en su cartera', 'row-level security',
+      como(V, `with x as (insert into cliente_contactos (nombre, cliente_id) values ('Contacto 20v', '${cliVend}') returning id) select row_to_json(x)::text from x`));
+    await caso('Contactos 20v: un vendedor con permiso gestiona contactos de su cartera', (r) => r?.cliente_id === cliVend,
+      como({ ...V, previo: permisoVend('clientes') }, `with x as (insert into cliente_contactos (nombre, cliente_id) values ('Contacto 20v', '${cliVend}') returning cliente_id) select row_to_json(x)::text from x`));
+    await caso('Contactos 20v: un vendedor con permiso no crea contactos de clientes ajenos', 'row-level security',
+      como({ ...V, previo: permisoVend('clientes') }, `with x as (insert into cliente_contactos (nombre, cliente_id) values ('Contacto 20v', '${cliAjeno}') returning id) select row_to_json(x)::text from x`));
+    await caso('Contactos 20v: un vendedor con permiso de contactos no crea sueltos ni de proveedores', 'row-level security',
+      como({ ...V, previo: permisoVend('contactos') }, `with x as (insert into cliente_contactos (nombre, proveedor_id) values ('Contacto 20v', '${provGuds}') returning id) select row_to_json(x)::text from x`));
+    await caso('Contactos 20v: un vendedor con permiso no da acceso al portal a contactos de clientes ajenos', 'No tienes permiso',
+      como({ ...V, previo: `${permisoVend('clientes')} ${nuevoK(16, `cliente_id, email|'${cliAjeno}', 'prueba.20v.16@guds.test'`)}` },
+        `select row_to_json(t)::text from public.crear_acceso_contacto('${K(16)}') t`));
+    await caso('Contactos 20v: un vendedor con permiso da acceso al portal a un contacto de su cartera', (r) => r?.email === 'prueba.20v.17@guds.test',
+      como({ ...V, previo: `${permisoVend('clientes')} ${nuevoK(17, `cliente_id, email|'${cliVend}', 'prueba.20v.17@guds.test'`)}` },
+        `select row_to_json(t)::text from public.crear_acceso_contacto('${K(17)}') t`));
+    await caso('Contactos 20v: un vendedor solo ve los contactos de su cartera', (r) => r?.propios >= 1 && r?.ajenos === 0,
+      como({ ...V, previo: `${nuevoK(18, `cliente_id|'${cliVend}'`)} ${nuevoK(19, `cliente_id|'${cliAjeno}'`)} ${nuevoK(20)}` },
+        `select row_to_json(t)::text from (select count(*) filter (where cliente_id = '${cliVend}') propios, count(*) filter (where cliente_id is distinct from '${cliVend}') ajenos from cliente_contactos) t`));
+  }
+  const previoPortal = `insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
+      values ('${AUTH_P}', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'portal.20v@guds.test', '', now(), now(), now());
+    insert into usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('${AUTH_P}', 'portal.20v@guds.test', 'Portal', 'cliente', '${cliGuds}', true);
+    ${nuevoK(21, `cliente_id|'${cliGuds}'`)} ${nuevoK(22, `email|'prueba.20v.22@guds.test'`)}`;
+  await caso('Contactos 20v: un usuario del portal no ve contactos (ni de su cliente)', (r) => r?.n === 0,
+    como({ uid: AUTH_P, empresa: guds.id, previo: previoPortal }, `select row_to_json(t)::text from (select count(*) n from cliente_contactos) t`));
+  await caso('Contactos 20v: un usuario del portal no da accesos', 'No tienes permiso',
+    como({ uid: AUTH_P, empresa: guds.id, previo: `${previoPortal} update cliente_contactos set cliente_id = '${cliGuds}' where id = '${K(22)}';` },
+      `select row_to_json(t)::text from public.crear_acceso_contacto('${K(22)}') t`));
+  await caso('Contactos 20v: el rol Contador (clientes y compras: ver) ve contactos de clientes, no los sueltos', (r) => r?.de_cliente >= 1 && r?.sueltos === 0,
+    como({ uid: AUTH_P, empresa: guds.id, previo: `${previoPortal} perform set_config('guds.bypass_guard', 'on', true); update usuarios set role = 'admin', cliente_id = null, rol_id = (select id from roles where nombre = 'Contador') where auth_id = '${AUTH_P}'; perform set_config('guds.bypass_guard', 'off', true);
+      insert into usuario_empresas (usuario_id, empresa_id, por_defecto) select id, '${guds.id}', true from usuarios where auth_id = '${AUTH_P}' on conflict do nothing;` },
+      `select row_to_json(t)::text from (select count(*) filter (where cliente_id is not null) de_cliente, count(*) filter (where cliente_id is null and proveedor_id is null) sueltos from cliente_contactos) t`));
+  await caso('Contactos 20v: anónimo no lee contactos', 'permission denied',
+    como({ rol: 'anon', uid: null, empresa: guds.id }, `select count(*)::text from cliente_contactos`));
+  await caso('Contactos 20v: funciones internas cerradas y acciones sin anónimo', (r) => r?.n === 0,
+    como({}, `select row_to_json(t)::text from (select count(*) n from pg_proc p where p.pronamespace = 'public'::regnamespace and (
+      (p.proname in ('validar_clave_portal', 'desactivar_acceso_contacto', 'sincronizar_accesos_contactos', 'trg_contacto_empresa', 'trg_contacto_odoo_protegido',
+         'trg_contacto_espejo', 'trg_contacto_reglas', 'trg_contacto_acceso', 'trg_contacto_odoo_encolar')
+        and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute')))
+      or (p.proname in ('puede_gestionar_contacto', 'crear_acceso_contacto', 'restablecer_clave_cliente', 'cambiar_acceso_cliente', 'accesos_portal_contactos', 'enviar_contacto_odoo')
+        and has_function_privilege('anon', p.oid, 'execute')))) t`));
+  await caso('Contactos 20v: las acciones SECURITY DEFINER exigen sesión y validan permiso', (r) => r?.n === 4 && r?.total === 4,
+    como({}, `select row_to_json(t)::text from (select count(*) filter (where pg_get_functiondef(p.oid) ~ 'auth\\.uid\\(\\) is null' and pg_get_functiondef(p.oid) ~ 'puede_gestionar_contacto\\(') n,
+      count(*) total from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosecdef
+      and p.proname in ('crear_acceso_contacto', 'restablecer_clave_cliente', 'cambiar_acceso_cliente', 'enviar_contacto_odoo')) t`));
+
+  // Contactos que vienen de Odoo
+  const deOdoo = (n, padre = false, cli = null) => `insert into cliente_contactos (id, empresa_id, nombre, origen, odoo_id, odoo_padre_id, cliente_id)
+    values ('${K(n)}', '${guds.id}', 'Contacto Odoo 20v', 'odoo', ${999990000 + n}, ${padre ? cliOdooId : 'null'}, ${cli ? `'${cli}'` : 'null'});`;
+  await caso('Contactos 20v: los datos de un contacto de Odoo no se editan en GUDS', 'vienen de Odoo',
+    como({ ...G, previo: deOdoo(23) }, `with x as (update cliente_contactos set nombre = 'X' where id = '${K(23)}' returning id) select row_to_json(x)::text from x`));
+  await caso('Contactos 20v: a un contacto suelto de Odoo se le asigna un cliente en GUDS', (r) => r?.cliente_id === cliGuds,
+    como({ ...G, previo: deOdoo(24) }, `with x as (update cliente_contactos set cliente_id = '${cliGuds}' where id = '${K(24)}' returning cliente_id) select row_to_json(x)::text from x`));
+  await caso('Contactos 20v: un contacto hijo en Odoo no cambia de cliente en GUDS', 'el cambio se hace en Odoo',
+    como({ ...G, previo: deOdoo(25, true, cliGuds) }, `with x as (update cliente_contactos set cliente_id = null where id = '${K(25)}' returning id) select row_to_json(x)::text from x`));
+  await caso('Contactos 20v: un contacto de Odoo no se elimina en GUDS', 'viene de Odoo',
+    como({ ...G, previo: deOdoo(26) }, `with x as (delete from cliente_contactos where id = '${K(26)}' returning id) select row_to_json(x)::text from x`));
+
+  // Sincronización (motor del importador, sin tocar Odoo): idempotente, sin duplicar y sin pisar lo de GUDS
+  const { filasContactos, sqlUpsertContactos } = await import('../supabase/functions/_shared/odoo-sync/contactos.js');
+  const P = (id, extra = {}) => ({ id, name: `Persona Odoo ${id}`, function: false, email: `p${id}@guds.test`, phone: false, mobile: false, parent_id: false,
+    type: 'contact', is_company: false, company_id: [1, 'GUDS'], active: true, comment: false, ...extra });
+  const leidos = {
+    hijos: [P(999991001, { parent_id: [cliOdooId, 'Cliente'] }), P(999991002, { parent_id: [cliOdooId, 'Cliente'], comment: '<p>(GUDS) creado por GUDS</p>' })],
+    sueltos: [P(999991003), P(999991004, { company_id: false }), P(999991005)],
+    clientes: new Set([cliOdooId]), proveedores: new Set(),
+  };
+  const filas = filasContactos(leidos);
+  casos.push({ ok: filas.length === 4 && !filas.some((f) => f.odoo_id === 999991002) ? '✓' : '✗', caso: 'Contactos 20v: la sincronización no importa los contactos que creó GUDS en Odoo', resultado: `${filas.length} filas` });
+  const upsert = sqlUpsertContactos(filas, new Date().toISOString());
+  const previoSync = `insert into cliente_contactos (id, empresa_id, nombre, origen, odoo_id, cliente_id) values ('${K(27)}', '${guds.id}', 'De GUDS', 'guds', 999991005, '${cliGuds}');
+    ${upsert}; ${upsert};`;
+  await caso('Contactos 20v: la sincronización no duplica contactos (dos pasadas) ni pisa los de GUDS', (r) => r?.filas === 4 && r?.distintos === 4 && r?.hijo_cliente === true && r?.guds_intacto === 'De GUDS' && r?.compartido === true,
+    como({ rol: 'postgres', previo: previoSync }, `select row_to_json(t)::text from (select count(*) filas, count(distinct odoo_id) distintos,
+      bool_or(odoo_id = 999991001 and cliente_id = '${cliGuds}' and origen = 'odoo') hijo_cliente,
+      max(nombre) filter (where odoo_id = 999991005) guds_intacto, bool_or(odoo_id = 999991004 and empresa_id is null) compartido
+      from cliente_contactos where odoo_id between 999991000 and 999991999) t`));
+  await caso('Contactos 20v: la sincronización conserva el cliente que GUDS asignó a un contacto suelto de Odoo', (r) => r?.cliente_id === cli2,
+    como({ rol: 'postgres', previo: `${upsert}; update cliente_contactos set cliente_id = '${cli2}' where odoo_id = 999991003; ${upsert};` },
+      `select row_to_json(t)::text from (select cliente_id from cliente_contactos where odoo_id = 999991003) t`));
+  await caso('Contactos 20v: si en Odoo el contacto cambia de cliente, la sincronización desactiva su acceso', (r) => r?.activo === false,
+    como({ ...G, previo: `${deOdoo(28, true, cliGuds)} update cliente_contactos set email = 'prueba.20v.28@guds.test' where id = '${K(28)}'; ${comoAdmin}
+      perform public.crear_acceso_contacto('${K(28)}'); ${verif}
+      perform set_config('request.jwt.claims', '', true); set local session_replication_role = replica;
+      update cliente_contactos set cliente_id = '${cli2}' where id = '${K(28)}'; set local session_replication_role = origin;
+      perform public.sincronizar_accesos_contactos();` }, `select pg_temp.acceso_20v('${K(28)}')`));
+
+  // Hacia Odoo (en rollback: pg_net no llega a enviar nada)
+  await caso('Contactos 20v: un contacto suelto no se encola hacia Odoo', (r) => r?.n === 0,
+    como({ ...G, previo: `${comoAdmin} ${nuevoK(29)}` }, `select row_to_json(t)::text from (select count(*) n from odoo_escrituras where referencia_id = '${K(29)}') t`));
+  await caso('Contactos 20v: un contacto nuevo de un proveedor de Odoo se encola (crear)', (r) => r?.accion === 'crear' && r?.proveedor_id === provGuds,
+    como({ ...G, previo: `${comoAdmin} ${nuevoK(30, `proveedor_id|'${provGuds}'`)}` },
+      `select row_to_json(t)::text from (select datos ->> 'accion' accion, datos ->> 'proveedor_id' proveedor_id from odoo_escrituras where referencia_id = '${K(30)}' and tipo = 'persona_contacto') t`));
+  await caso('Contactos 20v: al cambiar de cliente un contacto ya enviado, queda la nota en Odoo (desligar) y se crea en el nuevo', (r) => r?.desligar === 1 && r?.crear === 1 && r?.odoo_id === null,
+    como({ ...G, previo: `${nuevoK(31, `cliente_id, odoo_id, odoo_padre_id|'${cliGuds}', 999992031, ${cliOdooId}`)} ${comoAdmin}
+      update cliente_contactos set cliente_id = '${cli2}' where id = '${K(31)}';` },
+      `select row_to_json(t)::text from (select count(*) filter (where datos ->> 'accion' = 'desligar' and (datos ->> 'odoo_id_anterior')::int = 999992031) desligar,
+        count(*) filter (where datos ->> 'accion' = 'crear' and datos ->> 'cliente_id' = '${cli2}') crear,
+        (select odoo_id from cliente_contactos where id = '${K(31)}') odoo_id from odoo_escrituras where referencia_id = '${K(31)}') t`));
+  const { valsContactoHijo } = await import('../supabase/functions/_shared/odoo-sync/escribir-persona-contacto.js');
+  const { formaAltaPartner } = await import('../supabase/functions/_shared/odoo-sync/odoo.js');
+  const vals = valsContactoHijo({ nombre: 'Persona Prueba', cargo: 'Compras', email: 'x@guds.test', telefono: null, celular: null },
+    { street: 'Calle 1', city: 'Caracas', state_id: [1, 'X'], country_id: [238, 'VE'], company_id: [1, 'GUDS'], lang: 'es_VE' }, 4242, 'Prueba');
+  let forma = null; try { forma = formaAltaPartner(vals); } catch (e) { forma = e.message; }
+  casos.push({ ok: forma === 'contacto' && vals.parent_id === 4242 && /^<p>\(GUDS\)/.test(vals.comment) ? '✓' : '✗',
+    caso: 'Contactos 20v: el contacto de un proveedor va a Odoo como hijo "(GUDS)" permitido por odoo.js', resultado: String(forma).slice(0, 100) });
+
+  await caso('Contactos 20v: el buscador global encuentra contactos por teléfono y enlaza al módulo', (r) => r?.n >= 1 && r?.modulo === true,
+    como({ ...G, previo: nuevoK(32, `celular|'+58 414-555-0132'`) }, `select row_to_json(t)::text from (select count(*) n, bool_and(enlace like '/admin/contactos?contacto=%') modulo
+      from public.buscar_global('4145550132', 5) where tipo = 'contacto') t`));
+}
+
+
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {
   const pol = await sql(String.raw`select tablename || '.' || policyname p, coalesce(qual,'') || ' ' || coalesce(with_check,'') t from pg_policies where schemaname = 'public'`);

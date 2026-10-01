@@ -42,6 +42,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { useColumnas } from "@/components/datos/columnas";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, contadorFiltrado,
+  type OpcionPrueba, type DefFiltro,
+} from "@/components/datos/FiltrosLista";
 
 interface MovimientoInventario {
   id: string;
@@ -60,8 +64,9 @@ interface InvAlmacenRow {
   id: string;
   cantidad: number;
   reservado: number;
+  empresa_id?: string | null;
   almacen: { id: string; nombre: string; tipo: string } | null;
-  producto: { id: string; nombre: string; sku: string } | null;
+  producto: { id: string; nombre: string; sku: string; categoria_id: string | null } | null;
 }
 
 interface ProductoConCategoria extends Omit<Producto, 'categoria'> {
@@ -74,12 +79,23 @@ interface LoteRow {
   es_serie: boolean;
   vencimiento: string | null;
   cantidad: number;
-  producto: { id: string; nombre: string; sku: string } | null;
+  empresa_id?: string | null;
+  producto: { id: string; nombre: string; sku: string; categoria_id: string | null } | null;
 }
 const FILTROS_LOTE: Record<string, string> = {
   vencidos: "Vencidos con existencia", "30": "Vencen en 30 días", "90": "Vencen en 90 días",
   existencia: "Todos con existencia", sin_fecha: "Sin fecha de vencimiento", todos: "Todos los lotes",
 };
+
+// Filtros de cada pestaña (en la URL). Al cambiar de pestaña se quitan los que la nueva no tiene; "categoria", "almacen" y
+// "empresa" significan lo mismo en todas y se conservan donde existen.
+const CLAVES_TAB: Record<string, string[]> = {
+  stock: ["alcance", "categoria", "estado", "almacen", "lote", "empresa"],
+  almacenes: ["tipo_almacen", "almacen", "categoria", "empresa"],
+  lotes: ["lotes", "categoria", "tipo_lote", "empresa"],
+  movements: ["tipo_mov", "fecha"],
+};
+
 
 // Comprometido (entregas pendientes en Odoo + pedidos de GUDS sin pasar a Odoo) y disponible para vender
 function CeldasReservado({ item }: { item: Pick<Producto, "controla_stock" | "comprometido_odoo" | "comprometido_guds" | "stock_disponible" | "stock_actual"> }) {
@@ -104,21 +120,15 @@ const Inventario = () => {
   const [invAlmacen, setInvAlmacen] = useState<InvAlmacenRow[]>([]);
   const [lotes, setLotes] = useState<LoteRow[]>([]);
   const [loteSearch, setLoteSearch] = useState("");
-  const [params] = useSearchParams();
-  const [loteFiltro, setLoteFiltro] = useState(params.get("lotes") || "90");
+  const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [categoriaFiltro, setCategoriaFiltro] = useState("all");
   const [agruparCategoria, setAgruparCategoria] = useState(false);
-  // Como el inventario de Odoo: por defecto solo productos almacenables activos (sin servicios ni inactivos)
-  const [alcance, setAlcance] = useState<"almacenables" | "todos">("almacenables");
   const [openCat, setOpenCat] = useState<Set<string>>(new Set());
   const toggleCat = (k: string) => setOpenCat((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const [movementSearchTerm, setMovementSearchTerm] = useState("");
-  const [tipoFiltro, setTipoFiltro] = useState("all");
   const [almSearch, setAlmSearch] = useState("");
-  const [almTipoFiltro, setAlmTipoFiltro] = useState("all");
   const [openAlm, setOpenAlm] = useState<Set<string>>(new Set());
   const toggleAlm = (k: string) => setOpenAlm((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   
@@ -142,8 +152,8 @@ const Inventario = () => {
     const [productosRes, movimientosRes, invAlmRes, lotesRes] = await Promise.all([
       supabase.from('productos').select('*, categoria:categorias(nombre)').order('nombre'),
       supabase.from('movimientos_inventario').select('*, producto:productos(nombre, sku)').order('created_at', { ascending: false }).limit(50),
-      supabase.from('inventario_almacen').select('id, cantidad, reservado, almacen:almacenes(id, nombre, tipo), producto:productos(id, nombre, sku)').limit(5000),
-      supabase.from('lotes').select('id, nombre, es_serie, vencimiento, cantidad, producto:productos(id, nombre, sku)').order('vencimiento', { ascending: true, nullsFirst: false }),
+      supabase.from('inventario_almacen').select('id, cantidad, reservado, empresa_id, almacen:almacenes(id, nombre, tipo), producto:productos(id, nombre, sku, categoria_id)').limit(5000),
+      supabase.from('lotes').select('id, nombre, es_serie, vencimiento, cantidad, empresa_id, producto:productos(id, nombre, sku, categoria_id)').order('vencimiento', { ascending: true, nullsFirst: false }),
     ]);
     if (lotesRes.data) setLotes(lotesRes.data as unknown as LoteRow[]);
 
@@ -153,29 +163,123 @@ const Inventario = () => {
     setLoading(false);
   };
 
-  const categorias = useMemo(() => {
-    const set = new Map<string, string>();
-    for (const p of productos) if (p.categoria?.nombre) set.set(p.categoria.nombre, p.categoria.nombre);
-    return [...set.values()].sort((a, b) => a.localeCompare(b));
+  // Nombre de cada categoría (para las opciones de las pestañas cuyas filas solo traen categoria_id)
+  const nombreCategoria = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of productos) if (p.categoria_id && p.categoria?.nombre) m.set(p.categoria_id, p.categoria.nombre.trim());
+    return m;
   }, [productos]);
 
+  // ---- Pestaña activa y filtros (en la URL) ----
+  const tab = (["almacenes", "lotes", "movements"].includes(params.get("tab") ?? "") ? params.get("tab") : "stock") as string;
+  const setTab = (t: string) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    if (t === "stock") n.delete("tab"); else n.set("tab", t);
+    for (const k of new Set(Object.values(CLAVES_TAB).flat())) if (!CLAVES_TAB[t].includes(k)) n.delete(k);
+    return n;
+  }, { replace: true });
+
   const esAlmacenable = (p: ProductoConCategoria) => p.activo && p.controla_stock !== false;
-  const filteredProductos = productos.filter(p =>
-    (alcance === "todos" || esAlmacenable(p)) &&
-    (p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-     p.sku.toLowerCase().includes(searchTerm.toLowerCase())) &&
-    (categoriaFiltro === "all" || p.categoria?.nombre === categoriaFiltro)
-  );
   const estadoStock = (p: ProductoConCategoria) =>
     p.controla_stock === false ? "servicio" : p.stock_actual <= 0 ? "agotado" : p.stock_actual <= p.stock_minimo ? "bajo" : "ok";
   const ETIQUETA_ESTADO: Record<string, string> = { ok: "OK", bajo: "Bajo", agotado: "Agotado", servicio: "Servicio" };
+
+  // Existencias por almacén y lotes con existencia de cada producto
+  const almacenesDe = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const r of invAlmacen) {
+      if (!r.producto || !r.almacen || !(Number(r.cantidad) > 0)) continue;
+      const s = m.get(r.producto.id) ?? new Set<string>(); s.add(r.almacen.id); m.set(r.producto.id, s);
+    }
+    return m;
+  }, [invAlmacen]);
+  const lotesDe = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const l of lotes) {
+      if (!l.producto || !(Number(l.cantidad) > 0)) continue;
+      const s = m.get(l.producto.id) ?? new Set<string>(); s.add(estadoVencimiento(l.vencimiento)); m.set(l.producto.id, s);
+    }
+    return m;
+  }, [lotes]);
+
+  const pruebasEstado: OpcionPrueba<ProductoConCategoria>[] = [
+    { valor: "ok", etiqueta: "OK (sobre el mínimo)", prueba: (p) => estadoStock(p) === "ok" },
+    { valor: "bajo", etiqueta: "Bajo mínimo", prueba: (p) => estadoStock(p) === "bajo" },
+    { valor: "agotado", etiqueta: "Agotado", prueba: (p) => estadoStock(p) === "agotado" },
+    { valor: "servicio", etiqueta: "Servicio (sin stock)", prueba: (p) => estadoStock(p) === "servicio" },
+  ];
+  const pruebasLoteProducto: OpcionPrueba<ProductoConCategoria>[] = [
+    { valor: "vencidos", etiqueta: "Con lotes vencidos", prueba: (p) => !!lotesDe.get(p.id)?.has("vencido") },
+    { valor: "30", etiqueta: "Con lotes que vencen en 30 días", prueba: (p) => !!lotesDe.get(p.id)?.has("30") },
+    { valor: "90", etiqueta: "Con lotes que vencen en 90 días", prueba: (p) => { const s = lotesDe.get(p.id); return !!s && (s.has("30") || s.has("90")); } },
+  ];
+  const almacenesOpc = useMemo(() => opcionesDe(invAlmacen.filter((r) => r.almacen && Number(r.cantidad) > 0), (r) => r.almacen!.id, (r) => r.almacen!.nombre), [invAlmacen]);
+  // Productos del alcance (como el inventario de Odoo: por defecto solo almacenables activos)
+  const alcanceTodos = params.get("alcance") === "todos";
+  const enAlcance = useMemo(() => (alcanceTodos ? productos : productos.filter(esAlmacenable)), [productos, alcanceTodos]);
+
+  const filtroEmpresaProd = useFiltroEmpresa(productos);
+  const filtroEmpresaAlm = useFiltroEmpresa(invAlmacen);
+  const filtroEmpresaLote = useFiltroEmpresa(lotes);
+  const catOpc = <T,>(filas: T[], id: (f: T) => string | null | undefined) =>
+    opcionesDe(filas, id, (_f, v) => nombreCategoria.get(v) ?? "—", "Sin categoría");
+  const pruebasLote: OpcionPrueba<LoteRow>[] = [
+    { valor: "lote", etiqueta: "Lotes", prueba: (l) => !l.es_serie }, { valor: "serie", etiqueta: "Números de serie", prueba: (l) => l.es_serie },
+  ];
+  const pruebasMov: OpcionPrueba<MovimientoInventario>[] = [
+    { valor: "entrada", etiqueta: "Entradas", prueba: (m) => m.tipo === "entrada" }, { valor: "salida", etiqueta: "Salidas", prueba: (m) => m.tipo === "salida" },
+    { valor: "ajuste", etiqueta: "Ajustes", prueba: (m) => m.tipo === "ajuste" },
+  ];
+  const defsPorTab: Record<string, (DefFiltro | null)[]> = {
+    stock: [
+      { clave: "categoria", etiqueta: "Categoría", todos: "Todas", principal: true, opciones: catOpc(enAlcance, (p) => p.categoria_id) },
+      { clave: "estado", etiqueta: "Estado", principal: true, opciones: opcionesPrueba(enAlcance, pruebasEstado, true) },
+      { clave: "almacen", etiqueta: "Almacén", todos: "Todos los almacenes", principal: true, opciones: almacenesOpc },
+      { clave: "lote", etiqueta: "Lotes", todos: "Todos", opciones: opcionesPrueba(enAlcance, pruebasLoteProducto) },
+      { clave: "alcance", etiqueta: "Productos", porDefecto: "almacenables", opciones: [
+        { valor: "almacenables", etiqueta: "Almacenables activos", n: productos.filter(esAlmacenable).length },
+        { valor: "todos", etiqueta: "Todos (con servicios e inactivos)", n: productos.length },
+      ] },
+      filtroEmpresaProd,
+    ],
+    almacenes: [
+      { clave: "tipo_almacen", etiqueta: "Tipo", todos: "Todos los almacenes", principal: true, opciones: opcionesPrueba(invAlmacen, [
+        { valor: "propio", etiqueta: "Solo propios", prueba: (r) => r.almacen?.tipo === "propio" },
+        { valor: "consignacion", etiqueta: "Solo consignación", prueba: (r) => r.almacen?.tipo === "consignacion" },
+      ]) },
+      { clave: "almacen", etiqueta: "Almacén", todos: "Todos los almacenes", principal: true, opciones: almacenesOpc },
+      { clave: "categoria", etiqueta: "Categoría", todos: "Todas", principal: true, opciones: catOpc(invAlmacen, (r) => r.producto?.categoria_id) },
+      filtroEmpresaAlm,
+    ],
+    lotes: [
+      { clave: "lotes", etiqueta: "Vencimiento", porDefecto: "90", principal: true, opciones: Object.entries(FILTROS_LOTE).map(([valor, etiqueta]) => ({ valor, etiqueta })) },
+      { clave: "categoria", etiqueta: "Categoría", todos: "Todas", principal: true, opciones: catOpc(lotes, (l) => l.producto?.categoria_id) },
+      { clave: "tipo_lote", etiqueta: "Tipo", todos: "Lotes y series", opciones: opcionesPrueba(lotes, pruebasLote) },
+      filtroEmpresaLote,
+    ],
+    movements: [
+      { clave: "tipo_mov", etiqueta: "Tipo", principal: true, opciones: opcionesPrueba(movimientos, pruebasMov) },
+      { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+    ],
+  };
+  const f = useFiltros(defsPorTab[tab]);
+  const loteFiltro = tab === "lotes" ? f.v("lotes") : "90";
+  const setLoteFiltro = (v: string) => f.set("lotes", v);
+
+  const termino = searchTerm.toLowerCase();
+  const filteredProductos = enAlcance.filter(p =>
+    (p.nombre.toLowerCase().includes(termino) || p.sku.toLowerCase().includes(termino)) &&
+    coincide(p.categoria_id, f.v("categoria")) && pasaPrueba(pruebasEstado, f.v("estado"), p) &&
+    (!f.v("almacen") || !!almacenesDe.get(p.id)?.has(f.v("almacen"))) && pasaPrueba(pruebasLoteProducto, f.v("lote"), p) &&
+    (!filtroEmpresaProd || coincide(p.empresa_id, f.v("empresa")))
+  );
   const { ordenadas, orden, alternar } = useOrdenTabla(filteredProductos, {
     sku: (p) => p.sku, nombre: (p) => p.nombre, stock: (p) => Number(p.stock_actual || 0),
     comprometido: (p) => Number(p.comprometido_odoo || 0) + Number(p.comprometido_guds || 0),
     disponible: (p) => (p.controla_stock === false ? null : Number(p.stock_disponible ?? p.stock_actual ?? 0)),
     minimo: (p) => Number(p.stock_minimo || 0), maximo: (p) => Number(p.stock_maximo || 0), estado: (p) => estadoStock(p),
   });
-  const pagination = usePagination(ordenadas, 50);
+  const pagination = usePagination(ordenadas, 50, f.firma);
   const exportar = () => exportarCSV("inventario", ordenadas, [
     { titulo: "SKU", valor: (p) => p.sku }, { titulo: "Producto", valor: (p) => p.nombre }, { titulo: "Categoría", valor: (p) => p.categoria?.nombre },
     { titulo: "Stock", valor: (p) => Number(p.stock_actual || 0) },
@@ -195,15 +299,19 @@ const Inventario = () => {
   }), [lotes, lotesConExistencia]);
   const lotesFiltrados = useMemo(() => {
     const q = loteSearch.trim().toLowerCase();
+    const cat = tab === "lotes" ? f.v("categoria") : "", tipoLote = tab === "lotes" ? f.v("tipo_lote") : "";
+    const emp = tab === "lotes" && filtroEmpresaLote ? f.v("empresa") : "";
     return lotes.filter((l) => {
       const e = estadoVencimiento(l.vencimiento);
       const ex = Number(l.cantidad) > 0;
       const ok = loteFiltro === "todos" ? true : loteFiltro === "existencia" ? ex : loteFiltro === "sin_fecha" ? e === "sin_fecha"
         : loteFiltro === "vencidos" ? ex && e === "vencido" : loteFiltro === "30" ? ex && e === "30" : ex && (e === "30" || e === "90");
-      return ok && (!q || l.nombre.toLowerCase().includes(q) || l.producto?.nombre?.toLowerCase().includes(q) || l.producto?.sku?.toLowerCase().includes(q));
+      return ok && coincide(l.producto?.categoria_id, cat) && pasaPrueba(pruebasLote, tipoLote, l) && coincide(l.empresa_id, emp)
+        && (!q || l.nombre.toLowerCase().includes(q) || l.producto?.nombre?.toLowerCase().includes(q) || l.producto?.sku?.toLowerCase().includes(q));
     });
-  }, [lotes, loteSearch, loteFiltro]);
-  const paginacionLotes = usePagination(lotesFiltrados, 50);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lotes, loteSearch, loteFiltro, tab, f.firma]);
+  const paginacionLotes = usePagination(lotesFiltrados, 50, f.firma);
   // El stock de los productos de Odoo se mueve en Odoo: el ajuste manual es solo para productos propios de GUDS
   const productosPropios = useMemo(() => productos.filter((p) => !p.odoo_id), [productos]);
 
@@ -222,18 +330,22 @@ const Inventario = () => {
     const matchesSearch = movementSearchTerm === "" ||
       (m.producto as any)?.nombre?.toLowerCase().includes(movementSearchTerm.toLowerCase()) ||
       (m.producto as any)?.sku?.toLowerCase().includes(movementSearchTerm.toLowerCase());
-    const matchesTipo = tipoFiltro === "all" || m.tipo === tipoFiltro;
-    return matchesSearch && matchesTipo;
+    return matchesSearch && (tab !== "movements" || (pasaPrueba(pruebasMov, f.v("tipo_mov"), m) && enRango(m.created_at, f.v("fecha"))));
   });
 
-  const pagination2 = usePagination(filteredMovimientos, 50);
+  const pagination2 = usePagination(filteredMovimientos, 50, f.firma);
 
+  const totalAlmacenes = useMemo(() => new Set(invAlmacen.filter((r) => r.almacen).map((r) => r.almacen!.id)).size, [invAlmacen]);
   const gruposAlm = useMemo(() => {
     const m = new Map<string, { key: string; nombre: string; tipo: string; items: InvAlmacenRow[]; total: number }>();
     const q = almSearch.toLowerCase();
+    const enTab = tab === "almacenes";
+    const tipoAlm = enTab ? f.v("tipo_almacen") : "", alm = enTab ? f.v("almacen") : "", cat = enTab ? f.v("categoria") : "";
+    const emp = enTab && filtroEmpresaAlm ? f.v("empresa") : "";
     for (const r of invAlmacen) {
       if (!r.almacen) continue;
-      if (almTipoFiltro !== "all" && r.almacen.tipo !== almTipoFiltro) continue;
+      if (tipoAlm && r.almacen.tipo !== tipoAlm) continue;
+      if (!coincide(r.almacen.id, alm) || !coincide(r.producto?.categoria_id, cat) || !coincide(r.empresa_id, emp)) continue;
       if (q && !(r.almacen.nombre.toLowerCase().includes(q) || r.producto?.nombre?.toLowerCase().includes(q) || r.producto?.sku?.toLowerCase().includes(q))) continue;
       const key = r.almacen.id;
       const g = m.get(key) || { key, nombre: r.almacen.nombre, tipo: r.almacen.tipo, items: [], total: 0 };
@@ -241,7 +353,8 @@ const Inventario = () => {
       m.set(key, g);
     }
     return [...m.values()].sort((a, b) => a.nombre.localeCompare(b.nombre));
-  }, [invAlmacen, almSearch, almTipoFiltro]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invAlmacen, almSearch, tab, f.firma]);
 
   const openMovementDialog = (type: 'entrada' | 'salida' | 'ajuste') => {
     setMovementType(type);
@@ -332,7 +445,16 @@ const Inventario = () => {
     agotados: almacenables.filter(p => p.stock_actual <= 0).length,
   };
 
-  const [tab, setTab] = useState<string>(params.get("tab") || "stock");
+  // Indicadores de stock: al pulsarlos fijan el filtro (sobre almacenables activos, como el indicador)
+  const alcance = f.v("alcance") === "todos" ? "todos" : "almacenables";
+  const kpiEstado = (estado: string) => () =>
+    f.v("estado") === estado && tab === "stock" ? f.setVarios({ estado: "", alcance: "" })
+      : tab === "stock" ? f.setVarios({ estado, alcance: "" })
+      : setParams((p) => { const n = new URLSearchParams(p); n.delete("tab"); for (const k of Object.values(CLAVES_TAB).flat()) n.delete(k); n.set("estado", estado); return n; }, { replace: true });
+  const kpiAlcance = (a: "almacenables" | "todos") => () => {
+    if (tab === "stock") f.set("alcance", a);
+    else setParams((p) => { const n = new URLSearchParams(p); n.delete("tab"); for (const k of Object.values(CLAVES_TAB).flat()) n.delete(k); if (a === "todos") n.set("alcance", a); return n; }, { replace: true });
+  };
   const pestanas = (
     <TabsList className="h-auto flex-wrap justify-start">
       <TabsTrigger value="stock">Stock Actual</TabsTrigger>
@@ -347,14 +469,14 @@ const Inventario = () => {
     <MainLayout title="Inventario">
       {cols.estilo}
       <KpiStrip items={[
-        { label: "Almacenables activos", valor: stats.total, tono: "primario", onClick: () => setAlcance("almacenables"), activo: alcance === "almacenables", titulo: "Ver solo productos almacenables activos (como el inventario de Odoo)" },
-        { label: "Servicios e inactivos", valor: stats.otros, tono: "tenue", detalle: alcance === "todos" ? "mostrándose en la lista" : "ocultos · clic para ver", onClick: () => setAlcance((a) => (a === "todos" ? "almacenables" : "todos")), activo: alcance === "todos" },
+        { label: "Almacenables activos", valor: stats.total, tono: "primario", onClick: kpiAlcance("almacenables"), activo: tab === "stock" && alcance === "almacenables", titulo: "Ver solo productos almacenables activos (como el inventario de Odoo)" },
+        { label: "Servicios e inactivos", valor: stats.otros, tono: "tenue", detalle: alcance === "todos" ? "mostrándose en la lista" : "ocultos · clic para ver", onClick: kpiAlcance(alcance === "todos" ? "almacenables" : "todos"), activo: tab === "stock" && alcance === "todos" },
         {
           label: "Lotes vencen en 90 días", valor: conteoLotes.d90, tono: "alerta",
           detalle: conteoLotes.vencidos > 0 ? <span className="text-destructive">{conteoLotes.vencidos} vencidos con existencia</span> : undefined,
         },
-        { label: "Agotados", valor: stats.agotados, tono: "negativo" },
-        { label: "Bajo Mínimo", valor: stats.bajoMinimo, tono: "alerta" },
+        { label: "Agotados", valor: stats.agotados, tono: "negativo", onClick: kpiEstado("agotado"), activo: tab === "stock" && f.v("estado") === "agotado", titulo: "Ver los almacenables activos agotados" },
+        { label: "Bajo Mínimo", valor: stats.bajoMinimo, tono: "alerta", onClick: kpiEstado("bajo"), activo: tab === "stock" && f.v("estado") === "bajo", titulo: "Ver los almacenables activos bajo el mínimo" },
       ]} />
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -365,18 +487,8 @@ const Inventario = () => {
             busqueda={searchTerm}
             onBusqueda={setSearchTerm}
             placeholder="Buscar producto..."
-            filtros={
-              <Select value={categoriaFiltro} onValueChange={setCategoriaFiltro}>
-                <SelectTrigger className="h-8 w-full text-[13px] sm:w-44">
-                  <SelectValue placeholder="Categoría" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas las categorías</SelectItem>
-                  {categorias.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            }
-            contador={`${filteredProductos.length} registros`}
+            filtros={<FiltrosLista filtros={f} resultados={filteredProductos.length} />}
+            contador={loading ? undefined : contadorFiltrado(filteredProductos.length, enAlcance.length, f.activos || !!searchTerm)}
             acciones={
               <>
                 {cols.selector}
@@ -397,19 +509,8 @@ const Inventario = () => {
             busqueda={almSearch}
             onBusqueda={setAlmSearch}
             placeholder="Buscar almacén o producto..."
-            filtros={
-              <Select value={almTipoFiltro} onValueChange={setAlmTipoFiltro}>
-                <SelectTrigger className="h-8 w-full text-[13px] sm:w-48">
-                  <SelectValue placeholder="Tipo de almacén" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los almacenes</SelectItem>
-                  <SelectItem value="propio">Solo propios</SelectItem>
-                  <SelectItem value="consignacion">Solo consignación</SelectItem>
-                </SelectContent>
-              </Select>
-            }
-            contador={`${gruposAlm.length} almacenes`}
+            filtros={<FiltrosLista filtros={f} resultados={gruposAlm.length} />}
+            contador={loading ? undefined : contadorFiltrado(gruposAlm.length, totalAlmacenes, f.activos || !!almSearch, "almacenes")}
           />
         ) : tab === "lotes" ? (
           <BarraLista
@@ -417,15 +518,8 @@ const Inventario = () => {
             busqueda={loteSearch}
             onBusqueda={setLoteSearch}
             placeholder="Buscar lote o producto..."
-            filtros={
-              <Select value={loteFiltro} onValueChange={setLoteFiltro}>
-                <SelectTrigger className="h-8 w-full text-[13px] sm:w-56"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {Object.entries(FILTROS_LOTE).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            }
-            contador={`${lotesFiltrados.length} registros`}
+            filtros={<FiltrosLista filtros={f} resultados={lotesFiltrados.length} />}
+            contador={loading ? undefined : `${lotesFiltrados.length} registros`}
             acciones={<span className="flex items-center gap-1.5 text-xs text-muted-foreground"><OdooBadge /> Lotes, series y vencimientos de Odoo</span>}
           />
         ) : (
@@ -434,20 +528,8 @@ const Inventario = () => {
             busqueda={movementSearchTerm}
             onBusqueda={setMovementSearchTerm}
             placeholder="Buscar movimiento..."
-            filtros={
-              <Select value={tipoFiltro} onValueChange={setTipoFiltro}>
-                <SelectTrigger className="h-8 w-full text-[13px] sm:w-40">
-                  <SelectValue placeholder="Tipo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="entrada">Entradas</SelectItem>
-                  <SelectItem value="salida">Salidas</SelectItem>
-                  <SelectItem value="ajuste">Ajustes</SelectItem>
-                </SelectContent>
-              </Select>
-            }
-            contador={`${filteredMovimientos.length} registros`}
+            filtros={<FiltrosLista filtros={f} resultados={filteredMovimientos.length} />}
+            contador={loading ? undefined : contadorFiltrado(filteredMovimientos.length, movimientos.length, f.activos || !!movementSearchTerm)}
             acciones={
               <>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openMovementDialog('entrada')}>

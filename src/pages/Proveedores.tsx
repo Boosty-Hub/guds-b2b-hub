@@ -16,6 +16,11 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { useColumnas } from "@/components/datos/columnas";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesTexto, opcionesPrueba, pasaPrueba, coincide, coincideTexto,
+  contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
+import { estadoVe } from "@/components/clientes/odooCliente";
 
 interface Proveedor {
   id: string;
@@ -41,6 +46,10 @@ interface Proveedor {
   odoo_sync_at: string | null;
 }
 
+/** Saldo con el proveedor según sus facturas publicadas (misma regla que Cuentas por Pagar). */
+interface SaldoProv { saldo: number; vencido: number; aFavor: number }
+const SIN_SALDO: SaldoProv = { saldo: 0, vencido: 0, aFavor: 0 };
+
 function Campo({ label, children, odoo }: { label: string; children?: React.ReactNode; odoo?: boolean }) {
   const vacio = children === null || children === undefined || children === "";
   return (
@@ -57,28 +66,83 @@ const Proveedores = () => {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<Proveedor | null>(null);
+  const [saldos, setSaldos] = useState<Record<string, SaldoProv>>({});
 
   useEffect(() => {
-    supabase.from("proveedores").select("*").order("nombre").then(({ data }) => {
+    Promise.all([
+      supabase.from("proveedores").select("*").order("nombre"),
+      // Solo facturas de proveedor con saldo (para el filtro de saldo): proveedor, saldo y vencimiento
+      supabase.from("facturas_proveedor").select("proveedor_id, saldo_usd, fecha_vencimiento, fecha_emision").eq("estado", "posted")
+        .or("saldo_usd.gt.0.009,saldo_usd.lt.-0.009"),
+    ]).then(([{ data }, { data: facs }]) => {
       setProveedores((data as Proveedor[] | null) ?? []);
+      const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+      const s: Record<string, SaldoProv> = {};
+      for (const f of (facs as { proveedor_id: string | null; saldo_usd: number; fecha_vencimiento: string | null; fecha_emision: string | null }[] | null) ?? []) {
+        if (!f.proveedor_id) continue;
+        const x = s[f.proveedor_id] ?? (s[f.proveedor_id] = { ...SIN_SALDO });
+        const saldo = Number(f.saldo_usd);
+        if (saldo < 0) x.aFavor += saldo;
+        else {
+          x.saldo += saldo;
+          const vence = f.fecha_vencimiento || f.fecha_emision;
+          if (vence && new Date(`${vence}T00:00:00`).getTime() < hoy.getTime()) x.vencido += saldo;
+        }
+      }
+      setSaldos(s);
       setLoading(false);
     });
   }, []);
 
+  // ---- Filtros (en la URL) ----
+  const saldoDe = (p: Proveedor) => saldos[p.id] ?? SIN_SALDO;
+  const pruebasSaldo: OpcionPrueba<Proveedor>[] = [
+    { valor: "con", etiqueta: "Con saldo por pagar", prueba: (p) => saldoDe(p).saldo > 0.009 },
+    { valor: "vencido", etiqueta: "Con facturas vencidas", prueba: (p) => saldoDe(p).vencido > 0.009 },
+    { valor: "sin", etiqueta: "Sin saldo por pagar", prueba: (p) => saldoDe(p).saldo <= 0.009 },
+    { valor: "favor", etiqueta: "Con saldo a favor", prueba: (p) => saldoDe(p).aFavor < -0.009 },
+  ];
+  const siNo = (si: string, no: string, fn: (p: Proveedor) => boolean): OpcionPrueba<Proveedor>[] =>
+    [{ valor: "si", etiqueta: si, prueba: fn }, { valor: "no", etiqueta: no, prueba: (p) => !fn(p) }];
+  const pruebasTipo = siNo("Empresas", "Personas naturales", (p) => !!p.es_empresa);
+  const pruebasCliente = siNo("También son clientes", "Solo proveedores", (p) => !!p.cliente_id);
+  const pruebasActivo = siNo("Activos", "Archivados", (p) => p.activo);
+  const filtroEmpresa = useFiltroEmpresa(proveedores);
+  const f = useFiltros([
+    { clave: "estado", etiqueta: "Estado", todos: "Todos los estados", principal: true, opciones: opcionesDe(proveedores, (p) => estadoVe(p.estado) ?? p.estado, undefined, "Sin estado") },
+    { clave: "ciudad", etiqueta: "Ciudad", todos: "Todas las ciudades", principal: true, opciones: opcionesTexto(proveedores, (p) => p.ciudad, "Sin ciudad") },
+    { clave: "saldo", etiqueta: "Saldo", todos: "Todos", principal: true, opciones: opcionesPrueba(proveedores, pruebasSaldo) },
+    { clave: "tipo", etiqueta: "Tipo", todos: "Empresas y personas", opciones: opcionesPrueba(proveedores, pruebasTipo) },
+    { clave: "residencia", etiqueta: "Residencia fiscal", todos: "Todas", opciones: opcionesDe(proveedores, (p) => p.tipo_residencia, undefined, "Sin indicar") },
+    { clave: "cliente", etiqueta: "También cliente", todos: "Todos", opciones: opcionesPrueba(proveedores, pruebasCliente) },
+    { clave: "activo", etiqueta: "Situación", todos: "Activos y archivados", opciones: opcionesPrueba(proveedores, pruebasActivo) },
+    filtroEmpresa,
+  ]);
+  const pasaFiltros = (p: Proveedor) =>
+    coincide(estadoVe(p.estado) ?? p.estado, f.v("estado")) && coincideTexto(p.ciudad, f.v("ciudad"))
+    && pasaPrueba(pruebasSaldo, f.v("saldo"), p) && pasaPrueba(pruebasTipo, f.v("tipo"), p)
+    && coincide(p.tipo_residencia, f.v("residencia")) && pasaPrueba(pruebasCliente, f.v("cliente"), p)
+    && pasaPrueba(pruebasActivo, f.v("activo"), p) && (!filtroEmpresa || coincide(p.empresa_id, f.v("empresa")));
+  // Indicadores: sobre los filtros sin la búsqueda (sin filtros = todos, como antes)
+  const base = useMemo(() => (f.activos ? proveedores.filter(pasaFiltros) : proveedores),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [proveedores, saldos, f.firma]);
   const filtrados = useMemo(() => {
     const t = q.trim().toLowerCase();
-    if (!t) return proveedores;
-    return proveedores.filter((p) =>
+    if (!t) return base;
+    return base.filter((p) =>
       [p.nombre, p.rif, p.codigo, p.ciudad, p.email].some((v) => (v || "").toLowerCase().includes(t)));
-  }, [proveedores, q]);
+  }, [base, q]);
   const { ordenadas, orden, alternar } = useOrdenTabla(filtrados, {
     codigo: (p) => p.codigo, nombre: (p) => p.nombre, rif: (p) => p.rif, ciudad: (p) => p.ciudad, condicion: (p) => p.condicion_pago, estado: (p) => (p.activo ? 1 : 0),
   });
-  const pg = usePagination(ordenadas, 50);
+  const pg = usePagination(ordenadas, 50, f.firma);
   const exportar = () => exportarCSV("proveedores", ordenadas, [
     { titulo: "Código", valor: (p) => p.codigo }, { titulo: "Proveedor", valor: (p) => p.nombre }, { titulo: "RIF", valor: (p) => p.rif },
     { titulo: "Ciudad", valor: (p) => p.ciudad }, { titulo: "Teléfono", valor: (p) => p.telefono }, { titulo: "Email", valor: (p) => p.email },
     { titulo: "Condición de pago", valor: (p) => p.condicion_pago }, { titulo: "Activo", valor: (p) => (p.activo ? "Sí" : "No") },
+    { titulo: "Estado", valor: (p) => estadoVe(p.estado) ?? p.estado },
+    { titulo: "Saldo por pagar USD", valor: (p) => Number(saldoDe(p).saldo.toFixed(2)) }, { titulo: "Vencido USD", valor: (p) => Number(saldoDe(p).vencido.toFixed(2)) },
   ]);
   const empresaDe = (id: string | null) => empresas.find((e) => e.id === id) ?? null;
 
@@ -87,22 +151,21 @@ const Proveedores = () => {
     <MainLayout title="Proveedores">
       {cols.estilo}
       <KpiStrip items={[
-        { label: "Proveedores", valor: proveedores.length, tono: "primario" },
-        { label: "Empresas", valor: proveedores.filter((p) => p.es_empresa).length },
-        { label: "También son clientes", valor: proveedores.filter((p) => p.cliente_id).length },
+        { label: "Proveedores", valor: base.length, tono: "primario" },
+        { label: "Empresas", valor: base.filter((p) => p.es_empresa).length },
+        { label: "También son clientes", valor: base.filter((p) => p.cliente_id).length },
       ]} />
 
       <BarraLista
         busqueda={q}
         onBusqueda={setQ}
         placeholder="Buscar por nombre, RIF, ciudad o correo..."
-        filtros={
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <OdooBadge /> Proveedores sincronizados desde Odoo · se editan en Odoo
-          </span>
-        }
-        contador={`${filtrados.length} registros`}
-        acciones={<>{cols.selector}<BotonExportar onClick={exportar} total={ordenadas.length} /></>}
+        filtros={<FiltrosLista filtros={f} resultados={filtrados.length} />}
+        contador={loading ? undefined : contadorFiltrado(filtrados.length, proveedores.length, f.activos || !!q.trim())}
+        acciones={<>
+          <span className="hidden items-center gap-1.5 text-xs text-muted-foreground 2xl:flex" title="Proveedores sincronizados desde Odoo · se editan en Odoo"><OdooBadge /> Se editan en Odoo</span>
+          {cols.selector}<BotonExportar onClick={exportar} total={ordenadas.length} />
+        </>}
       />
 
       {loading ? (
@@ -123,7 +186,10 @@ const Proveedores = () => {
             </TableHeader>
             <TableBody>
               {pg.pageItems.length === 0 ? (
-                <TableRow><TableCell colSpan={soloLectura ? 7 : 6} className="py-10 text-center text-muted-foreground">Sin proveedores</TableCell></TableRow>
+                <TableRow><TableCell colSpan={soloLectura ? 7 : 6} className="py-10 text-center text-muted-foreground">
+                  {proveedores.length > 0 ? "Ningún proveedor coincide con la búsqueda o los filtros" : "Sin proveedores"}
+                  {f.activos > 0 && <button type="button" className="ml-2 text-xs font-medium text-primary hover:underline" onClick={f.limpiar}>Limpiar filtros</button>}
+                </TableCell></TableRow>
               ) : pg.pageItems.map((p) => (
                 <TableRow key={p.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSel(p)}>
                   <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">{p.codigo}</TableCell>

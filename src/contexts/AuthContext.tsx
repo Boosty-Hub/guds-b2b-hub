@@ -193,6 +193,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         let errorMessage = authError.message;
         if (authError.message.includes('Invalid login credentials')) {
           errorMessage = 'Email o contraseña incorrectos';
+        } else if (authError.message.includes('User is banned')) {
+          errorMessage = 'Tu cuenta está desactivada. Contacta al administrador.';
         } else if (authError.message.includes('Email not confirmed')) {
           errorMessage = 'Por favor confirma tu email antes de iniciar sesión';
         }
@@ -215,7 +217,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       console.log('Datos de usuario:', { userData, userError });
 
-      if (userError || !userData) {
+      if (userError && userError.code !== 'PGRST116') {
+        // Falló la consulta del perfil (red o base ocupada): no decir que la cuenta no tiene acceso
+        await supabase.auth.signOut();
+        return { success: false, error: "No se pudo cargar tu perfil. Intenta de nuevo en unos segundos." };
+      }
+      if (!userData) {
         // Cuenta sin perfil en GUDS: no se crea uno por defecto (los perfiles los crea GUDS)
         await supabase.auth.signOut();
         return { success: false, error: "Tu cuenta no tiene acceso configurado en GUDS. Pide acceso a tu ejecutivo de cuenta." };

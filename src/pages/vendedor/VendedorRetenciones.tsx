@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { VendedorLayout } from "@/components/vendedor/VendedorLayout";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { DeclararRetencionForm } from "@/components/retenciones/DeclararRetencionForm";
 import type { FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
+import { FiltrosLista, useFiltros, opcionesDe, coincide, enRango, contadorFiltrado } from "@/components/datos/FiltrosLista";
 
 interface ClienteConRetencion { id: string; nombre_negocio: string; }
 interface Retencion { id: string; numero: string; tipo: string; estado: string; fecha: string; total: number; }
@@ -23,7 +25,9 @@ const VendedorRetenciones = () => {
   const { user } = useAuth();
   const { formatPrice } = useCurrency();
   const [clientes, setClientes] = useState<ClienteConRetencion[]>([]);
-  const [clienteId, setClienteId] = useState("");
+  // El cliente elegido va en la URL (?cliente=): sobrevive a recargar y se puede compartir
+  const [params, setParams] = useSearchParams();
+  const clienteId = params.get("cliente") ?? "";
   const [facturas, setFacturas] = useState<FacturaSaldo[]>([]);
   const [retenciones, setRetenciones] = useState<Retencion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,8 +58,24 @@ const VendedorRetenciones = () => {
     setRetenciones((rets as Retencion[]) ?? []);
   };
 
-  const elegirCliente = (cid: string) => { setClienteId(cid); cargarDetalle(cid); };
+  const elegirCliente = (cid: string) => {
+    setParams((p) => { const n = new URLSearchParams(p); n.set("cliente", cid); ["tipo", "estado", "fecha"].forEach((k) => n.delete(k)); return n; }, { replace: true });
+  };
+  // Detalle del cliente de la URL (al elegirlo o al recargar)
+  useEffect(() => {
+    if (clienteId && clientes.some((c) => c.id === clienteId)) cargarDetalle(clienteId);
+    else { setFacturas([]); setRetenciones([]); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteId, clientes]);
   const clienteSel = clientes.find((c) => c.id === clienteId);
+
+  // Filtros de las retenciones del cliente (en la URL)
+  const f = useFiltros([
+    { clave: "tipo", etiqueta: "Tipo", principal: true, opciones: opcionesDe(retenciones, (r) => r.tipo, (_r, v) => v.toUpperCase()) },
+    { clave: "estado", etiqueta: "Estado", principal: true, opciones: opcionesDe(retenciones, (r) => r.estado, (_r, v) => ESTADO[v]?.label ?? v) },
+    { clave: "fecha", etiqueta: "Fecha", tipo: "fecha" },
+  ]);
+  const retFiltradas = retenciones.filter((r) => coincide(r.tipo, f.v("tipo")) && coincide(r.estado, f.v("estado")) && enRango(r.fecha, f.v("fecha")));
 
   return (
     <VendedorLayout title="Retenciones">
@@ -85,9 +105,19 @@ const VendedorRetenciones = () => {
               </div>
 
               <div className="rounded-lg border border-border bg-card">
-                <div className="border-b border-border bg-muted/30 px-3 py-1.5"><h2 className="text-[13px] font-semibold">Retenciones de {clienteSel.nombre_negocio} ({retenciones.length})</h2></div>
+                <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
+                  <h2 className="mr-auto text-[13px] font-semibold">Retenciones de {clienteSel.nombre_negocio}{" "}
+                    <span className="font-normal text-muted-foreground" data-contador="">({contadorFiltrado(retFiltradas.length, retenciones.length, f.activos, "retenciones")})</span>
+                  </h2>
+                  {retenciones.length > 0 && <FiltrosLista filtros={f} resultados={retFiltradas.length} />}
+                </div>
                 {retenciones.length === 0 ? (
                   <p className="p-5 text-center text-sm text-muted-foreground">Sin retenciones todavía.</p>
+                ) : retFiltradas.length === 0 ? (
+                  <p className="p-5 text-center text-sm text-muted-foreground">
+                    Ninguna retención con esos filtros.
+                    <button type="button" className="ml-2 font-medium text-primary hover:underline" onClick={f.limpiar}>Limpiar filtros</button>
+                  </p>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -97,7 +127,7 @@ const VendedorRetenciones = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {retenciones.map((r) => (
+                      {retFiltradas.map((r) => (
                         <TableRow key={r.id}>
                           <TableCell className="font-mono text-sm text-primary">{r.numero}</TableCell>
                           <TableCell className="uppercase text-muted-foreground">{r.tipo}</TableCell>

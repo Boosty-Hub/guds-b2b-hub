@@ -49,6 +49,7 @@ export function BuscadorGlobalDialogo({ abierto, setAbierto, contexto = "admin",
   const [q, setQ] = useState("");
   const [resultados, setResultados] = useState<Resultado[]>([]);
   const [cargando, setCargando] = useState(false);
+  const [fallo, setFallo] = useState(false);
   const [recientes, setRecientes] = useState<Resultado[]>(leerRecientes);
   const [seleccion, setSeleccion] = useState("");
   const consulta = useRef(0);
@@ -59,8 +60,9 @@ export function BuscadorGlobalDialogo({ abierto, setAbierto, contexto = "admin",
     setCargando(true);
     const n = ++consulta.current;
     const h = setTimeout(async () => {
-      const { data } = await supabase.rpc("buscar_global", { q: t, limite: 6, contexto });
+      const { data, error } = await supabase.rpc("buscar_global", { q: t, limite: 6, contexto });
       if (n !== consulta.current) return;
+      setFallo(!!error);
       setResultados((data as Resultado[] | null) ?? []);
       setCargando(false);
     }, 150);
@@ -159,7 +161,7 @@ export function BuscadorGlobalDialogo({ abierto, setAbierto, contexto = "admin",
                     </CommandPrimitive.Group>
                   ))}
                   {!cargando && grupos.length === 0 && modulos.length === 0 && (
-                    <p className="px-3 py-6 text-center text-sm text-muted-foreground">Sin resultados para “{q.trim()}”.</p>
+                    <p className="px-3 py-6 text-center text-sm text-muted-foreground">{fallo ? "La búsqueda no respondió a tiempo. Vuelve a intentarlo en unos segundos." : <>Sin resultados para “{q.trim()}”.</>}</p>
                   )}
                 </>
               )}

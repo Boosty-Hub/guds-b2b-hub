@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,10 +50,24 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { useColumnas } from "@/components/datos/columnas";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesTexto, opcionesPrueba, pasaPrueba, coincide, coincideTexto,
+  contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 interface ClienteConLista extends Cliente {
   lista_precios?: ListaPrecios | null;
+  vendedor?: { nombre: string; apellido: string | null } | null;
+  condicion_pago?: string | null;
+  empresa_id?: string | null;
 }
+
+/** Deuda del cliente según sus facturas publicadas (misma regla que Cuentas por Cobrar): saldo, vencido y a favor. */
+interface Deuda { saldo: number; vencido: number; aFavor: number; neto: number }
+const SIN_DEUDA: Deuda = { saldo: 0, vencido: 0, aFavor: 0, neto: 0 };
+
+/** "15 Days" / "Immediate Payment" (como vienen de Odoo) → "15 días" / "Pago inmediato". */
+const textoCondicion = (c: string) => c.replace(/^Immediate Payment$/i, "Pago inmediato").replace(/^(\d+)\s*Days?$/i, "$1 días").replace(/^contado$/i, "Contado");
 
 const tiposNegocio = [
   "Bodega",
@@ -70,6 +84,8 @@ const tiposNegocio = [
 const Clientes = () => {
   const [clientes, setClientes] = useState<ClienteConLista[]>([]);
   const [listasPrecios, setListasPrecios] = useState<ListaPrecios[]>([]);
+  const [deudas, setDeudas] = useState<Record<string, Deuda>>({});
+  const [conPortal, setConPortal] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const { formatPrice } = useCurrency();
@@ -104,13 +120,32 @@ const Clientes = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    const [clientesRes, listasRes] = await Promise.all([
-      supabase.from('clientes').select('*, lista_precios:listas_precios(*)').order('nombre_negocio'),
+    const [clientesRes, listasRes, facturasRes, portalRes] = await Promise.all([
+      supabase.from('clientes').select('*, lista_precios:listas_precios(*), vendedor:usuarios!clientes_vendedor_asignado_id_fkey(nombre, apellido)').order('nombre_negocio'),
       supabase.from('listas_precios').select('*').eq('activo', true).order('nombre'),
+      // Solo facturas con saldo (para los filtros de deuda): cliente, saldo y vencimiento
+      supabase.from('facturas').select('cliente_id, saldo_usd, fecha_vencimiento, fecha_emision').eq('estado', 'posted').or('saldo_usd.gt.0.009,saldo_usd.lt.-0.009'),
+      // Clientes con al menos un acceso activo al portal
+      supabase.from('usuarios').select('cliente_id').eq('role', 'cliente').eq('activo', true).not('cliente_id', 'is', null),
     ]);
-    
-    if (clientesRes.data) setClientes(clientesRes.data);
+
+    if (clientesRes.data) setClientes(clientesRes.data as ClienteConLista[]);
     if (listasRes.data) setListasPrecios(listasRes.data);
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const d: Record<string, Deuda> = {};
+    for (const f of (facturasRes.data as { cliente_id: string; saldo_usd: number; fecha_vencimiento: string | null; fecha_emision: string | null }[] | null) ?? []) {
+      const x = d[f.cliente_id] ?? (d[f.cliente_id] = { ...SIN_DEUDA });
+      const saldo = Number(f.saldo_usd);
+      if (saldo < 0) x.aFavor += saldo;
+      else {
+        x.saldo += saldo;
+        const vence = f.fecha_vencimiento || f.fecha_emision;
+        if (vence && new Date(`${vence}T00:00:00`).getTime() < hoy.getTime()) x.vencido += saldo;
+      }
+      x.neto = x.saldo + x.aFavor;
+    }
+    setDeudas(d);
+    setConPortal(new Set(((portalRes.data as { cliente_id: string }[] | null) ?? []).map((u) => u.cliente_id)));
     setLoading(false);
   };
 
@@ -243,27 +278,78 @@ const Clientes = () => {
     setIsEditOpen(true);
   };
 
-  const filteredClientes = clientes.filter(c =>
-    c.nombre_negocio.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.codigo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.rif.toLowerCase().includes(searchTerm.toLowerCase())
+  // ---- Filtros (en la URL) ----
+  const deudaDe = (c: ClienteConLista) => deudas[c.id] ?? SIN_DEUDA;
+  const nombreVendedor = (c: ClienteConLista) => (c.vendedor ? `${c.vendedor.nombre} ${c.vendedor.apellido || ""}`.trim() : null);
+  const pruebasDeuda: OpcionPrueba<ClienteConLista>[] = [
+    { valor: "con", etiqueta: "Con deuda", prueba: (c) => deudaDe(c).neto > 0.009 },
+    { valor: "vencida", etiqueta: "Con facturas vencidas", prueba: (c) => deudaDe(c).vencido > 0.009 },
+    { valor: "sin", etiqueta: "Sin deuda", prueba: (c) => deudaDe(c).neto <= 0.009 },
+    { valor: "favor", etiqueta: "Con saldo a favor", prueba: (c) => deudaDe(c).aFavor < -0.009 },
+  ];
+  const pruebasCredito: OpcionPrueba<ClienteConLista>[] = [
+    { valor: "con", etiqueta: "Con límite de crédito", prueba: (c) => Number(c.limite_credito || 0) > 0 },
+    { valor: "sin", etiqueta: "Sin límite (contado)", prueba: (c) => !(Number(c.limite_credito || 0) > 0) },
+    { valor: "excedido", etiqueta: "Deuda sobre el límite", prueba: (c) => Number(c.limite_credito || 0) > 0 && deudaDe(c).neto > Number(c.limite_credito) + 0.009 },
+  ];
+  const pruebasSiNo = (si: string, no: string, p: (c: ClienteConLista) => boolean): OpcionPrueba<ClienteConLista>[] => [
+    { valor: "si", etiqueta: si, prueba: p }, { valor: "no", etiqueta: no, prueba: (c) => !p(c) },
+  ];
+  const pruebasActivo = pruebasSiNo("Activos", "Inactivos", (c) => c.activo);
+  const pruebasPortal = pruebasSiNo("Con acceso al portal", "Sin acceso", (c) => conPortal.has(c.id));
+  const pruebasOrigen: OpcionPrueba<ClienteConLista>[] = [
+    { valor: "odoo", etiqueta: "Odoo", prueba: (c) => !!c.odoo_id }, { valor: "guds", etiqueta: "Creado en GUDS", prueba: (c) => !c.odoo_id },
+  ];
+  const filtroEmpresa = useFiltroEmpresa(clientes);
+  const f = useFiltros([
+    { clave: "estado", etiqueta: "Estado", todos: "Todos los estados", principal: true, opciones: opcionesDe(clientes, (c) => estadoVe(c.estado) ?? c.estado, undefined, "Sin estado") },
+    { clave: "ciudad", etiqueta: "Ciudad", todos: "Todas las ciudades", principal: true, opciones: opcionesTexto(clientes, (c) => c.ciudad, "Sin ciudad") },
+    { clave: "vendedor", etiqueta: "Vendedor", principal: true, opciones: opcionesDe(clientes, (c) => c.vendedor_asignado_id, (c) => nombreVendedor(c) ?? "—", "Sin vendedor") },
+    { clave: "deuda", etiqueta: "Deuda", todos: "Todas", principal: true, opciones: opcionesPrueba(clientes, pruebasDeuda) },
+    { clave: "condicion", etiqueta: "Condición de pago", todos: "Todas", opciones: opcionesDe(clientes, (c) => c.condicion_pago, (_c, v) => textoCondicion(v), "Sin condición") },
+    { clave: "credito", etiqueta: "Crédito", todos: "Todos", opciones: opcionesPrueba(clientes, pruebasCredito) },
+    { clave: "lista", etiqueta: "Lista de precios", todos: "Todas", opciones: opcionesDe(clientes, (c) => c.lista_precios_id, (c) => c.lista_precios?.nombre ?? "—", "Sin lista") },
+    { clave: "activo", etiqueta: "Situación", todos: "Activos e inactivos", opciones: opcionesPrueba(clientes, pruebasActivo) },
+    { clave: "portal", etiqueta: "Portal", todos: "Con y sin acceso", opciones: opcionesPrueba(clientes, pruebasPortal) },
+    { clave: "origen", etiqueta: "Origen", todos: "Odoo y GUDS", opciones: opcionesPrueba(clientes, pruebasOrigen) },
+    filtroEmpresa,
+  ]);
+  const pasaFiltros = (c: ClienteConLista) =>
+    coincide(estadoVe(c.estado) ?? c.estado, f.v("estado")) && coincideTexto(c.ciudad, f.v("ciudad"))
+    && coincide(c.vendedor_asignado_id, f.v("vendedor")) && pasaPrueba(pruebasDeuda, f.v("deuda"), c)
+    && coincide(c.condicion_pago, f.v("condicion")) && pasaPrueba(pruebasCredito, f.v("credito"), c)
+    && coincide(c.lista_precios_id, f.v("lista")) && pasaPrueba(pruebasActivo, f.v("activo"), c)
+    && pasaPrueba(pruebasPortal, f.v("portal"), c) && pasaPrueba(pruebasOrigen, f.v("origen"), c)
+    && (!filtroEmpresa || coincide(c.empresa_id, f.v("empresa")));
+  // Base de los indicadores: los filtros sin la búsqueda (sin filtros = todos los clientes, como antes)
+  const base = useMemo(() => (f.activos ? clientes.filter(pasaFiltros) : clientes),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [clientes, deudas, conPortal, f.firma]);
+  const termino = searchTerm.toLowerCase();
+  const filteredClientes = base.filter(c =>
+    c.nombre_negocio.toLowerCase().includes(termino) ||
+    c.codigo.toLowerCase().includes(termino) ||
+    (c.rif || "").toLowerCase().includes(termino)
   );
 
   const { ordenadas, orden, alternar } = useOrdenTabla(filteredClientes, {
     nombre: (c) => c.nombre_negocio, rif: (c) => c.rif, ciudad: (c) => c.ciudad, estado: (c) => (c.activo ? 1 : 0),
     limite: (c) => Number(c.limite_credito || 0), usado: (c) => Number(c.credito_utilizado || 0),
   });
-  const pagination = usePagination(ordenadas, 50);
+  const pagination = usePagination(ordenadas, 50, f.firma);
   const exportar = () => exportarCSV("clientes", ordenadas, [
     { titulo: "Código", valor: (c) => c.codigo }, { titulo: "Cliente", valor: (c) => c.nombre_negocio }, { titulo: "RIF", valor: (c) => c.rif },
     { titulo: "Ciudad", valor: (c) => c.ciudad }, { titulo: "Teléfono", valor: (c) => c.telefono }, { titulo: "Email", valor: (c) => c.email },
     { titulo: "Activo", valor: (c) => (c.activo ? "Sí" : "No") }, { titulo: "Límite crédito", valor: (c) => Number(c.limite_credito || 0) },
     { titulo: "Crédito utilizado", valor: (c) => Number(c.credito_utilizado || 0) },
+    { titulo: "Estado", valor: (c) => estadoVe(c.estado) ?? c.estado }, { titulo: "Vendedor", valor: (c) => nombreVendedor(c) },
+    { titulo: "Condición de pago", valor: (c) => (c.condicion_pago ? textoCondicion(c.condicion_pago) : "") },
+    { titulo: "Deuda USD", valor: (c) => Number(deudaDe(c).neto.toFixed(2)) }, { titulo: "Vencido USD", valor: (c) => Number(deudaDe(c).vencido.toFixed(2)) },
   ]);
 
   const stats = {
-    total: clientes.length,
-    activos: clientes.filter(c => c.activo).length,
+    total: base.length,
+    activos: base.filter(c => c.activo).length,
   };
 
   const cols = useColumnas("clientes", [{ etiqueta: "Cliente", fija: true }, { etiqueta: "RIF" }, { etiqueta: "Ciudad" }, { etiqueta: "Lista de Precios" }, { etiqueta: "Estado" }, { etiqueta: "Límite crédito" }, { etiqueta: "Usado" }, { etiqueta: "Acciones", fija: true }]);
@@ -275,8 +361,8 @@ const Clientes = () => {
         items={[
           { label: "Total Clientes", valor: stats.total, tono: "primario" },
           { label: "Activos", valor: stats.activos, tono: "positivo" },
-          { label: "Con Crédito", valor: clientes.filter(c => c.limite_credito > 0).length, tono: "alerta" },
-          { label: "Crédito Utilizado", valor: formatPrice(clientes.reduce((sum, c) => sum + Number(c.credito_utilizado || 0), 0)), tono: "negativo" },
+          { label: "Con Crédito", valor: base.filter(c => c.limite_credito > 0).length, tono: "alerta" },
+          { label: "Crédito Utilizado", valor: formatPrice(base.reduce((sum, c) => sum + Number(c.credito_utilizado || 0), 0)), tono: "negativo" },
         ]}
       />
 
@@ -285,7 +371,8 @@ const Clientes = () => {
         busqueda={searchTerm}
         onBusqueda={setSearchTerm}
         placeholder="Buscar cliente..."
-        contador={`${filteredClientes.length} registros`}
+        filtros={<FiltrosLista filtros={f} resultados={filteredClientes.length} />}
+        contador={loading ? undefined : contadorFiltrado(filteredClientes.length, clientes.length, f.activos || !!searchTerm)}
         acciones={
           <>
             {cols.selector}
@@ -307,8 +394,17 @@ const Clientes = () => {
         ) : filteredClientes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
             <Building2 className="mb-2 h-8 w-8 opacity-50" />
-            <p className="text-sm">No hay clientes registrados</p>
-            <p className="text-xs">Los clientes aparecerán aquí cuando se aprueben registros</p>
+            {clientes.length > 0 ? (
+              <>
+                <p className="text-sm">Ningún cliente coincide con la búsqueda o los filtros</p>
+                {f.activos > 0 && <button type="button" className="mt-1 text-xs font-medium text-primary hover:underline" onClick={f.limpiar}>Limpiar filtros</button>}
+              </>
+            ) : (
+              <>
+                <p className="text-sm">No hay clientes registrados</p>
+                <p className="text-xs">Los clientes aparecerán aquí cuando se aprueben registros</p>
+              </>
+            )}
           </div>
         ) : (
           <Table data-tabla="clientes">

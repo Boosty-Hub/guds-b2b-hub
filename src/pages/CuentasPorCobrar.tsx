@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,10 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { useColumnas } from "@/components/datos/columnas";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesTexto, opcionesPrueba, pasaPrueba, coincide, coincideTexto, enRango,
+  contadorFiltrado, type DefFiltro, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 interface FacturaRow { id: string; numero: string; cliente_id: string; tipo: string; fecha_emision: string | null; fecha_vencimiento: string | null; saldo_usd: number; }
 interface Banco { id: string; nombre: string; moneda: string; metodo_pago: string; metodos: string[] | null; }
@@ -39,14 +43,22 @@ const metodoLabel: Record<string, string> = {
 interface Deudor {
   cliente_id: string; nombre: string; docs: number; saldo: number;
   porVencer: number; d30: number; d60: number; d90: number; mas90: number; aFavor: number; neto: number;
+  // Datos del cliente para los filtros
+  ciudad: string | null; vendedorId: string | null; vendedor: string | null; empresa_id: string | null;
 }
+interface InfoCliente { nombre: string; ciudad: string | null; vendedorId: string | null; vendedor: string | null; empresa_id: string | null }
 const TRAMOS = [
   { k: "porVencer", label: "Por vencer" }, { k: "d30", label: "1–30 días" }, { k: "d60", label: "31–60 días" },
   { k: "d90", label: "61–90 días" }, { k: "mas90", label: "+90 días" },
 ] as const;
-interface Cobro { id: string; numero: string; monto: number; monto_moneda: number; moneda: string; created_at: string; cliente?: { nombre_negocio: string } | null; banco?: { nombre: string } | null; }
-interface CuentaManual { id: string; numero: string; cliente_id: string; concepto: string; monto: number; monto_pagado: number; estado_pago: string; fecha: string; }
-interface PagoPendiente { id: string; numero: string; cliente_id: string; monto: number; monto_moneda: number | null; moneda: string; metodo: string; referencia: string | null; comprobante_url: string | null; banco_id: string | null; created_at: string; propuesta_estado?: string | null; cliente?: { nombre_negocio: string } | null; orden?: { numero: string } | null; }
+interface Cobro { id: string; numero: string; monto: number; monto_moneda: number; moneda: string; created_at: string; banco_id: string | null; empresa_id?: string | null; cliente?: { nombre_negocio: string } | null; banco?: { nombre: string } | null; }
+interface CuentaManual { id: string; numero: string; cliente_id: string; concepto: string; monto: number; monto_pagado: number; estado_pago: string; fecha: string; empresa_id?: string | null; }
+interface PagoPendiente { id: string; numero: string; cliente_id: string; monto: number; monto_moneda: number | null; moneda: string; metodo: string; referencia: string | null; comprobante_url: string | null; banco_id: string | null; created_at: string; propuesta_estado?: string | null; registrado_por?: string | null; empresa_id?: string | null; cliente?: { nombre_negocio: string } | null; orden?: { numero: string } | null; }
+
+const ESTADO_MANUAL: Record<string, string> = { pendiente: "Pendiente", parcial: "Pagada en parte", pagado: "Pagada" };
+// Filtros propios de cada pestaña (claves distintas; se limpian al cambiar de pestaña). "empresa" vale para todas.
+const PESTANAS_CXC = ["cobrar", "manuales", "cobros", "anticipos", "verificar"] as const;
+const CLAVES_PESTANA = ["tramo", "vendedor", "ciudad", "favor", "m_estado", "m_fecha", "r_fecha", "r_banco", "r_moneda", "a_fecha", "v_fecha", "v_metodo", "v_origen"];
 interface Anticipo { pago_id: string; numero: string; cliente_id: string; monto_usd: number; aplicado: number; disponible: number; created_at: string; }
 
 const CuentasPorCobrar = () => {
@@ -55,6 +67,7 @@ const CuentasPorCobrar = () => {
   const navigate = useNavigate();
   const [facturas, setFacturas] = useState<FacturaRow[]>([]);
   const [clientes, setClientes] = useState<Record<string, string>>({});
+  const [infoCli, setInfoCli] = useState<Record<string, InfoCliente>>({});
   const [bancos, setBancos] = useState<Banco[]>([]);
   const [cobros, setCobros] = useState<Cobro[]>([]);
   const [cuentas, setCuentas] = useState<CuentaManual[]>([]);
@@ -62,6 +75,15 @@ const CuentasPorCobrar = () => {
   const [anticipos, setAnticipos] = useState<Anticipo[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  // Pestaña en la URL (?tab=), para compartir un enlace con sus filtros
+  const [params, setParams] = useSearchParams();
+  const tabCxc = (PESTANAS_CXC as readonly string[]).includes(params.get("tab") ?? "") ? params.get("tab")! : "cobrar";
+  const setTabCxc = (t: string) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    if (t === "cobrar") n.delete("tab"); else n.set("tab", t);
+    for (const k of CLAVES_PESTANA) n.delete(k);
+    return n;
+  }, { replace: true });
 
   // Verificación de pagos pendientes
   const [verif, setVerif] = useState<PagoPendiente | null>(null);
@@ -87,15 +109,21 @@ const CuentasPorCobrar = () => {
     setLoading(true);
     const [{ data: facs }, { data: clis }, { data: bcs }, { data: cbs }, { data: cxc }, { data: pend }, { data: ants }] = await Promise.all([
       supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, fecha_vencimiento, saldo_usd").eq("estado", "posted"),
-      supabase.from("clientes").select("id, nombre_negocio").order("nombre_negocio"),
+      supabase.from("clientes").select("id, nombre_negocio, ciudad, empresa_id, vendedor_asignado_id, vendedor:usuarios!clientes_vendedor_asignado_id_fkey(nombre, apellido)").order("nombre_negocio"),
       supabase.from("bancos").select("id, nombre, moneda, metodo_pago, metodos").eq("activo", true).order("nombre"),
-      supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("created_at", { ascending: false }).limit(5000),
-      supabase.from("cuentas_cobrar").select("id, numero, cliente_id, concepto, monto, monto_pagado, estado_pago, fecha").order("fecha", { ascending: false }),
-      supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, comprobante_url, banco_id, created_at, propuesta_estado, cliente:clientes(nombre_negocio), orden:ordenes(numero)").eq("estado", "pendiente").order("created_at", { ascending: false }),
+      supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, banco_id, empresa_id, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("created_at", { ascending: false }).limit(5000),
+      supabase.from("cuentas_cobrar").select("id, numero, cliente_id, concepto, monto, monto_pagado, estado_pago, fecha, empresa_id").order("fecha", { ascending: false }),
+      supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, comprobante_url, banco_id, created_at, propuesta_estado, registrado_por, empresa_id, cliente:clientes(nombre_negocio), orden:ordenes(numero)").eq("estado", "pendiente").order("created_at", { ascending: false }),
       supabase.from("v_anticipos").select("*").order("created_at", { ascending: false }),
     ]);
     setFacturas((facs as FacturaRow[]) ?? []);
-    setClientes(Object.fromEntries(((clis as { id: string; nombre_negocio: string }[]) ?? []).map((c) => [c.id, c.nombre_negocio])));
+    type FilaCli = { id: string; nombre_negocio: string; ciudad: string | null; empresa_id: string | null; vendedor_asignado_id: string | null; vendedor: { nombre: string; apellido: string | null } | null };
+    const filasCli = (clis as unknown as FilaCli[]) ?? [];
+    setClientes(Object.fromEntries(filasCli.map((c) => [c.id, c.nombre_negocio])));
+    setInfoCli(Object.fromEntries(filasCli.map((c) => [c.id, {
+      nombre: c.nombre_negocio, ciudad: c.ciudad, empresa_id: c.empresa_id, vendedorId: c.vendedor_asignado_id,
+      vendedor: c.vendedor ? `${c.vendedor.nombre} ${c.vendedor.apellido || ""}`.trim() : null,
+    }])));
     setBancos((bcs as Banco[]) ?? []);
     setCobros((cbs as unknown as Cobro[]) ?? []);
     setCuentas((cxc as CuentaManual[]) ?? []);
@@ -110,8 +138,9 @@ const CuentasPorCobrar = () => {
   const deudores = useMemo(() => {
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
     const m = new Map<string, Deudor>();
-    const de = (id: string) => m.get(id) || { cliente_id: id, nombre: clientes[id] || "—", docs: 0, saldo: 0,
-      porVencer: 0, d30: 0, d60: 0, d90: 0, mas90: 0, aFavor: 0, neto: 0 };
+    const de = (id: string): Deudor => m.get(id) || { cliente_id: id, nombre: clientes[id] || "—", docs: 0, saldo: 0,
+      porVencer: 0, d30: 0, d60: 0, d90: 0, mas90: 0, aFavor: 0, neto: 0,
+      ciudad: infoCli[id]?.ciudad ?? null, vendedorId: infoCli[id]?.vendedorId ?? null, vendedor: infoCli[id]?.vendedor ?? null, empresa_id: infoCli[id]?.empresa_id ?? null };
     for (const f of facturas) {
       const saldo = Number(f.saldo_usd);
       if (Math.abs(saldo) <= 0.009) continue;
@@ -128,7 +157,7 @@ const CuentasPorCobrar = () => {
       m.set(f.cliente_id, d);
     }
     return [...m.values()].filter((d) => d.saldo > 0.009).sort((a, b) => b.saldo - a.saldo);
-  }, [facturas, clientes]);
+  }, [facturas, clientes, infoCli]);
 
   const clientesLista = useMemo(() => Object.entries(clientes).map(([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre)), [clientes]);
 
@@ -153,23 +182,89 @@ const CuentasPorCobrar = () => {
   // Neto como en Odoo: facturas pendientes menos saldos a favor (notas de crédito sin aplicar) de todos los clientes
   const totalAFavor = facturas.reduce((s, f) => s + (Number(f.saldo_usd) < -0.009 ? Number(f.saldo_usd) : 0), 0);
   const totalNeto = totalPorCobrar + totalAFavor;
-  const totalesTramo = TRAMOS.map((t) => ({ ...t, monto: deudores.reduce((s, d) => s + d[t.k], 0) }));
-  const filtrados = deudores.filter((d) => d.nombre.toLowerCase().includes(q.toLowerCase()));
+
+  // ---- Filtros (en la URL), según la pestaña ----
+  const pruebasTramo: OpcionPrueba<Deudor>[] = [
+    ...TRAMOS.map((t) => ({ valor: t.k, etiqueta: t.k === "porVencer" ? "Con saldo por vencer" : `Con vencido ${t.label}`, prueba: (d: Deudor) => d[t.k] > 0.009 })),
+    { valor: "vencida", etiqueta: "Con deuda vencida (cualquier tramo)", prueba: (d) => d.d30 + d.d60 + d.d90 + d.mas90 > 0.009 },
+  ];
+  const pruebasFavor: OpcionPrueba<Deudor>[] = [
+    { valor: "si", etiqueta: "Con saldo a favor", prueba: (d) => d.aFavor < -0.009 },
+    { valor: "no", etiqueta: "Sin saldo a favor", prueba: (d) => d.aFavor >= -0.009 },
+  ];
+  const pruebasOrigenPend: OpcionPrueba<PagoPendiente>[] = [
+    { valor: "vendedor", etiqueta: "Vendedor", prueba: (p) => !!p.registrado_por },
+    { valor: "cliente", etiqueta: "Cliente (portal)", prueba: (p) => !p.registrado_por },
+  ];
+  const anticiposEmp = useMemo(() => anticipos.map((a) => ({ ...a, empresa_id: infoCli[a.cliente_id]?.empresa_id ?? null })), [anticipos, infoCli]);
+  const empDeud = useFiltroEmpresa(deudores), empCobros = useFiltroEmpresa(cobros), empCuentas = useFiltroEmpresa(cuentas);
+  const empAnt = useFiltroEmpresa(anticiposEmp), empPend = useFiltroEmpresa(pendientes);
+  const defsPorTab: Record<string, (DefFiltro | null)[]> = {
+    cobrar: [
+      { clave: "tramo", etiqueta: "Antigüedad", todos: "Todas", principal: true, opciones: opcionesPrueba(deudores, pruebasTramo) },
+      { clave: "vendedor", etiqueta: "Vendedor", principal: true, opciones: opcionesDe(deudores, (d) => d.vendedorId, (d) => d.vendedor ?? "—", "Sin vendedor") },
+      { clave: "ciudad", etiqueta: "Ciudad", todos: "Todas las ciudades", principal: true, opciones: opcionesTexto(deudores, (d) => d.ciudad, "Sin ciudad") },
+      { clave: "favor", etiqueta: "Saldo a favor", todos: "Con y sin saldo a favor", opciones: opcionesPrueba(deudores, pruebasFavor) },
+      empDeud,
+    ],
+    manuales: [
+      { clave: "m_estado", etiqueta: "Estado", todos: "Todos", principal: true, opciones: opcionesDe(cuentas, (c) => c.estado_pago, (_c, v) => ESTADO_MANUAL[v] ?? v) },
+      { clave: "m_fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+      empCuentas,
+    ],
+    cobros: [
+      { clave: "r_fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+      { clave: "r_banco", etiqueta: "Banco", todos: "Todos los bancos", principal: true, opciones: opcionesDe(cobros, (c) => c.banco_id, (c) => c.banco?.nombre ?? "—", "Sin banco") },
+      { clave: "r_moneda", etiqueta: "Moneda", todos: "Todas", principal: true, opciones: opcionesDe(cobros, (c) => c.moneda) },
+      empCobros,
+    ],
+    anticipos: [{ clave: "a_fecha", etiqueta: "Fecha", tipo: "fecha", principal: true }, empAnt],
+    verificar: [
+      { clave: "v_fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+      { clave: "v_metodo", etiqueta: "Método", todos: "Todos", principal: true, opciones: opcionesDe(pendientes, (p) => p.metodo, (_p, v) => metodoLabel[v] || v) },
+      { clave: "v_origen", etiqueta: "Reportado por", todos: "Todos", principal: true, opciones: opcionesPrueba(pendientes, pruebasOrigenPend) },
+      empPend,
+    ],
+  };
+  const f = useFiltros(defsPorTab[tabCxc]);
+  const enEmpresa = (empresa_id: string | null | undefined) => coincide(empresa_id, f.v("empresa"));
+  const texto = q.trim().toLowerCase();
+  const tiene = (...vs: (string | null | undefined)[]) => !texto || vs.some((v) => (v || "").toLowerCase().includes(texto));
+
+  // Base de los tramos: filtros de "Por cobrar" sin la búsqueda (sin filtros = todos los deudores, como antes)
+  const deudBase = useMemo(() => deudores.filter((d) => pasaPrueba(pruebasTramo, f.v("tramo"), d) && coincide(d.vendedorId, f.v("vendedor"))
+    && coincideTexto(d.ciudad, f.v("ciudad")) && pasaPrueba(pruebasFavor, f.v("favor"), d) && (!empDeud || enEmpresa(d.empresa_id))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deudores, f.firma]);
+  const totalesTramo = TRAMOS.map((t) => ({ ...t, monto: deudBase.reduce((s, d) => s + d[t.k], 0) }));
+  const filtrados = deudBase.filter((d) => d.nombre.toLowerCase().includes(texto));
+  const cobrosFiltrados = cobros.filter((c) => enRango(c.created_at, f.v("r_fecha")) && coincide(c.banco_id, f.v("r_banco"))
+    && coincide(c.moneda, f.v("r_moneda")) && (!empCobros || enEmpresa(c.empresa_id)) && tiene(c.numero, c.cliente?.nombre_negocio));
+  const cuentasFiltradas = cuentas.filter((c) => coincide(c.estado_pago, f.v("m_estado")) && enRango(c.fecha, f.v("m_fecha"))
+    && (!empCuentas || enEmpresa(c.empresa_id)) && tiene(c.numero, clientes[c.cliente_id], c.concepto));
+  const anticiposFiltrados = anticiposEmp.filter((a) => enRango(a.created_at, f.v("a_fecha")) && (!empAnt || enEmpresa(a.empresa_id))
+    && tiene(a.numero, clientes[a.cliente_id]));
+  const pendientesFiltrados = pendientes.filter((p) => enRango(p.created_at, f.v("v_fecha")) && coincide(p.metodo, f.v("v_metodo"))
+    && pasaPrueba(pruebasOrigenPend, f.v("v_origen"), p) && (!empPend || enEmpresa(p.empresa_id))
+    && tiene(p.numero, p.cliente?.nombre_negocio, p.referencia, p.orden?.numero));
+  const conteoTab: Record<string, [number, number]> = {
+    cobrar: [filtrados.length, deudores.length], manuales: [cuentasFiltradas.length, cuentas.length], cobros: [cobrosFiltrados.length, cobros.length],
+    anticipos: [anticiposFiltrados.length, anticipos.length], verificar: [pendientesFiltrados.length, pendientes.length],
+  };
   const { ordenadas: deudOrdenados, orden: ordenDeud, alternar: alternarDeud } = useOrdenTabla(filtrados, {
     nombre: (d) => d.nombre, docs: (d) => d.docs, porVencer: (d) => d.porVencer, d30: (d) => d.d30, d60: (d) => d.d60,
     d90: (d) => d.d90, mas90: (d) => d.mas90, saldo: (d) => d.saldo, aFavor: (d) => Math.abs(d.aFavor), neto: (d) => d.neto,
   });
-  const pgDeud = usePagination(deudOrdenados, 50);
+  const pgDeud = usePagination(deudOrdenados, 50, f.firma);
   const exportarDeudores = () => exportarCSV("cuentas-por-cobrar", deudOrdenados, [
     { titulo: "Cliente", valor: (d) => d.nombre }, { titulo: "Facturas", valor: (d) => d.docs },
     ...TRAMOS.map((t) => ({ titulo: t.label, valor: (d: Deudor) => Number(d[t.k].toFixed(2)) })),
     { titulo: "Saldo", valor: (d) => Number(d.saldo.toFixed(2)) }, { titulo: "A favor", valor: (d) => Number(Math.abs(d.aFavor).toFixed(2)) },
     { titulo: "Neto", valor: (d) => Number(d.neto.toFixed(2)) },
   ]);
-  const [tabCxc, setTabCxc] = useState("cobrar");
-  const pgCobros = usePagination(cobros, 50);
-  const pgCuentas = usePagination(cuentas, 50);
-  const pgAnt = usePagination(anticipos, 50);
+  const pgCobros = usePagination(cobrosFiltrados, 50, f.firma);
+  const pgCuentas = usePagination(cuentasFiltradas, 50, f.firma);
+  const pgAnt = usePagination(anticiposFiltrados, 50, f.firma);
 
   const bancoSel = bancos.find((b) => b.id === form.banco_id);
   const esBs = bancoSel?.moneda === "BS";
@@ -238,7 +333,7 @@ const CuentasPorCobrar = () => {
     fetchAll();
   };
 
-  const pgPend = usePagination(pendientes, 50);
+  const pgPend = usePagination(pendientesFiltrados, 50, f.firma);
 
   const abrirVerif = (p: PagoPendiente) => {
     setVerif(p);
@@ -324,7 +419,9 @@ const CuentasPorCobrar = () => {
         <BarraLista
           busqueda={q}
           onBusqueda={setQ}
-          placeholder="Buscar cliente..."
+          placeholder={tabCxc === "cobrar" ? "Buscar cliente..." : "Buscar número o cliente..."}
+          filtros={<FiltrosLista filtros={f} resultados={conteoTab[tabCxc][0]} />}
+          contador={loading ? undefined : contadorFiltrado(conteoTab[tabCxc][0], conteoTab[tabCxc][1], f.activos || !!texto)}
           pestanas={
             <TabsList className="h-auto flex-wrap justify-start">
               <TabsTrigger value="cobrar">Por cobrar ({deudores.length})</TabsTrigger>
@@ -354,8 +451,8 @@ const CuentasPorCobrar = () => {
         <>
           <TabsContent value="verificar">
             <div className="rounded-lg border border-border bg-card">
-              {pendientes.length === 0 ? (
-                <p className="p-6 text-center text-muted-foreground">No hay pagos por verificar. Los pagos reportados por clientes y vendedores aparecen aquí.</p>
+              {pendientesFiltrados.length === 0 ? (
+                <p className="p-6 text-center text-muted-foreground">{pendientes.length > 0 ? "Ningún pago coincide con la búsqueda o los filtros." : "No hay pagos por verificar. Los pagos reportados por clientes y vendedores aparecen aquí."}</p>
               ) : (
                 <>
                   <Table>
@@ -438,8 +535,8 @@ const CuentasPorCobrar = () => {
 
           <TabsContent value="manuales">
             <div className="rounded-lg border border-border bg-card">
-              {cuentas.length === 0 ? (
-                <p className="p-6 text-center text-muted-foreground">No hay cuentas por cobrar manuales. Creá una con "Nueva cuenta por cobrar".</p>
+              {cuentasFiltradas.length === 0 ? (
+                <p className="p-6 text-center text-muted-foreground">{cuentas.length > 0 ? "Ninguna cuenta coincide con la búsqueda o los filtros." : "No hay cuentas por cobrar manuales. Creá una con \"Nueva cuenta por cobrar\"."}</p>
               ) : (
                 <>
                   <Table>
@@ -458,7 +555,7 @@ const CuentasPorCobrar = () => {
                           <TableCell className="text-muted-foreground"><span className="block max-w-[280px] truncate" title={c.concepto}>{c.concepto}</span></TableCell>
                           <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(c.fecha).toLocaleDateString("es-VE")}</TableCell>
                           <TableCell>
-                            <Badge variant={c.estado_pago === "pagado" ? "default" : c.estado_pago === "parcial" ? "outline" : "secondary"}>{c.estado_pago}</Badge>
+                            <Badge variant={c.estado_pago === "pagado" ? "default" : c.estado_pago === "parcial" ? "outline" : "secondary"}>{ESTADO_MANUAL[c.estado_pago] ?? c.estado_pago}</Badge>
                           </TableCell>
                           <TableCell className="whitespace-nowrap text-right">{formatPrice(c.monto)}</TableCell>
                           <TableCell className="whitespace-nowrap text-right font-semibold text-destructive">{formatPrice(Number(c.monto) - Number(c.monto_pagado || 0))}</TableCell>
@@ -504,8 +601,8 @@ const CuentasPorCobrar = () => {
 
           <TabsContent value="anticipos">
             <div className="rounded-lg border border-border bg-card">
-              {anticipos.length === 0 ? (
-                <p className="p-6 text-center text-muted-foreground">No hay anticipos sin aplicar. Un pago con sobrante queda acá.</p>
+              {anticiposFiltrados.length === 0 ? (
+                <p className="p-6 text-center text-muted-foreground">{anticipos.length > 0 ? "Ningún anticipo coincide con la búsqueda o los filtros." : "No hay anticipos sin aplicar. Un pago con sobrante queda acá."}</p>
               ) : (
                 <>
                   <Table>

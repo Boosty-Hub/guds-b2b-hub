@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
@@ -16,12 +17,25 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { BarraLista } from "@/components/datos/BarraLista";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, leerRango, contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 interface Banco { id: string; nombre: string; moneda: string; }
 interface Extracto {
   id: string; nombre_archivo: string; moneda: string; fecha_desde: string | null; fecha_hasta: string | null;
-  total_lineas: number; created_at: string; banco?: { nombre: string } | null;
+  total_lineas: number; created_at: string; banco_id: string | null; empresa_id: string | null; banco?: { nombre: string } | null;
 }
+// Filtros de las líneas del extracto abierto (se limpian al volver a la lista)
+const CLAVES_LINEAS = ["fecha", "tipo", "ia"];
+const PRUEBAS_TIPO_LINEA: OpcionPrueba<LineaExtracto>[] = [
+  { valor: "entrada", etiqueta: "Entradas (+)", prueba: (l) => Number(l.monto) >= 0 }, { valor: "salida", etiqueta: "Salidas (−)", prueba: (l) => Number(l.monto) < 0 },
+];
+const PRUEBAS_IA: OpcionPrueba<LineaExtracto>[] = [
+  { valor: "con", etiqueta: "Con candidato sugerido", prueba: (l) => !!l.sugerencia_ia?.movimiento_bancario_id },
+  { valor: "sin_candidato", etiqueta: "IA sin candidato", prueba: (l) => !!l.sugerencia_ia && !l.sugerencia_ia.movimiento_bancario_id },
+  { valor: "sin", etiqueta: "Sin revisar con IA", prueba: (l) => !l.sugerencia_ia },
+];
 interface LineaExtracto {
   id: string; fecha: string; monto: number; referencia: string | null; descripcion: string | null;
   estado: string; metodo_match: string | null; confianza: number | null;
@@ -63,21 +77,43 @@ const Conciliacion = () => {
   const [candidatos, setCandidatos] = useState<MovimientoCandidato[]>([]);
   const [buscandoCandidatos, setBuscandoCandidatos] = useState(false);
   const [bancoActualId, setBancoActualId] = useState("");
+  // Líneas por conciliar de cada extracto (para el filtro de estado de la lista)
+  const [pendPorExtracto, setPendPorExtracto] = useState<Record<string, number>>({});
+  const [params, setParams] = useSearchParams();
 
   const fetchAll = async () => {
     setLoading(true);
-    const [{ data: bcs }, { data: exts }] = await Promise.all([
+    const [{ data: bcs }, { data: exts }, { data: lns }] = await Promise.all([
       supabase.from("bancos").select("id, nombre, moneda").eq("activo", true).order("nombre"),
-      supabase.from("extractos_bancarios").select("id, nombre_archivo, moneda, fecha_desde, fecha_hasta, total_lineas, created_at, banco:bancos(nombre)").order("created_at", { ascending: false }),
+      supabase.from("extractos_bancarios").select("id, nombre_archivo, moneda, fecha_desde, fecha_hasta, total_lineas, created_at, banco_id, empresa_id, banco:bancos(nombre)").order("created_at", { ascending: false }),
+      supabase.from("extracto_lineas").select("extracto_id").eq("estado", "pendiente"),
     ]);
     setBancos((bcs as Banco[]) ?? []);
     setExtractos((exts as unknown as Extracto[]) ?? []);
+    const pend: Record<string, number> = {};
+    for (const l of (lns as { extracto_id: string }[] | null) ?? []) pend[l.extracto_id] = (pend[l.extracto_id] || 0) + 1;
+    setPendPorExtracto(pend);
     setLoading(false);
   };
   useEffect(() => { fetchAll(); }, []);
 
+  // El extracto abierto va en la URL (?extracto=<id>): recargar lo conserva junto con sus filtros
+  const volverALista = () => {
+    setSeleccionado(null);
+    setParams((p) => { const n = new URLSearchParams(p); n.delete("extracto"); for (const k of CLAVES_LINEAS) n.delete(k); return n; }, { replace: true });
+    fetchAll();
+  };
+  useEffect(() => {
+    const id = params.get("extracto");
+    if (!id || seleccionado?.id === id || extractos.length === 0) return;
+    const x = extractos.find((e) => e.id === id);
+    if (x) cargarLineas(x);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extractos, params]);
+
   const cargarLineas = async (extracto: Extracto) => {
     setSeleccionado(extracto);
+    if (params.get("extracto") !== extracto.id) setParams((p) => { const n = new URLSearchParams(p); n.set("extracto", extracto.id); return n; }, { replace: true });
     setCargandoLineas(true);
     const { data } = await supabase.from("extracto_lineas")
       .select("id, fecha, monto, referencia, descripcion, estado, metodo_match, confianza, sugerencia_ia, movimiento:movimientos_bancarios(referencia, descripcion)")
@@ -86,13 +122,48 @@ const Conciliacion = () => {
     setCargandoLineas(false);
   };
 
-  const conciliadas = lineas.filter((l) => l.estado === "conciliado");
-  const pendientes = lineas.filter((l) => l.estado === "pendiente");
-  const descartadas = lineas.filter((l) => l.estado === "descartado");
-  const pgConc = usePagination(conciliadas, 50);
-  const pgPend = usePagination(pendientes, 50);
-  const pgDesc = usePagination(descartadas, 50);
-  const pgExtractos = usePagination(extractos, 50);
+  // ---- Filtros (en la URL): los de la lista de extractos o los de las líneas del extracto abierto ----
+  const pruebasEstadoExt: OpcionPrueba<Extracto>[] = [
+    { valor: "pendiente", etiqueta: "Con líneas por conciliar", prueba: (e) => (pendPorExtracto[e.id] || 0) > 0 },
+    { valor: "completo", etiqueta: "Revisado por completo", prueba: (e) => !(pendPorExtracto[e.id] || 0) },
+  ];
+  // Período: el del extracto se cruza con el rango elegido
+  const cruzaPeriodo = (e: Extracto, rango: string) => {
+    if (!rango) return true;
+    const { desde, hasta } = leerRango(rango);
+    const ini = e.fecha_desde || e.fecha_hasta, fin = e.fecha_hasta || e.fecha_desde;
+    if (!ini || !fin) return false;
+    return (!desde || fin >= desde) && (!hasta || ini <= hasta);
+  };
+  const filtroEmpresa = useFiltroEmpresa(extractos);
+  const f = useFiltros(seleccionado ? [
+    { clave: "tipo", etiqueta: "Tipo", todos: "Entradas y salidas", principal: true, opciones: opcionesPrueba(lineas, PRUEBAS_TIPO_LINEA) },
+    { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+    { clave: "ia", etiqueta: "Sugerencia IA", todos: "Todas", opciones: opcionesPrueba(lineas, PRUEBAS_IA) },
+  ] : [
+    { clave: "banco", etiqueta: "Banco", todos: "Todos los bancos", principal: true, opciones: opcionesDe(extractos, (e) => e.banco_id, (e) => e.banco?.nombre ?? "—") },
+    { clave: "periodo", etiqueta: "Período", tipo: "fecha", principal: true },
+    { clave: "estado", etiqueta: "Estado", todos: "Todos", principal: true, opciones: opcionesPrueba(extractos, pruebasEstadoExt) },
+    filtroEmpresa,
+  ]);
+  const lineasFiltradas = useMemo(() => lineas.filter((l) => pasaPrueba(PRUEBAS_TIPO_LINEA, f.v("tipo"), l) && enRango(l.fecha, f.v("fecha"))
+    && pasaPrueba(PRUEBAS_IA, f.v("ia"), l)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lineas, f.firma]);
+  const extractosFiltrados = useMemo(() => extractos.filter((e) => coincide(e.banco_id, f.v("banco")) && cruzaPeriodo(e, f.v("periodo"))
+    && pasaPrueba(pruebasEstadoExt, f.v("estado"), e) && (!filtroEmpresa || coincide(e.empresa_id, f.v("empresa")))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [extractos, pendPorExtracto, f.firma]);
+
+  const conciliadas = lineasFiltradas.filter((l) => l.estado === "conciliado");
+  // "Sugerir con IA" trabaja sobre todas las pendientes del extracto, no solo las filtradas
+  const pendientesTodas = lineas.filter((l) => l.estado === "pendiente");
+  const pendientes = lineasFiltradas.filter((l) => l.estado === "pendiente");
+  const descartadas = lineasFiltradas.filter((l) => l.estado === "descartado");
+  const pgConc = usePagination(conciliadas, 50, f.firma);
+  const pgPend = usePagination(pendientes, 50, f.firma);
+  const pgDesc = usePagination(descartadas, 50, f.firma);
+  const pgExtractos = usePagination(extractosFiltrados, 50, f.firma);
 
   // ── Carga: parseo de archivo ──────────────────────────────────────────
   // Un CSV se parsea como texto plano, a mano: XLSX "adivina" fechas en formato inglés
@@ -252,13 +323,15 @@ const Conciliacion = () => {
         <BarraLista
           filtros={
             <>
-              <Button variant="ghost" size="sm" className="gap-1.5 px-2" onClick={() => setSeleccionado(null)}><ArrowLeft className="h-3.5 w-3.5" /> Volver a extractos</Button>
+              <Button variant="ghost" size="sm" className="gap-1.5 px-2" onClick={volverALista}><ArrowLeft className="h-3.5 w-3.5" /> Volver a extractos</Button>
               <span className="text-xs text-muted-foreground">{seleccionado.banco?.nombre} · {seleccionado.total_lineas} línea(s)</span>
+              <FiltrosLista filtros={f} resultados={lineasFiltradas.length} />
             </>
           }
+          contador={cargandoLineas ? undefined : contadorFiltrado(lineasFiltradas.length, lineas.length, f.activos, "líneas")}
           acciones={
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={sugerirConIA} disabled={sugiriendoIA || pendientes.length === 0}>
-              {sugiriendoIA ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Sugerir con IA ({pendientes.length} pendientes)
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={sugerirConIA} disabled={sugiriendoIA || pendientesTodas.length === 0}>
+              {sugiriendoIA ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Sugerir con IA ({pendientesTodas.length} pendientes)
             </Button>
           }
         />
@@ -409,16 +482,18 @@ const Conciliacion = () => {
   return (
     <MainLayout title="Conciliación Bancaria">
       <BarraLista
-        contador={loading ? undefined : `${extractos.length} registros`}
+        filtros={<FiltrosLista filtros={f} resultados={extractosFiltrados.length} />}
+        contador={loading ? undefined : contadorFiltrado(extractosFiltrados.length, extractos.length, f.activos)}
         acciones={<Button size="sm" className="gap-1.5" onClick={() => setOpenCarga(true)}><Upload className="h-3.5 w-3.5" /> Cargar extracto</Button>}
       />
 
       {loading ? (
         <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
-      ) : extractos.length === 0 ? (
+      ) : extractosFiltrados.length === 0 ? (
         <div className="flex flex-col items-center rounded-lg border border-border bg-card py-10 text-center text-sm text-muted-foreground">
           <ListChecks className="mb-2 h-8 w-8 opacity-50" />
-          <p>Todavía no cargaste ningún extracto bancario.</p>
+          <p>{extractos.length === 0 ? "Todavía no cargaste ningún extracto bancario." : "Ningún extracto coincide con los filtros."}</p>
+          {f.activos > 0 && <button type="button" className="mt-1 text-xs font-medium text-primary hover:underline" onClick={f.limpiar}>Limpiar filtros</button>}
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border bg-card">

@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
@@ -15,66 +13,123 @@ import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { OdooBadge } from "@/components/OdooBadge";
 import { EstadoTransferencia, PENDIENTES, TIPO_TRANSF, fmtFechaHora, type TransferenciaRow } from "@/components/inventario/EstadoTransferencia";
 import { useColumnas } from "@/components/datos/columnas";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, fechaLocal, contadorFiltrado,
+  type OpcionFiltro, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
-const SELECT = "id, numero, tipo, tipo_operacion, estado, origen, contacto, fecha_programada, fecha_realizada, almacen_origen_id, almacen_destino_id, ubicacion_origen, ubicacion_destino, cliente:clientes(id, nombre_negocio), proveedor:proveedores(id, nombre), orden:ordenes(id, numero)";
+// El cliente no se incrusta: con ~1.800 transferencias, el join con clientes evalúa su RLS por fila y la consulta llegó a
+// 12–30 s (o al límite de tiempo). Los nombres se piden aparte y se unen aquí.
+const SELECT = "id, numero, tipo, tipo_operacion, estado, origen, contacto, fecha_programada, fecha_realizada, almacen_origen_id, almacen_destino_id, ubicacion_origen, ubicacion_destino, empresa_id, cliente_id, proveedor:proveedores(id, nombre), orden:ordenes(id, numero)";
+type Fila = TransferenciaRow & { empresa_id?: string | null; cliente_id?: string | null };
+const TIPOS = ["entrega", "recepcion", "interna", "todas"];
+// Fecha que muestra la tabla: la realizada si está hecha; si no, la programada
+const fechaDe = (t: Fila) => (t.estado === "hecha" ? t.fecha_realizada : t.fecha_programada);
 
 const Transferencias = () => {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const almacenFiltro = params.get("almacen");
-  const [filas, setFilas] = useState<TransferenciaRow[]>([]);
-  const [almacenNombre, setAlmacenNombre] = useState<string | null>(null);
+  const [filas, setFilas] = useState<Fila[]>([]);
+  const [almacenes, setAlmacenes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [tipo, setTipo] = useState(params.get("tipo") || "entrega");
-  const [estado, setEstado] = useState(params.get("estado") || "pendientes");
+  // Tipo = pestañas (?tipo=, por defecto entregas); los demás filtros van en FiltrosLista (?estado=, ?almacen=, ?fecha=…)
+  const tipo = TIPOS.includes(params.get("tipo") ?? "") ? params.get("tipo")! : "entrega";
+  const setTipo = (t: string) => setParams((p) => { const n = new URLSearchParams(p); if (t === "entrega") n.delete("tipo"); else n.set("tipo", t); return n; }, { replace: true });
   const [q, setQ] = useState("");
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      let consulta = supabase.from("transferencias").select(SELECT).order("fecha_programada", { ascending: false });
-      if (almacenFiltro) consulta = consulta.or(`almacen_origen_id.eq.${almacenFiltro},almacen_destino_id.eq.${almacenFiltro}`);
-      const [{ data }, alm] = await Promise.all([
-        consulta,
-        almacenFiltro ? supabase.from("almacenes").select("nombre").eq("id", almacenFiltro).maybeSingle() : Promise.resolve({ data: null }),
+      // Todas las transferencias de la empresa; el filtro de almacén se aplica en la lista (antes pedía de nuevo al servidor)
+      // Con la base cargada la consulta puede pasar el límite de 8 s: un reintento antes de mostrar la lista vacía
+      const transferencias = async () => {
+        const r = await supabase.from("transferencias").select(SELECT).order("fecha_programada", { ascending: false });
+        return r.error ? supabase.from("transferencias").select(SELECT).order("fecha_programada", { ascending: false }) : r;
+      };
+      const [{ data }, { data: alm }, { data: clis }] = await Promise.all([
+        transferencias(),
+        supabase.from("almacenes").select("id, nombre"),
+        supabase.from("clientes").select("id, nombre_negocio"),
       ]);
-      setFilas((data as unknown as TransferenciaRow[]) ?? []);
-      setAlmacenNombre((alm.data as { nombre: string } | null)?.nombre ?? null);
+      const nombres = new Map(((clis as { id: string; nombre_negocio: string }[] | null) ?? []).map((c) => [c.id, c.nombre_negocio]));
+      setFilas(((data as unknown as Fila[]) ?? []).map((t) => ({
+        ...t, cliente: t.cliente_id && nombres.has(t.cliente_id) ? { id: t.cliente_id, nombre_negocio: nombres.get(t.cliente_id)! } : null,
+      })));
+      setAlmacenes(Object.fromEntries(((alm as { id: string; nombre: string }[] | null) ?? []).map((a) => [a.id, a.nombre])));
       setLoading(false);
     })();
-  }, [almacenFiltro]);
+  }, []);
+
+  // ---- Filtros (en la URL) ----
+  const hoy = fechaLocal(new Date().toISOString())!;
+  const pruebasEstado: OpcionPrueba<Fila>[] = [
+    { valor: "pendientes", etiqueta: "Pendientes", prueba: (t) => PENDIENTES.includes(t.estado) },
+    { valor: "atrasadas", etiqueta: "Pendientes atrasadas", prueba: (t) => PENDIENTES.includes(t.estado) && !!t.fecha_programada && (fechaLocal(t.fecha_programada) ?? "") < hoy },
+    { valor: "lista", etiqueta: "Listas", prueba: (t) => t.estado === "lista" },
+    { valor: "en_espera", etiqueta: "En espera", prueba: (t) => t.estado === "en_espera" },
+    { valor: "parcial", etiqueta: "Parciales", prueba: (t) => t.estado === "parcial" },
+    { valor: "borrador", etiqueta: "Borradores", prueba: (t) => t.estado === "borrador" },
+    { valor: "hecha", etiqueta: "Hechas", prueba: (t) => t.estado === "hecha" },
+    { valor: "cancelada", etiqueta: "Canceladas", prueba: (t) => t.estado === "cancelada" },
+    { valor: "todas", etiqueta: "Todos los estados", prueba: () => true },
+  ];
+  const deAlmacen = (t: Fila, a: string) => !a || t.almacen_origen_id === a || t.almacen_destino_id === a;
+  // Almacenes que aparecen como origen o destino (una transferencia cuenta en los dos)
+  const opcionesAlmacen = useMemo<OpcionFiltro[]>(() => {
+    const n = new Map<string, number>();
+    for (const t of filas) for (const a of new Set([t.almacen_origen_id, t.almacen_destino_id])) if (a) n.set(a, (n.get(a) ?? 0) + 1);
+    return [...n.entries()].map(([valor, c]) => ({ valor, etiqueta: almacenes[valor] ?? "Almacén", n: c }))
+      .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, "es", { numeric: true }));
+  }, [filas, almacenes]);
+  const contactoDe = (t: Fila) => t.cliente?.nombre_negocio || t.proveedor?.nombre || t.contacto || null;
+  const filtroEmpresa = useFiltroEmpresa(filas);
+  const deTipo = useMemo(() => filas.filter((t) => tipo === "todas" || t.tipo === tipo), [filas, tipo]);
+  const f = useFiltros([
+    { clave: "estado", etiqueta: "Estado", porDefecto: "pendientes", principal: true, opciones: opcionesPrueba(deTipo, pruebasEstado).filter((o) => (o.n ?? 0) > 0 || ["pendientes", "todas"].includes(o.valor)) },
+    { clave: "almacen", etiqueta: "Almacén", todos: "Todos los almacenes", principal: true, opciones: opcionesAlmacen },
+    { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+    { clave: "contacto", etiqueta: "Contacto", todos: "Todos", opciones: opcionesDe(deTipo, contactoDe, undefined, "Sin contacto") },
+    filtroEmpresa,
+  ]);
+  const estado = f.v("estado");
+  // Filtros que no son tipo ni estado: acotan también los indicadores y las pestañas (sin filtros = todo, como antes)
+  const base = useMemo(() => filas.filter((t) => deAlmacen(t, f.v("almacen")) && enRango(fechaDe(t), f.v("fecha"))
+      && coincide(contactoDe(t), f.v("contacto")) && (!filtroEmpresa || coincide(t.empresa_id, f.v("empresa")))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filas, f.firma]);
 
   const stats = useMemo(() => ({
-    listas: filas.filter((t) => t.tipo === "entrega" && t.estado === "lista").length,
-    espera: filas.filter((t) => t.tipo === "entrega" && ["en_espera", "parcial", "borrador"].includes(t.estado)).length,
-    recepciones: filas.filter((t) => t.tipo === "recepcion" && PENDIENTES.includes(t.estado)).length,
-    internas: filas.filter((t) => t.tipo === "interna" && PENDIENTES.includes(t.estado)).length,
-  }), [filas]);
+    listas: base.filter((t) => t.tipo === "entrega" && t.estado === "lista").length,
+    espera: base.filter((t) => t.tipo === "entrega" && ["en_espera", "parcial", "borrador"].includes(t.estado)).length,
+    recepciones: base.filter((t) => t.tipo === "recepcion" && PENDIENTES.includes(t.estado)).length,
+    internas: base.filter((t) => t.tipo === "interna" && PENDIENTES.includes(t.estado)).length,
+  }), [base]);
   const porTipo = useMemo(() => {
-    const m: Record<string, number> = { todas: filas.length };
-    for (const t of filas) m[t.tipo] = (m[t.tipo] || 0) + 1;
+    const m: Record<string, number> = { todas: base.length };
+    for (const t of base) m[t.tipo] = (m[t.tipo] || 0) + 1;
     return m;
-  }, [filas]);
+  }, [base]);
 
   const filtradas = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return filas.filter((f) =>
-      (tipo === "todas" || f.tipo === tipo) &&
-      (estado === "todas" || (estado === "pendientes" ? PENDIENTES.includes(f.estado) : f.estado === estado)) &&
-      (!t || [f.numero, f.origen, f.contacto, f.cliente?.nombre_negocio, f.proveedor?.nombre].some((v) => (v || "").toLowerCase().includes(t))));
-  }, [filas, tipo, estado, q]);
+    return base.filter((x) =>
+      (tipo === "todas" || x.tipo === tipo) && pasaPrueba(pruebasEstado, estado, x) &&
+      (!t || [x.numero, x.origen, x.contacto, x.cliente?.nombre_negocio, x.proveedor?.nombre].some((v) => (v || "").toLowerCase().includes(t))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base, tipo, estado, q]);
   const { ordenadas, orden, alternar } = useOrdenTabla(filtradas, {
     numero: (t) => t.numero, contacto: (t) => t.cliente?.nombre_negocio || t.proveedor?.nombre || t.contacto, documento: (t) => t.orden?.numero || t.origen,
     fecha: (t) => (t.estado === "hecha" ? t.fecha_realizada : t.fecha_programada), estado: (t) => t.estado,
   });
-  const pg = usePagination(ordenadas, 50);
+  const pg = usePagination(ordenadas, 50, `${tipo}&${f.firma}`);
   const exportar = () => exportarCSV("transferencias", ordenadas, [
     { titulo: "Número", valor: (t) => t.numero }, { titulo: "Tipo", valor: (t) => t.tipo }, { titulo: "Contacto", valor: (t) => t.cliente?.nombre_negocio || t.proveedor?.nombre || t.contacto },
     { titulo: "Origen", valor: (t) => t.ubicacion_origen }, { titulo: "Destino", valor: (t) => t.ubicacion_destino }, { titulo: "Documento", valor: (t) => t.orden?.numero || t.origen },
     { titulo: "Programada", valor: (t) => t.fecha_programada }, { titulo: "Realizada", valor: (t) => t.fecha_realizada }, { titulo: "Estado", valor: (t) => t.estado },
   ]);
 
-  const ir = (t: string, e: string) => { setTipo(t); setEstado(e); };
+  // Un indicador fija tipo y estado a la vez (en una sola escritura de la URL)
+  const ir = (t: string, e: string) => f.setVarios({ tipo: t === "entrega" ? "" : t, estado: e });
 
   const cols = useColumnas("transferencias", [{ etiqueta: "Número", fija: true }, { etiqueta: "Contacto" }, { etiqueta: "Origen" }, { etiqueta: "Destino" }, { etiqueta: "Documento" }, { etiqueta: "Fecha" }, { etiqueta: "Estado" }]);
   return (
@@ -86,13 +141,6 @@ const Transferencias = () => {
         { label: "Recepciones pendientes", valor: stats.recepciones, tono: "positivo", onClick: () => ir("recepcion", "pendientes"), activo: tipo === "recepcion" && estado === "pendientes" },
         { label: "Traslados pendientes", valor: stats.internas, onClick: () => ir("interna", "pendientes"), activo: tipo === "interna" && estado === "pendientes" },
       ]} />
-
-      {almacenFiltro && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md bg-muted/50 px-3 py-1 text-[13px]">
-          Movimientos del almacén <span className="font-semibold">{almacenNombre || "…"}</span>
-          <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => { params.delete("almacen"); setParams(params); }}><X className="h-3.5 w-3.5" /> Quitar filtro</Button>
-        </div>
-      )}
 
       {/* Tipo (pestañas), búsqueda, estado y acciones en una sola fila */}
       <Tabs value={tipo} onValueChange={setTipo}>
@@ -108,20 +156,8 @@ const Transferencias = () => {
             <TabsTrigger value="todas">Todas ({porTipo.todas})</TabsTrigger>
           </TabsList>
         }
-        filtros={
-          <Select value={estado} onValueChange={setEstado}>
-            <SelectTrigger className="h-8 w-full text-[13px] sm:w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="pendientes">Pendientes</SelectItem>
-              <SelectItem value="lista">Listas</SelectItem>
-              <SelectItem value="en_espera">En espera</SelectItem>
-              <SelectItem value="hecha">Hechas</SelectItem>
-              <SelectItem value="cancelada">Canceladas</SelectItem>
-              <SelectItem value="todas">Todos los estados</SelectItem>
-            </SelectContent>
-          </Select>
-        }
-        contador={`${filtradas.length} registros`}
+        filtros={<FiltrosLista filtros={f} resultados={filtradas.length} />}
+        contador={loading ? undefined : contadorFiltrado(filtradas.length, deTipo.length, f.activos || !!q)}
         acciones={<><span className="hidden items-center gap-1.5 text-xs text-muted-foreground 2xl:flex"><OdooBadge /> Se procesan en Odoo</span>{cols.selector}<BotonExportar onClick={exportar} total={ordenadas.length} /></>}
       />
       </Tabs>

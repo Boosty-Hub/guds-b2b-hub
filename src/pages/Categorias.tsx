@@ -50,6 +50,7 @@ import { OdooBadge } from "@/components/OdooBadge";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { Panel } from "@/components/datos/FichaCampos";
+import { FiltrosLista, useFiltros, opcionesPrueba, pasaPrueba, normalizarTexto, contadorFiltrado, type OpcionPrueba } from "@/components/datos/FiltrosLista";
 
 const colorOptions = [
   { value: "bg-yellow-500", label: "Amarillo" },
@@ -76,6 +77,7 @@ const Categorias = () => {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [selectedCategoria, setSelectedCategoria] = useState<Categoria | null>(null);
+  const [busqueda, setBusqueda] = useState("");
   const { toast } = useToast();
 
   const [formData, setFormData] = useState({
@@ -192,6 +194,25 @@ const Categorias = () => {
   const activeCategorias = categorias.filter(c => c.activo).length;
   const totalProductos = categorias.reduce((sum, c) => sum + c.productosCount, 0);
 
+  // ---- Filtros (en la URL) ----
+  const pruebasActivo: OpcionPrueba<Categoria>[] = [
+    { valor: "si", etiqueta: "Activas", prueba: (c) => c.activo }, { valor: "no", etiqueta: "Inactivas", prueba: (c) => !c.activo },
+  ];
+  const pruebasProductos: OpcionPrueba<Categoria>[] = [
+    { valor: "con", etiqueta: "Con productos", prueba: (c) => c.productosCount > 0 }, { valor: "sin", etiqueta: "Sin productos", prueba: (c) => c.productosCount === 0 },
+  ];
+  const pruebasOrigen: OpcionPrueba<Categoria>[] = [
+    { valor: "odoo", etiqueta: "Odoo", prueba: (c) => !!c.odooId }, { valor: "guds", etiqueta: "Creada en GUDS", prueba: (c) => !c.odooId },
+  ];
+  const f = useFiltros([
+    { clave: "activo", etiqueta: "Situación", todos: "Activas e inactivas", principal: true, opciones: opcionesPrueba(categorias, pruebasActivo) },
+    { clave: "productos", etiqueta: "Productos", todos: "Todas", principal: true, opciones: opcionesPrueba(categorias, pruebasProductos) },
+    { clave: "origen", etiqueta: "Origen", todos: "Odoo y GUDS", opciones: opcionesPrueba(categorias, pruebasOrigen) },
+  ]);
+  const termino = normalizarTexto(busqueda);
+  const filtradas = categorias.filter((c) => pasaPrueba(pruebasActivo, f.v("activo"), c) && pasaPrueba(pruebasProductos, f.v("productos"), c)
+    && pasaPrueba(pruebasOrigen, f.v("origen"), c) && (!termino || normalizarTexto(c.nombre).includes(termino)));
+
   return (
     <MainLayout title="Categorías">
       {/* Stats */}
@@ -205,13 +226,11 @@ const Categorias = () => {
 
       {/* Header */}
       <BarraLista
-        filtros={
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold leading-tight">Gestión de Categorías</h2>
-            <p className="text-xs text-muted-foreground">Las categorías se muestran en el portal cliente y catálogo</p>
-          </div>
-        }
-        contador={`${categorias.length} registros`}
+        busqueda={busqueda}
+        onBusqueda={setBusqueda}
+        placeholder="Buscar categoría..."
+        filtros={<FiltrosLista filtros={f} resultados={filtradas.length} />}
+        contador={contadorFiltrado(filtradas.length, categorias.length, f.activos || !!busqueda)}
         acciones={
           <Button size="sm" className="gap-1.5" onClick={() => {
             resetForm();
@@ -237,11 +256,11 @@ const Categorias = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {categorias.length === 0 ? (
+            {filtradas.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">No hay categorías</TableCell>
+                <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">{categorias.length ? "Ninguna categoría coincide con la búsqueda o los filtros" : "No hay categorías"}</TableCell>
               </TableRow>
-            ) : categorias.sort((a, b) => a.orden - b.orden).map((categoria) => (
+            ) : [...filtradas].sort((a, b) => a.orden - b.orden).map((categoria) => (
               <TableRow key={categoria.id} className={!categoria.activo ? "opacity-60" : ""}>
                 <TableCell className="pr-0">
                   <div className="cursor-grab text-muted-foreground hover:text-foreground">

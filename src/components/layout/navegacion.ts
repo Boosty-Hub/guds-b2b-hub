@@ -26,6 +26,7 @@ import {
   ListChecks,
   BarChart3,
   Undo2,
+  Contact,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -45,6 +46,7 @@ export const navSections: NavSection[] = [
     items: [
       { icon: ShoppingCart, label: "Órdenes", path: "/admin/ordenes", modulo: "ordenes" },
       { icon: Users, label: "Clientes", path: "/admin/clientes", modulo: "clientes" },
+      { icon: Contact, label: "Contactos", path: "/admin/contactos", modulo: "contactos" },
       { icon: UserCog, label: "Vendedores", path: "/admin/vendedores", modulo: "usuarios" },
       { icon: UserPlus, label: "Registros", path: "/admin/registros", modulo: "registros" },
     ],

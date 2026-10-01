@@ -19,6 +19,9 @@ import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
 import { METODO_LABEL } from "@/hooks/useCuentasPago";
 import { useResumenVendedor, mesDe } from "@/components/vendedor/resumen";
 import { urlComprobante } from "@/components/vendedor/comprobantes";
+import {
+  FiltrosLista, useFiltros, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 // Cobros del vendedor: lista de pagos de su cartera con las cifras de resumen_vendedor(). El registro de un cobro nuevo
 // (varias líneas, tasa BCV por fecha, comprobante y propuesta de aplicación a facturas) está en /vendedor/cobros/nuevo.
@@ -26,7 +29,7 @@ import { urlComprobante } from "@/components/vendedor/comprobantes";
 interface Pago {
   id: string; numero: string; monto: number; metodo: string; estado: string; referencia: string | null; created_at: string; fecha_pago: string | null;
   es_igtf: boolean | null; comprobante_url: string | null; propuesta_estado: string | null; moneda: string | null; monto_moneda: number | null;
-  notas: string | null; cliente?: { nombre_negocio: string } | null;
+  notas: string | null; cliente_id: string | null; cliente?: { nombre_negocio: string } | null;
 }
 
 const estadoConfig: Record<string, { label: string; cls: string }> = {
@@ -48,7 +51,6 @@ const VendedorPagos = () => {
   const [loading, setLoading] = useState(true);
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get("q") || "");
-  const [estadoFiltro, setEstadoFiltro] = useState<"todos" | "pendiente" | "verificado_mes">(params.get("estado") === "pendiente" ? "pendiente" : "todos");
   // Cifras desde resumen_vendedor() (misma fuente que el tablero Hoy)
   const { resumen } = useResumenVendedor();
   // El buscador global abre esta página con ?q=
@@ -58,7 +60,7 @@ const VendedorPagos = () => {
     if (!user?.id) return;
     setLoading(true);
     const { data } = await supabase.from("pagos")
-      .select("id, numero, monto, metodo, estado, referencia, created_at, fecha_pago, es_igtf, comprobante_url, propuesta_estado, moneda, monto_moneda, notas, cliente:clientes(nombre_negocio)")
+      .select("id, numero, monto, metodo, estado, referencia, created_at, fecha_pago, es_igtf, comprobante_url, propuesta_estado, moneda, monto_moneda, notas, cliente_id, cliente:clientes(nombre_negocio)")
       .order("created_at", { ascending: false });
     if (data) setPagos(data as unknown as Pago[]);
     setLoading(false);
@@ -75,14 +77,30 @@ const VendedorPagos = () => {
 
   const cob = resumen?.cobros;
   const verificadoMes = (p: Pago) => p.estado === "verificado" && !p.es_igtf && !!resumen && diaCaracas(p.created_at) >= resumen.mes_desde && diaCaracas(p.created_at) <= resumen.mes_hasta;
+  // ---- Filtros (en la URL). ?estado=pendiente llega desde el tablero Hoy ----
+  const pruebasEstado: OpcionPrueba<Pago>[] = [
+    { valor: "pendiente", etiqueta: "Pendientes de verificar", prueba: (p) => p.estado === "pendiente" },
+    { valor: "verificado", etiqueta: "Verificados", prueba: (p) => p.estado === "verificado" },
+    { valor: "verificado_mes", etiqueta: `Verificados en ${mesDe(resumen) || "el mes"} (sin IGTF)`, prueba: verificadoMes },
+    { valor: "rechazado", etiqueta: "Rechazados", prueba: (p) => p.estado === "rechazado" },
+  ];
+  const f = useFiltros([
+    { clave: "estado", etiqueta: "Estado", todos: "Todos", principal: true, opciones: opcionesPrueba(pagos, pruebasEstado) },
+    { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+    { clave: "cliente", etiqueta: "Cliente", todos: "Todos los clientes", opciones: opcionesDe(pagos, (p) => p.cliente_id, (p) => p.cliente?.nombre_negocio ?? "—") },
+    { clave: "metodo", etiqueta: "Método", todos: "Todos", opciones: opcionesDe(pagos, (p) => p.metodo, (_p, v) => METODO_LABEL[v] || v) },
+  ]);
+  const estadoFiltro = f.v("estado");
+  const verEstado = (v: string) => () => f.set("estado", estadoFiltro === v ? "" : v);
   const texto = q.trim().toLowerCase();
-  const filtrados = pagos.filter((p) => (estadoFiltro === "todos" || (estadoFiltro === "pendiente" ? p.estado === "pendiente" : verificadoMes(p))) &&
+  const filtrados = pagos.filter((p) => pasaPrueba(pruebasEstado, estadoFiltro, p) && enRango(fechaDe(p), f.v("fecha"))
+    && coincide(p.cliente_id, f.v("cliente")) && coincide(p.metodo, f.v("metodo")) &&
     (!texto || [p.numero, p.cliente?.nombre_negocio, p.referencia].some((v) => (v || "").toLowerCase().includes(texto))));
   const { ordenadas, orden, alternar } = useOrdenTabla(filtrados, {
     numero: (p) => p.numero, cliente: (p) => p.cliente?.nombre_negocio, fecha: (p) => fechaDe(p), monto: (p) => Number(p.monto || 0),
     metodo: (p) => p.metodo, estado: (p) => p.estado,
   });
-  const pagination = usePagination(ordenadas, 50);
+  const pagination = usePagination(ordenadas, 50, f.firma);
   const montoOriginal = (p: Pago) => (p.moneda === "BS" && p.monto_moneda ? `Bs. ${Number(p.monto_moneda).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null);
 
   return (
@@ -90,21 +108,27 @@ const VendedorPagos = () => {
       <div>
         <KpiStrip items={[
           { label: `Verificados en ${mesDe(resumen)}`, valor: cob ? formatPrice(cob.verificados_mes_monto) : "—", detalle: cob ? `${cob.verificados_mes_n} cobros · sin IGTF` : undefined,
-            tono: "positivo", onClick: () => setEstadoFiltro("verificado_mes"), activo: estadoFiltro === "verificado_mes" },
+            tono: "positivo", onClick: verEstado("verificado_mes"), activo: estadoFiltro === "verificado_mes" },
           { label: "Pendientes de verificar", valor: cob ? formatPrice(cob.pendientes_monto) : "—", detalle: cob ? `${cob.pendientes_n} cobros` : undefined,
-            tono: cob?.pendientes_n ? "alerta" : "normal", onClick: () => setEstadoFiltro("pendiente"), activo: estadoFiltro === "pendiente" },
+            tono: cob?.pendientes_n ? "alerta" : "normal", onClick: verEstado("pendiente"), activo: estadoFiltro === "pendiente" },
           { label: "Total registros", valor: cob?.total ?? "—", detalle: cob?.rechazados_mes_n ? `${cob.rechazados_mes_n} rechazados este mes` : undefined,
-            onClick: () => setEstadoFiltro("todos"), activo: estadoFiltro === "todos" },
+            onClick: () => f.set("estado", ""), activo: !estadoFiltro },
         ]} />
 
         <BarraLista busqueda={q} onBusqueda={setQ} placeholder="Buscar cobro, cliente o referencia..."
-          contador={loading ? undefined : `${filtrados.length} registros`}
+          filtros={<FiltrosLista filtros={f} resultados={filtrados.length} />}
+          contador={loading ? undefined : contadorFiltrado(filtrados.length, pagos.length, f.activos || !!texto)}
           acciones={<Button size="sm" className="gap-1.5 bg-emerald-700 hover:bg-emerald-800" onClick={() => navigate("/vendedor/cobros/nuevo")} data-testid="registrar-cobro-lista"><Plus className="h-3.5 w-3.5" />Registrar Cobro</Button>} />
 
         <div className="rounded-lg border border-border bg-card">
           {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div>
           : pagos.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay cobros registrados</div>
-          : filtrados.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Sin resultados{texto ? ` para "${q.trim()}"` : ""}</div>
+          : filtrados.length === 0 ? (
+            <div className="py-10 text-center text-sm text-muted-foreground">
+              Sin resultados{texto ? ` para "${q.trim()}"` : ""}
+              {f.activos > 0 && <button type="button" className="ml-2 font-medium text-primary hover:underline" onClick={f.limpiar}>Limpiar filtros</button>}
+            </div>
+          )
           : (
             <>
               {/* Teléfono: tarjetas con número, cliente, monto y estado a la vista */}

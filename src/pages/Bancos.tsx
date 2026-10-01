@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
@@ -29,9 +29,13 @@ import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { OdooBadge } from "@/components/OdooBadge";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesPrueba, pasaPrueba, coincide, contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 interface Banco {
   odoo_id?: number | null;
+  empresa_id?: string | null;
   id: string;
   nombre: string;
   metodo_pago: string;
@@ -174,11 +178,45 @@ const Bancos = () => {
     setToDelete(null);
   };
 
-  const pagination = usePagination(bancos, 50);
-  const conSaldo = bancos.filter((b) => b.activo);
+  // ---- Filtros (en la URL) ----
+  const metodosDe = (b: Banco) => (b.metodos && b.metodos.length ? b.metodos : [b.metodo_pago]);
+  const siNo = (si: string, no: string, fn: (b: Banco) => boolean): OpcionPrueba<Banco>[] =>
+    [{ valor: "si", etiqueta: si, prueba: fn }, { valor: "no", etiqueta: no, prueba: (b) => !fn(b) }];
+  const pruebasMoneda: OpcionPrueba<Banco>[] = [
+    { valor: "USD", etiqueta: "Dólares (USD)", prueba: (b) => b.moneda === "USD" }, { valor: "BS", etiqueta: "Bolívares (Bs.)", prueba: (b) => b.moneda !== "USD" },
+  ];
+  const pruebasConciliacion: OpcionPrueba<Banco>[] = [
+    { valor: "pendiente", etiqueta: "Con líneas por conciliar", prueba: (b) => (b.porConciliar || 0) > 0 },
+    { valor: "al_dia", etiqueta: "Conciliado al día", prueba: (b) => !(b.porConciliar || 0) },
+  ];
+  const pruebasActivo = siNo("Activos", "Inactivos", (b) => b.activo);
+  const pruebasPortal = siNo("Publicadas a clientes", "No publicadas", (b) => !!b.visible_portal);
+  const pruebasOrigen: OpcionPrueba<Banco>[] = [
+    { valor: "odoo", etiqueta: "Diarios de Odoo", prueba: (b) => !!b.odoo_id }, { valor: "guds", etiqueta: "Creados en GUDS", prueba: (b) => !b.odoo_id },
+  ];
+  const pruebasMetodo: OpcionPrueba<Banco>[] = Object.entries(metodoLabel).map(([valor, etiqueta]) => ({ valor, etiqueta, prueba: (b: Banco) => metodosDe(b).includes(valor) }));
+  const filtroEmpresa = useFiltroEmpresa(bancos);
+  const f = useFiltros([
+    { clave: "moneda", etiqueta: "Moneda", todos: "USD y Bs.", principal: true, opciones: opcionesPrueba(bancos, pruebasMoneda) },
+    { clave: "conciliacion", etiqueta: "Conciliación", todos: "Todas", principal: true, opciones: opcionesPrueba(bancos, pruebasConciliacion) },
+    { clave: "activo", etiqueta: "Situación", todos: "Activos e inactivos", opciones: opcionesPrueba(bancos, pruebasActivo) },
+    { clave: "portal", etiqueta: "Portal", todos: "Todas", opciones: opcionesPrueba(bancos, pruebasPortal) },
+    { clave: "metodo", etiqueta: "Método de pago", todos: "Todos", opciones: opcionesPrueba(bancos, pruebasMetodo, true) },
+    { clave: "origen", etiqueta: "Origen", todos: "Odoo y GUDS", opciones: opcionesPrueba(bancos, pruebasOrigen) },
+    filtroEmpresa,
+  ]);
+  // Sin filtros = todos los bancos y los mismos totales de siempre
+  const filtrados = useMemo(() => (f.activos ? bancos.filter((b) =>
+    pasaPrueba(pruebasMoneda, f.v("moneda"), b) && pasaPrueba(pruebasConciliacion, f.v("conciliacion"), b) && pasaPrueba(pruebasActivo, f.v("activo"), b)
+    && pasaPrueba(pruebasPortal, f.v("portal"), b) && pasaPrueba(pruebasMetodo, f.v("metodo"), b) && pasaPrueba(pruebasOrigen, f.v("origen"), b)
+    && (!filtroEmpresa || coincide(b.empresa_id, f.v("empresa")))) : bancos),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bancos, f.firma]);
+  const pagination = usePagination(filtrados, 50, f.firma);
+  const conSaldo = filtrados.filter((b) => b.activo);
   const totalUsd = conSaldo.filter((b) => b.moneda === "USD").reduce((s, b) => s + saldoDe(b), 0);
   const totalBs = conSaldo.filter((b) => b.moneda !== "USD").reduce((s, b) => s + saldoDe(b), 0);
-  const totalPorConciliar = bancos.reduce((s, b) => s + (b.porConciliar || 0), 0);
+  const totalPorConciliar = filtrados.reduce((s, b) => s + (b.porConciliar || 0), 0);
 
   return (
     <MainLayout title="Bancos">
@@ -197,19 +235,22 @@ const Bancos = () => {
       />
 
       <BarraLista
-        filtros={
+        filtros={<>
           <p className="min-w-0 text-sm font-semibold">
             Cuentas para recibir pagos
-            <span className="ml-1.5 text-xs font-normal text-muted-foreground">Se eligen al registrar un cobro; en bolívares se pide la tasa de cambio.</span>
+            <span className="ml-1.5 hidden text-xs font-normal text-muted-foreground 2xl:inline">Se eligen al registrar un cobro; en bolívares se pide la tasa de cambio.</span>
           </p>
-        }
-        contador={loading ? undefined : `${bancos.length} registros`}
+          <FiltrosLista filtros={f} resultados={filtrados.length} />
+        </>}
+        contador={loading ? undefined : contadorFiltrado(filtrados.length, bancos.length, f.activos)}
         acciones={<Button size="sm" className="gap-1.5" onClick={openNew}><Plus className="h-3.5 w-3.5" /> Nuevo Banco</Button>}
       />
 
       <div className="overflow-hidden rounded-lg border border-border bg-card">
         {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
         : bancos.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No hay cuentas bancarias. Crea la primera con "Nuevo Banco".</div>
+        : filtrados.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Ninguna cuenta coincide con los filtros.
+            <button type="button" className="ml-2 text-xs font-medium text-primary hover:underline" onClick={f.limpiar}>Limpiar filtros</button></div>
         : (
           <Table>
             <TableHeader><TableRow>

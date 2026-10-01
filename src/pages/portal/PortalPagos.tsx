@@ -44,6 +44,7 @@ import { compressImage } from "@/lib/image";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useCuentasPago, metodosDeCuenta, METODO_LABEL, separarBanco, type CuentaPago } from "@/hooks/useCuentasPago";
+import { FiltrosLista, useFiltros, opcionesDe, coincide, enRango } from "@/components/datos/FiltrosLista";
 
 const MAX_COMPROBANTE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_COMPROBANTE_TYPES = ["application/pdf", "image/jpeg", "image/png"];
@@ -411,16 +412,30 @@ const PortalPagos = () => {
   const pagosPendientes = pagos.filter((p) => p.estado === "pendiente" || p.estado === "verificando");
   const pagosVerificados = pagos.filter((p) => p.estado === "verificado" || p.estado === "aprobado");
   const pagosRechazados = pagos.filter((p) => p.estado === "rechazado");
-  const displayPagos = activeTab === "pendientes" ? pagosPendientes : activeTab === "verificados" ? pagosVerificados : pagosRechazados;
   const totalVerificado = pagosVerificados.reduce((sum, p) => sum + Number(p.monto), 0);
+
+  // ---- Filtros de los pagos declarados (en la URL: ?fecha=&moneda=&metodo=). El estado son las pestañas. ----
+  const opcionesMetodo = opcionesDe(pagos, (p) => p.metodo, (_p, v) => METODO_LABEL[v] || v);
+  const f = useFiltros([
+    { clave: "fecha", etiqueta: "Fecha del pago", tipo: "fecha" },
+    { clave: "moneda", etiqueta: "Moneda", opciones: opcionesDe(pagos, (p) => p.moneda || "USD", (_p, v) => (v === "BS" ? "Bolívares (Bs.)" : v === "USD" ? "Dólares (USD)" : v)) },
+    // Método solo si hay más de uno (con uno solo no filtra nada)
+    opcionesMetodo.length > 1 && { clave: "metodo", etiqueta: "Método", opciones: opcionesMetodo },
+  ]);
+  const pasaFiltros = (p: PagoDB) => enRango(p.created_at, f.v("fecha")) && coincide(p.moneda || "USD", f.v("moneda")) && coincide(p.metodo, f.v("metodo"));
+  // Las pestañas y la lista cuentan con los filtros; los totales de arriba no (sin filtros, lo mismo de siempre)
+  const tabPendientes = pagosPendientes.filter(pasaFiltros);
+  const tabVerificados = pagosVerificados.filter(pasaFiltros);
+  const tabRechazados = pagosRechazados.filter(pasaFiltros);
+  const displayPagos = activeTab === "pendientes" ? tabPendientes : activeTab === "verificados" ? tabVerificados : tabRechazados;
 
   const cuentasBS = cuentas.filter((c) => c.moneda === "BS");
   const cuentasUSD = cuentas.filter((c) => c.moneda === "USD");
 
   const tabs = [
-    { k: "pendientes" as const, label: "Por verificar", n: pagosPendientes.length },
-    { k: "verificados" as const, label: "Verificados", n: pagosVerificados.length },
-    { k: "rechazados" as const, label: "Rechazados", n: pagosRechazados.length },
+    { k: "pendientes" as const, label: "Por verificar", n: tabPendientes.length },
+    { k: "verificados" as const, label: "Verificados", n: tabVerificados.length },
+    { k: "rechazados" as const, label: "Rechazados", n: tabRechazados.length },
   ];
 
   // Botón de una cuenta (función de render, no componente: así no se remonta en cada tecla)
@@ -522,12 +537,21 @@ const PortalPagos = () => {
 
         {/* Pagos declarados */}
         <section className="mt-6 space-y-3 lg:order-1 lg:mt-0" aria-label="Pagos declarados">
-          <Segmentado<"pendientes" | "verificados" | "rechazados">
-            opciones={tabs.map((t) => ({ valor: t.k, etiqueta: t.label, n: t.n }))}
-            valor={activeTab}
-            onCambio={setActiveTab}
-            etiqueta="Estado de los pagos"
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Segmentado<"pendientes" | "verificados" | "rechazados">
+              className="min-w-0 flex-1"
+              opciones={tabs.map((t) => ({ valor: t.k, etiqueta: t.label, n: t.n }))}
+              valor={activeTab}
+              onCambio={setActiveTab}
+              etiqueta="Estado de los pagos"
+            />
+            {pagos.length > 0 && <FiltrosLista portal filtros={f} resultados={displayPagos.length} />}
+          </div>
+          {!loading && f.activos > 0 && (
+            <p className="text-sm text-muted-foreground" aria-live="polite">
+              <span data-contador="">{displayPagos.length} {displayPagos.length === 1 ? "pago" : "pagos"}</span> con los filtros en esta pestaña
+            </p>
+          )}
 
           {loading ? (
             <SkeletonFilas n={4} alto="h-24" />
@@ -535,8 +559,10 @@ const PortalPagos = () => {
             <div className="rounded-xl border border-border bg-card">
               <EstadoVacio
                 icono={Receipt}
-                titulo={activeTab === "pendientes" ? "No tienes pagos por verificar" : activeTab === "verificados" ? "No hay pagos verificados" : "No tienes pagos rechazados"}
-                descripcion={activeTab === "pendientes" ? "Cuando declares un pago, lo verás aquí hasta que lo revisemos." : undefined}
+                titulo={f.activos > 0 ? "Ningún pago coincide con los filtros"
+                  : activeTab === "pendientes" ? "No tienes pagos por verificar" : activeTab === "verificados" ? "No hay pagos verificados" : "No tienes pagos rechazados"}
+                descripcion={f.activos > 0 ? undefined : activeTab === "pendientes" ? "Cuando declares un pago, lo verás aquí hasta que lo revisemos." : undefined}
+                accion={f.activos > 0 ? <Button variant="outline" onClick={f.limpiar}>Limpiar filtros</Button> : undefined}
               />
             </div>
           ) : (

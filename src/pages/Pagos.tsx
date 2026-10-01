@@ -31,6 +31,9 @@ import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "
 import { useColumnas } from "@/components/datos/columnas";
 import { VerificarCobroDialog } from "@/components/vendedor/VerificarCobroDialog";
 import { urlComprobante } from "@/components/vendedor/comprobantes";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 interface PagoAdmin {
   odoo_id?: number | null;
@@ -49,6 +52,11 @@ interface PagoAdmin {
   fecha_verificacion: string | null;
   orden?: { numero: string; total: number } | null;
   cliente?: { nombre_negocio: string } | null;
+  cliente_id?: string | null;
+  banco_id?: string | null;
+  banco_ref?: { nombre: string } | null;
+  moneda?: string | null;
+  empresa_id?: string | null;
   // Cobros reportados por un vendedor (20o): se verifican con la propuesta de aplicación y la foto del comprobante
   registrado_por?: string | null;
   propuesta_estado?: string | null;
@@ -60,10 +68,11 @@ const estadoConfig: Record<string, { label: string; variant: "default" | "second
   rechazado: { label: "Rechazado", variant: "destructive" },
 };
 
+const METODO: Record<string, string> = { transferencia: "Transferencia", efectivo: "Efectivo", pago_movil: "Pago móvil", tarjeta: "Tarjeta", credito: "Crédito" };
+
 const Pagos = () => {
   const [pagos, setPagos] = useState<PagoAdmin[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filtro, setFiltro] = useState<"pendiente" | "todos">("pendiente");
   const [q, setQ] = useState("");
   const [accion, setAccion] = useState<{ pago: PagoAdmin; aprobar: boolean } | null>(null);
   const [notas, setNotas] = useState("");
@@ -82,7 +91,7 @@ const Pagos = () => {
       .from("pagos")
       .select(`
         id, numero, monto, metodo, referencia, comprobante_url, banco, estado, notas, created_at, fecha_verificacion, odoo_id, es_igtf, igtf_origen:igtf_origen_id(numero),
-        registrado_por, propuesta_estado,
+        registrado_por, propuesta_estado, cliente_id, banco_id, moneda, empresa_id, banco_ref:bancos!pagos_banco_id_fkey(nombre),
         orden:ordenes(numero, total),
         cliente:clientes(nombre_negocio)
       `)
@@ -133,20 +142,51 @@ const Pagos = () => {
     }
   };
 
+  // ---- Filtros (en la URL). Por defecto, los pagos por verificar (como antes) ----
+  const pruebasEstado: OpcionPrueba<PagoAdmin>[] = [
+    { valor: "pendiente", etiqueta: "Por verificar", prueba: (p) => p.estado === "pendiente" },
+    { valor: "verificado", etiqueta: "Verificados", prueba: (p) => p.estado === "verificado" },
+    { valor: "rechazado", etiqueta: "Rechazados", prueba: (p) => p.estado === "rechazado" },
+    { valor: "todos", etiqueta: "Todos", prueba: () => true },
+  ];
+  const pruebasOrigen: OpcionPrueba<PagoAdmin>[] = [
+    { valor: "odoo", etiqueta: "Odoo", prueba: (p) => !!p.odoo_id },
+    { valor: "guds", etiqueta: "Registrado en GUDS", prueba: (p) => !p.odoo_id },
+    { valor: "vendedor", etiqueta: "Reportado por un vendedor", prueba: (p) => !!p.registrado_por },
+  ];
+  const pruebasIgtf: OpcionPrueba<PagoAdmin>[] = [
+    { valor: "si", etiqueta: "Solo IGTF", prueba: (p) => !!p.es_igtf }, { valor: "no", etiqueta: "Sin IGTF", prueba: (p) => !p.es_igtf },
+  ];
+  const filtroEmpresa = useFiltroEmpresa(pagos);
+  const f = useFiltros([
+    { clave: "estado", etiqueta: "Estado", principal: true, porDefecto: "pendiente", opciones: opcionesPrueba(pagos, pruebasEstado) },
+    { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+    { clave: "banco", etiqueta: "Banco", todos: "Todos los bancos", principal: true, opciones: opcionesDe(pagos, (p) => p.banco_id, (p) => p.banco_ref?.nombre ?? "—", "Sin banco") },
+    { clave: "cliente", etiqueta: "Cliente", todos: "Todos los clientes", opciones: opcionesDe(pagos, (p) => p.cliente_id, (p) => p.cliente?.nombre_negocio ?? "—", "Sin cliente") },
+    { clave: "metodo", etiqueta: "Método", todos: "Todos", opciones: opcionesDe(pagos, (p) => p.metodo, (_p, v) => METODO[v] ?? v) },
+    { clave: "moneda", etiqueta: "Moneda", todos: "Todas", opciones: opcionesDe(pagos, (p) => p.moneda) },
+    { clave: "origen", etiqueta: "Origen", todos: "Todos", opciones: opcionesPrueba(pagos, pruebasOrigen) },
+    { clave: "igtf", etiqueta: "IGTF", todos: "Con y sin IGTF", opciones: opcionesPrueba(pagos, pruebasIgtf) },
+    filtroEmpresa,
+  ]);
+  const filtro = f.v("estado");
   const texto = q.trim().toLowerCase();
-  const visibles = (filtro === "pendiente" ? pagos.filter((p) => p.estado === "pendiente") : pagos).filter((p) => !texto ||
-    [p.numero, p.cliente?.nombre_negocio, p.referencia, p.orden?.numero, p.metodo].some((v) => (v || "").toLowerCase().includes(texto)));
+  const visibles = pagos.filter((p) => pasaPrueba(pruebasEstado, filtro, p) && enRango(p.created_at, f.v("fecha"))
+    && coincide(p.banco_id, f.v("banco")) && coincide(p.cliente_id, f.v("cliente")) && coincide(p.metodo, f.v("metodo"))
+    && coincide(p.moneda, f.v("moneda")) && pasaPrueba(pruebasOrigen, f.v("origen"), p) && pasaPrueba(pruebasIgtf, f.v("igtf"), p)
+    && (!filtroEmpresa || coincide(p.empresa_id, f.v("empresa")))
+    && (!texto || [p.numero, p.cliente?.nombre_negocio, p.referencia, p.orden?.numero, p.metodo].some((v) => (v || "").toLowerCase().includes(texto))));
   const { ordenadas, orden, alternar } = useOrdenTabla(visibles, {
     numero: (p) => p.numero, cliente: (p) => p.cliente?.nombre_negocio, orden: (p) => p.orden?.numero, monto: (p) => Number(p.monto || 0),
     metodo: (p) => p.metodo, referencia: (p) => p.referencia, fecha: (p) => p.created_at, estado: (p) => p.estado,
   });
-  const pagination = usePagination(ordenadas, 50);
+  const pagination = usePagination(ordenadas, 50, f.firma);
   const exportar = () => exportarCSV("cobros", ordenadas, [
     { titulo: "Pago", valor: (p) => p.numero }, { titulo: "Origen", valor: (p) => (p.odoo_id ? "Odoo" : "GUDS") },
     { titulo: "Cliente", valor: (p) => p.cliente?.nombre_negocio }, { titulo: "Orden", valor: (p) => p.orden?.numero },
     { titulo: "Monto USD", valor: (p) => Number(p.monto || 0) }, { titulo: "Método", valor: (p) => p.metodo }, { titulo: "Referencia", valor: (p) => p.referencia },
     { titulo: "Fecha", valor: (p) => p.created_at?.slice(0, 10) }, { titulo: "Estado", valor: (p) => estadoConfig[p.estado]?.label || p.estado },
-    { titulo: "IGTF", valor: (p) => (p.es_igtf ? "Sí" : "") },
+    { titulo: "IGTF", valor: (p) => (p.es_igtf ? "Sí" : "") }, { titulo: "Banco", valor: (p) => p.banco_ref?.nombre }, { titulo: "Moneda", valor: (p) => p.moneda },
   ]);
   const pendientes = pagos.filter((p) => p.estado === "pendiente");
   const montoPendiente = pendientes.reduce((s, p) => s + Number(p.monto || 0), 0);
@@ -159,7 +199,8 @@ const Pagos = () => {
       {cols.estilo}
       <KpiStrip
         items={[
-          { label: "Pagos por verificar", valor: pendientes.length, tono: pendientes.length > 0 ? "alerta" : "normal" },
+          { label: "Pagos por verificar", valor: pendientes.length, tono: pendientes.length > 0 ? "alerta" : "normal",
+            onClick: () => f.setVarios(Object.fromEntries(f.defs.map((d) => [d.clave, ""]))), activo: filtro === "pendiente" && f.activos === 0, titulo: "Ver solo los pagos por verificar" },
           { label: "Monto pendiente", valor: formatPrice(montoPendiente), tono: "alerta" },
           { label: "Verificado", valor: formatPrice(montoVerificado), detalle: `${verificados.length} pagos`, tono: "positivo" },
         ]}
@@ -169,17 +210,8 @@ const Pagos = () => {
         busqueda={q}
         onBusqueda={setQ}
         placeholder="Buscar número, cliente, referencia u orden..."
-        filtros={
-          <>
-            <Button variant={filtro === "pendiente" ? "default" : "outline"} size="sm" onClick={() => setFiltro("pendiente")}>
-              Por verificar ({pendientes.length})
-            </Button>
-            <Button variant={filtro === "todos" ? "default" : "outline"} size="sm" onClick={() => setFiltro("todos")}>
-              Todos ({pagos.length})
-            </Button>
-          </>
-        }
-        contador={`${visibles.length} registros`}
+        filtros={<FiltrosLista filtros={f} resultados={visibles.length} />}
+        contador={loading ? undefined : contadorFiltrado(visibles.length, pagos.length, f.activos || !!texto)}
         acciones={<>{cols.selector}<BotonExportar onClick={exportar} total={ordenadas.length} /></>}
       />
 
@@ -191,7 +223,8 @@ const Pagos = () => {
           </div>
         ) : visibles.length === 0 ? (
           <div className="py-10 text-center text-sm text-muted-foreground">
-            {texto ? `Sin resultados para "${q.trim()}"` : filtro === "pendiente" ? "No hay pagos pendientes de verificación" : "No hay pagos registrados"}
+            {texto ? `Sin resultados para "${q.trim()}"` : f.activos ? "Ningún pago coincide con los filtros" : "No hay pagos pendientes de verificación"}
+            {f.activos > 0 && <button type="button" className="ml-1 text-xs font-medium text-primary hover:underline" onClick={f.limpiar}>Limpiar filtros</button>}
           </div>
         ) : (
           <Table data-tabla="pagos">

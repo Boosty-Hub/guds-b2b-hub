@@ -6,6 +6,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesTexto, opcionesPrueba, pasaPrueba, coincide, coincideTexto, enRango,
+  contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
+import { estadoVe } from "@/components/clientes/odooCliente";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, BarChart3, Eye, ListChecks, Loader2, MapPin, MapPinned, Route, Scale, ShieldAlert, Truck, UserPlus } from "lucide-react";
@@ -55,6 +60,9 @@ const SEL_ENT = `id, transferencia_id, transferencia_odoo_id, orden_id, doc_nume
   repartidor:usuarios!entregas_repartidor_id_fkey(nombre, apellido), orden:ordenes(numero, direccion_entrega, cliente:clientes(nombre_negocio)),
   cliente:clientes!entregas_cliente_id_fkey(nombre_negocio), documento:transferencias!entregas_transferencia_id_fkey(${SEL_DOC})`;
 const DIAS_HISTORIAL = 90;
+
+const ESTADO_ODOO: Record<string, string> = { lista: "Listo", en_espera: "En espera", borrador: "Borrador", hecha: "Hecho", cancelada: "Cancelado" };
+const TIPO_DOC: Record<string, string> = { venta: "Ventas (almacén propio)", reposicion: "Reposiciones a consignación", corte: "Cortes de consignación" };
 
 const PESTANAS: { v: Situacion; label: string }[] = [
   { v: "por_asignar", label: "Por asignar" }, { v: "asignada", label: "Asignadas" }, { v: "en_camino", label: "En camino" }, { v: "cerrada", label: "Cerradas" },
@@ -108,10 +116,7 @@ const Delivery = () => {
   const [repartidores, setRepartidores] = useState<Repartidor[]>([]);
   const [filas, setFilas] = useState<FilaDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Situacion>("por_asignar");
   const [q, setQ] = useState("");
-  const [estadoOdoo, setEstadoOdoo] = useState("todos");
-  const [tipoDoc, setTipoDoc] = useState("todos");
   const [detalle, setDetalle] = useState<FilaDoc | null>(null);
   const [asignar, setAsignar] = useState<FilaDoc | null>(null);
   const [repSel, setRepSel] = useState("");
@@ -124,7 +129,17 @@ const Delivery = () => {
   // 20p: En curso (seguimiento del día), Incidencias, Indicadores y Cuadre con Odoo
   const seccion = (["rutas", "ubicaciones", "curso", "incidencias", "indicadores", "cuadre"].includes(params.get("vista") ?? "") ? params.get("vista") : "cola") as
     "cola" | "rutas" | "ubicaciones" | "curso" | "incidencias" | "indicadores" | "cuadre";
-  const cambiarVista = (v: string) => setParams((p) => { const n = new URLSearchParams(p); if (v === "cola") n.delete("vista"); else n.set("vista", v); return n; }, { replace: true });
+  // Al cambiar de vista se limpian los filtros de la anterior (cada vista tiene los suyos en la URL)
+  const cambiarVista = (v: string) => setParams(() => { const n = new URLSearchParams(); if (v !== "cola") n.set("vista", v); return n; }, { replace: true });
+  // Pestaña de la cola (?cola=asignada); por asignar va sin parámetro
+  const tab = (PESTANAS.some((p) => p.v === params.get("cola")) ? params.get("cola") : "por_asignar") as Situacion;
+  // Desde otra vista (p. ej. un KPI pulsado en Incidencias) se entra a la cola sin los filtros de esa vista
+  const setTab = (t: Situacion) => setParams((p) => {
+    const n = seccion === "cola" ? new URLSearchParams(p) : new URLSearchParams();
+    n.delete("vista");
+    if (t === "por_asignar") n.delete("cola"); else n.set("cola", t);
+    return n;
+  }, { replace: true });
   const { can } = usePermissions();
   const puedeUbicar = can("delivery", "editar") || can("clientes", "editar");
   const [direcciones, setDirecciones] = useState<DireccionCliente[]>([]);
@@ -236,11 +251,32 @@ const Delivery = () => {
     else toast({ title: "No está en la cola de los últimos 90 días", description: "Ábrelo en Odoo con el enlace del documento." });
   };
 
+  // ---- Filtros de la cola (en la URL): estado en Odoo, tipo, repartidor, fecha, zona (estado), ciudad y ubicación ----
+  const filasTab = useMemo(() => filas.filter((f) => f.situacion === tab), [filas, tab]);
+  const zonaFila = (f: FilaDoc) => { const r = destinoFila(f)?.region ?? f.doc?.region_entrega ?? null; return estadoVe(r) ?? r; };
+  const ciudadFila = (f: FilaDoc) => destinoFila(f)?.ciudad ?? f.doc?.ciudad_entrega ?? null;
+  const pruebasUbicacion: OpcionPrueba<FilaDoc>[] = [
+    { valor: "con", etiqueta: "Con ubicación en el mapa", prueba: (f) => !!ubicacionFila(f) },
+    { valor: "sin", etiqueta: "Sin ubicación", prueba: (f) => tipoDe(f) !== "corte" && !ubicacionFila(f) },
+  ];
+  const empresasTab = useMemo(() => filasTab.map((f) => ({ empresa_id: f.doc?.empresa_id ?? f.entrega?.empresa_id ?? null })), [filasTab]);
+  const filtroEmpresa = useFiltroEmpresa(empresasTab);
+  const fc = useFiltros([
+    { clave: "odoo", etiqueta: "Estado Odoo", todos: "Todos", principal: true, opciones: opcionesDe(filasTab, (f) => f.doc?.estado, (_f, v) => ESTADO_ODOO[v] ?? v) },
+    { clave: "fecha", etiqueta: tab === "cerrada" ? "Cierre" : tab === "por_asignar" ? "Programada" : "Asignada", tipo: "fecha", principal: true },
+    { clave: "repartidor", etiqueta: "Repartidor", principal: true, opciones: opcionesDe(filasTab, (f) => f.entrega?.repartidor_id, (f) => nombreRepartidor(f.entrega), "Sin repartidor") },
+    { clave: "zona", etiqueta: "Zona (estado)", todos: "Todas las zonas", principal: true, opciones: opcionesDe(filasTab, zonaFila, undefined, "Sin zona") },
+    { clave: "ciudad", etiqueta: "Ciudad", todos: "Todas las ciudades", opciones: opcionesTexto(filasTab, ciudadFila, "Sin ciudad") },
+    { clave: "tipo", etiqueta: "Tipo de documento", todos: "Todos", opciones: opcionesDe(filasTab, tipoDe, (_f, v) => TIPO_DOC[v] ?? v) },
+    { clave: "ubicacion", etiqueta: "Ubicación", todos: "Todas", opciones: opcionesPrueba(filasTab, pruebasUbicacion) },
+    filtroEmpresa,
+  ]);
   const vista = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return filas.filter((f) => f.situacion === tab
-      && (estadoOdoo === "todos" || f.doc?.estado === estadoOdoo)
-      && (tipoDoc === "todos" || tipoDe(f) === tipoDoc)
+    return filasTab.filter((f) => coincide(f.doc?.estado, fc.v("odoo")) && coincide(tipoDe(f), fc.v("tipo"))
+      && coincide(f.entrega?.repartidor_id, fc.v("repartidor")) && enRango(fechaCola(f, incPorEntrega), fc.v("fecha"))
+      && coincide(zonaFila(f), fc.v("zona")) && coincideTexto(ciudadFila(f), fc.v("ciudad")) && pasaPrueba(pruebasUbicacion, fc.v("ubicacion"), f)
+      && (!filtroEmpresa || coincide(f.doc?.empresa_id ?? f.entrega?.empresa_id, fc.v("empresa")))
       && (!t || [numeroFila(f), clienteFila(f), f.doc?.contacto, f.doc?.origen, f.doc?.direccion_entrega, f.doc?.ciudad_entrega, nombreRepartidor(f.entrega)]
         .some((v) => (v || "").toLowerCase().includes(t))))
       .sort((a, b) => {
@@ -250,8 +286,9 @@ const Delivery = () => {
         }
         return fechaCola(b).localeCompare(fechaCola(a));
       });
-  }, [filas, tab, q, estadoOdoo, tipoDoc, incPorEntrega]);
-  const pagination = usePagination(vista, 50);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filasTab, tab, q, fc.firma, incPorEntrega, ubicaciones, destinoFila]);
+  const pagination = usePagination(vista, 50, `${fc.firma}&cola=${tab}`);
   const empresaDe = (id: string) => empresas.find((x) => x.id === id) ?? null;
 
   const abrirAsignar = (f: FilaDoc) => {
@@ -347,10 +384,10 @@ const Delivery = () => {
     <MainLayout title="Delivery">
       <KpiStrip
         items={[
-          { label: "Por asignar", valor: conteo.por_asignar, detalle: `${listas} listas en Odoo`, tono: "primario", onClick: () => { cambiarVista("cola"); setTab("por_asignar"); }, activo: seccion === "cola" && tab === "por_asignar" },
-          { label: "Asignadas", valor: conteo.asignada, onClick: () => { cambiarVista("cola"); setTab("asignada"); }, activo: seccion === "cola" && tab === "asignada" },
-          { label: "En camino", valor: conteo.en_camino, tono: "alerta", onClick: () => { cambiarVista("cola"); setTab("en_camino"); }, activo: seccion === "cola" && tab === "en_camino" },
-          { label: "Cerradas hoy", valor: cerradasHoy, detalle: `${conteo.cerrada} en ${DIAS_HISTORIAL} días`, tono: "positivo", onClick: () => { cambiarVista("cola"); setTab("cerrada"); }, activo: seccion === "cola" && tab === "cerrada" },
+          { label: "Por asignar", valor: conteo.por_asignar, detalle: `${listas} listas en Odoo`, tono: "primario", onClick: () => setTab("por_asignar"), activo: seccion === "cola" && tab === "por_asignar" },
+          { label: "Asignadas", valor: conteo.asignada, onClick: () => setTab("asignada"), activo: seccion === "cola" && tab === "asignada" },
+          { label: "En camino", valor: conteo.en_camino, tono: "alerta", onClick: () => setTab("en_camino"), activo: seccion === "cola" && tab === "en_camino" },
+          { label: "Cerradas hoy", valor: cerradasHoy, detalle: `${conteo.cerrada} en ${DIAS_HISTORIAL} días`, tono: "positivo", onClick: () => setTab("cerrada"), activo: seccion === "cola" && tab === "cerrada" },
           { label: "Sin ubicación", valor: sinUbicacion, detalle: porConfirmar ? `${porConfirmar} por confirmar (GPS)` : "destinos pendientes", tono: sinUbicacion ? "alerta" : "tenue",
             onClick: () => cambiarVista("ubicaciones"), activo: seccion === "ubicaciones", titulo: "Destinos de los documentos pendientes sin ubicación en el mapa" },
           { label: "Incidencias", valor: incPorDecidir, detalle: devPendientes ? `${devPendientes} devoluciones por confirmar` : "por decidir", tono: incPorDecidir ? "negativo" : "tenue",
@@ -396,31 +433,8 @@ const Delivery = () => {
           busqueda={q}
           onBusqueda={setQ}
           placeholder="Buscar documento, cliente, dirección…"
-          filtros={
-            <>
-              <Select value={estadoOdoo} onValueChange={setEstadoOdoo}>
-                <SelectTrigger className="h-8 w-full text-[13px] sm:w-40" aria-label="Estado en Odoo"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Estado Odoo: todos</SelectItem>
-                  <SelectItem value="lista">Listo</SelectItem>
-                  <SelectItem value="en_espera">En espera</SelectItem>
-                  <SelectItem value="borrador">Borrador</SelectItem>
-                  <SelectItem value="hecha">Hecho</SelectItem>
-                  <SelectItem value="cancelada">Cancelado</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={tipoDoc} onValueChange={setTipoDoc}>
-                <SelectTrigger className="h-8 w-full text-[13px] sm:w-52" aria-label="Tipo de documento"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Tipo: todos</SelectItem>
-                  <SelectItem value="venta">Ventas (almacén propio)</SelectItem>
-                  <SelectItem value="reposicion">Reposiciones a consignación</SelectItem>
-                  <SelectItem value="corte">Cortes de consignación</SelectItem>
-                </SelectContent>
-              </Select>
-            </>
-          }
-          contador={loading ? undefined : `${vista.length} documentos`}
+          filtros={<FiltrosLista filtros={fc} resultados={vista.length} />}
+          contador={loading ? undefined : contadorFiltrado(vista.length, filasTab.length, fc.activos || !!q.trim(), "documentos")}
           acciones={<span className="hidden items-center gap-1.5 text-xs text-muted-foreground xl:flex"><OdooBadge titulo="Documentos de entrega de Odoo: se muestran tal cual y se editan en Odoo" /> Documentos de Odoo</span>}
         />
       </Tabs>

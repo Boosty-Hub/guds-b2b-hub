@@ -33,7 +33,7 @@ export function BarraLista({
       )}
       {filtros}
       <div className="ml-auto flex flex-wrap items-center gap-2">
-        {contador && <span className="text-xs text-muted-foreground">{contador}</span>}
+        {contador && <span className="text-xs text-muted-foreground" data-contador="">{contador}</span>}
         {acciones}
       </div>
     </div>

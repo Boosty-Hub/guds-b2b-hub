@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,9 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 interface ListaConClientes extends ListaPrecios {
   clientes_count?: number;
@@ -55,9 +59,22 @@ interface ProductoConPrecio extends Producto {
   usa_precio_manual?: boolean;
 }
 
+type ProductoFila = Producto & { categoria?: { nombre: string } | null };
+const CLAVES_PRODUCTOS = ["categoria", "oferta", "precio", "lista", "empresa"];
+
 const Precios = () => {
   const [listas, setListas] = useState<ListaConClientes[]>([]);
-  const [productos, setProductos] = useState<Producto[]>([]);
+  const [productos, setProductos] = useState<ProductoFila[]>([]);
+  // Productos con precio especial por lista (tabla precios_lista): lista → productos
+  const [especiales, setEspeciales] = useState<Record<string, Set<string>>>({});
+  const [params, setParams] = useSearchParams();
+  // Pestaña en la URL (?tab=products) para que los filtros sobrevivan a recargar
+  const tab = params.get("tab") === "products" ? "products" : "lists";
+  const setTab = (t: string) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    if (t === "products") n.set("tab", t); else { n.delete("tab"); CLAVES_PRODUCTOS.forEach((k) => n.delete(k)); }
+    return n;
+  }, { replace: true });
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -97,11 +114,15 @@ const Precios = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    const [listasRes, productosRes, clientesRes] = await Promise.all([
+    const [listasRes, productosRes, clientesRes, especialesRes] = await Promise.all([
       supabase.from('listas_precios').select('*, clientes:clientes(count)').order('nombre'),
-      supabase.from('productos').select('*').eq('activo', true).order('nombre'),
-      supabase.from('clientes').select('*').eq('activo', true).order('nombre_negocio')
+      supabase.from('productos').select('*, categoria:categorias(nombre)').eq('activo', true).order('nombre'),
+      supabase.from('clientes').select('*').eq('activo', true).order('nombre_negocio'),
+      supabase.from('precios_lista').select('lista_precios_id, producto_id'),
     ]);
+    const esp: Record<string, Set<string>> = {};
+    for (const r of (especialesRes.data as { lista_precios_id: string; producto_id: string }[] | null) ?? []) (esp[r.lista_precios_id] ??= new Set()).add(r.producto_id);
+    setEspeciales(esp);
     
     if (listasRes.data) {
       setListas(listasRes.data.map(l => ({
@@ -109,7 +130,7 @@ const Precios = () => {
         clientes_count: l.clientes?.[0]?.count || 0
       })));
     }
-    if (productosRes.data) setProductos(productosRes.data);
+    if (productosRes.data) setProductos(productosRes.data as ProductoFila[]);
     if (clientesRes.data) setClientes(clientesRes.data);
     setLoading(false);
   };
@@ -379,16 +400,34 @@ const Precios = () => {
     p.sku.toLowerCase().includes(productSearchTerm.toLowerCase())
   );
 
+  // ---- Filtros de "Productos y precios" (en la URL) ----
+  const pruebasOferta: OpcionPrueba<ProductoFila>[] = [
+    { valor: "si", etiqueta: "En oferta", prueba: (p) => !!p.en_oferta }, { valor: "no", etiqueta: "Sin oferta", prueba: (p) => !p.en_oferta },
+  ];
+  const pruebasPrecio: OpcionPrueba<ProductoFila>[] = [
+    { valor: "sin", etiqueta: "Sin precio base (0)", prueba: (p) => !(Number(p.precio_base) > 0) },
+    { valor: "con", etiqueta: "Con precio base", prueba: (p) => Number(p.precio_base) > 0 },
+  ];
+  const filtroEmpresa = useFiltroEmpresa(productos);
+  const f = useFiltros(tab === "products" ? [
+    { clave: "categoria", etiqueta: "Categoría", todos: "Todas", principal: true, opciones: opcionesDe(productos, (p) => p.categoria_id, (p) => p.categoria?.nombre?.trim() || "—", "Sin categoría") },
+    { clave: "oferta", etiqueta: "Oferta", todos: "Todos", principal: true, opciones: opcionesPrueba(productos, pruebasOferta) },
+    { clave: "precio", etiqueta: "Precio base", todos: "Todos", principal: true, opciones: opcionesPrueba(productos, pruebasPrecio) },
+    { clave: "lista", etiqueta: "Precio especial en lista", todos: "Todos", opciones: listas.map((l) => ({ valor: l.id, etiqueta: l.nombre, n: productos.filter((p) => especiales[l.id]?.has(p.id)).length })) },
+    filtroEmpresa,
+  ] : []);
   const filteredProductos = productos.filter(p =>
-    p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.sku.toLowerCase().includes(searchTerm.toLowerCase())
+    (p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    p.sku.toLowerCase().includes(searchTerm.toLowerCase())) &&
+    coincide(p.categoria_id, f.v("categoria")) && pasaPrueba(pruebasOferta, f.v("oferta"), p) && pasaPrueba(pruebasPrecio, f.v("precio"), p) &&
+    (!f.v("lista") || !!especiales[f.v("lista")]?.has(p.id)) && (!filtroEmpresa || coincide(p.empresa_id, f.v("empresa")))
   );
 
   const filteredListas = listas.filter(l =>
     l.nombre.toLowerCase().includes(listSearchTerm.toLowerCase())
   );
 
-  const pagination = usePagination(filteredProductos, 50);
+  const pagination = usePagination(filteredProductos, 50, f.firma);
   const pagination2 = usePagination(filteredProductosPrecios, 50);
 
   const stats = {
@@ -406,7 +445,7 @@ const Precios = () => {
         { label: "Productos", valor: productos.length },
       ]} />
 
-      <Tabs defaultValue="lists">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="lists">Listas de Precios</TabsTrigger>
           <TabsTrigger value="products">Productos y Precios</TabsTrigger>
@@ -507,7 +546,8 @@ const Precios = () => {
             busqueda={searchTerm}
             onBusqueda={setSearchTerm}
             placeholder="Buscar producto..."
-            contador={`${filteredProductos.length} registros`}
+            filtros={<FiltrosLista filtros={f} resultados={filteredProductos.length} />}
+            contador={loading ? undefined : contadorFiltrado(filteredProductos.length, productos.length, f.activos || !!searchTerm)}
           />
 
           {/* Products Table */}

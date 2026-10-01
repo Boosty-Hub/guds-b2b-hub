@@ -16,6 +16,7 @@ import { leerCompras, proveedoresReferenciados, escribirCompras } from './compra
 import { leerInventario, lotesReferenciados, clientesPorEntregas, escribirInventario, CAMPOS_LOTE } from './inventario.js';
 import { leerTesoreria, escribirTesoreria } from './tesoreria.js';
 import { sincronizarContenidoProductos } from './contenido-productos.js';
+import { leerContactosOdoo, escribirContactos } from './contactos.js';
 
 // Documento sin número en Odoo (borrador o anulado antes de publicarse: name vacío o '/')
 const nombreDoc = (name, id, max = null) => (name && name !== '/' ? txt(name, max) : `ODOO-${id}`);
@@ -266,6 +267,10 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       log(`    ${d.emp.nombre_corto}: +${extra.length} proveedores con documentos pero sin marca de proveedor en Odoo`);
     }
     const proveedoresSet = new Set(datos.flatMap((d) => d.proveedores.map((p) => p.id)));
+    // Personas de contacto (20v): hijas de tipo contacto de clientes o proveedores y personas sueltas
+    const contactosOdoo = await leerContactosOdoo({ odoo, sql, idsClientes, idsProveedores: [...proveedoresSet] });
+    log(`    ${contactosOdoo.hijos.length} personas de contacto hijas · ${contactosOdoo.sueltos.length} personas sueltas${contactosOdoo.conSueltos ? '' : ' (no se importan)'}`);
+    if (!aplicar) resumen.contactos = await escribirContactos({ sql, escribir, leidos: contactosOdoo, ts, aplicar: false, log, aviso });
 
     // ── 3. Precio base: último precio USD en cotizaciones y órdenes no canceladas (decisión 2026-09-27) ──
     const ultimoPrecio = new Map();   // plantilla → { fecha, usd }
@@ -1157,6 +1162,9 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           is distinct from (excluded.cliente_id, excluded.empresa_id, excluded.nombre, excluded.direccion, excluded.calle, excluded.complemento,
             excluded.ciudad, excluded.estado, excluded.telefono, excluded.activo)`);
       }
+
+      // Personas de contacto (20v): después de clientes y proveedores (se ligan por su odoo_id)
+      resumen.contactos = await escribirContactos({ sql, escribir, leidos: contactosOdoo, ts, aplicar: true, log, aviso });
 
       // ── 6. Derivados ────────────────────────────────────────────────────
       log('\n[5] Recalculando derivados…');

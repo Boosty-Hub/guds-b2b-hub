@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarraLista } from "@/components/datos/BarraLista";
+import { FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesTexto, coincide, coincideTexto, enRango, contadorFiltrado } from "@/components/datos/FiltrosLista";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { usePagination } from "@/hooks/use-pagination";
 import { CalendarClock, CheckCircle2, Eye, Loader2, PackageCheck, UserPlus } from "lucide-react";
@@ -79,9 +81,13 @@ export function IncidenciasPanel({ incidencias, cargando, repartidores = [], mod
   onCambio: () => void;
   abrirId?: string | null;
 }) {
-  const [tab, setTab] = useState<Pestana>(modo === "almacen" ? "devolucion" : "decidir");
   const [q, setQ] = useState("");
-  const [tipo, setTipo] = useState("todos");
+  // Pestaña (?pestana=) y filtros en la URL: se comparten y sobreviven a recargar
+  const [params, setParams] = useSearchParams();
+  const tabInicial: Pestana = modo === "almacen" ? "devolucion" : "decidir";
+  const PESTANAS_VALIDAS: Pestana[] = modo === "almacen" ? ["devolucion", "confirmadas"] : ["decidir", "seguimiento", "devolucion", "resueltas"];
+  const tab = (PESTANAS_VALIDAS.includes(params.get("pestana") as Pestana) ? params.get("pestana") : tabInicial) as Pestana;
+  const setTab = (t: Pestana) => setParams((p) => { const n = new URLSearchParams(p); if (t === tabInicial) n.delete("pestana"); else n.set("pestana", t); return n; }, { replace: true });
   const [detalle, setDetalle] = useState<Incidencia | null>(null);
 
   useEffect(() => { setDetalle((d) => (d ? incidencias.find((x) => x.id === d.id) ?? null : d)); }, [incidencias]);
@@ -107,12 +113,23 @@ export function IncidenciasPanel({ incidencias, cargando, repartidores = [], mod
     : [{ v: "decidir", label: "Por decidir" }, { v: "seguimiento", label: "En la cola / reasignadas" }, { v: "devolucion", label: "Devolución pendiente" }, { v: "resueltas", label: "Resueltas" }];
   const conteo = (t: Pestana) => incidencias.filter((i) => enPestana(i, t)).length;
 
+  // ---- Filtros: resultado, repartidor, fecha de cierre, zona (ciudad) y empresa en «Ambas» ----
+  const enTab = useMemo(() => incidencias.filter((i) => enPestana(i, tab)), [incidencias, tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filtroEmpresa = useFiltroEmpresa(enTab);
+  const f = useFiltros([
+    modo === "admin" && { clave: "resultado", etiqueta: "Resultado", todos: "Todos", principal: true, opciones: opcionesDe(enTab, (i) => i.tipo, (_i, v) => TIPO_INCIDENCIA[v as Incidencia["tipo"]] ?? v) },
+    { clave: "repartidor", etiqueta: "Repartidor", principal: true, opciones: opcionesDe(enTab, (i) => i.repartidor_id, (i) => i.repartidor ?? "—", "Sin repartidor") },
+    { clave: "fecha", etiqueta: "Cierre", tipo: "fecha", principal: true },
+    { clave: "ciudad", etiqueta: "Zona (ciudad)", todos: "Todas las ciudades", opciones: opcionesTexto(enTab, (i) => i.ciudad, "Sin ciudad") },
+    filtroEmpresa,
+  ]);
   const vista = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return incidencias.filter((i) => enPestana(i, tab) && (tipo === "todos" || i.tipo === tipo)
+    return enTab.filter((i) => coincide(i.tipo, f.v("resultado")) && coincide(i.repartidor_id, f.v("repartidor")) && enRango(i.fecha_cierre, f.v("fecha"))
+      && coincideTexto(i.ciudad, f.v("ciudad")) && (!filtroEmpresa || coincide(i.empresa_id, f.v("empresa")))
       && (!t || [i.numero, i.cliente, i.repartidor, i.origen, i.motivo_detalle, etiquetaMotivo(i.motivo_codigo)].some((v) => (v || "").toLowerCase().includes(t))));
-  }, [incidencias, tab, tipo, q]); // eslint-disable-line react-hooks/exhaustive-deps
-  const pag = usePagination(vista, 25);
+  }, [enTab, f.firma, q]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pag = usePagination(vista, 25, `${f.firma}&pestana=${tab}`);
 
   const resultado = (i: Incidencia) => {
     const motivos = i.tipo === "incompleta"
@@ -133,18 +150,8 @@ export function IncidenciasPanel({ incidencias, cargando, repartidores = [], mod
         <BarraLista
           pestanas={<TabsList className="h-auto flex-wrap justify-start">{pestanas.map((p) => <TabsTrigger key={p.v} value={p.v}>{p.label} ({conteo(p.v)})</TabsTrigger>)}</TabsList>}
           busqueda={q} onBusqueda={setQ} placeholder="Buscar documento, cliente, repartidor…"
-          filtros={modo === "admin" ? (
-            <Select value={tipo} onValueChange={setTipo}>
-              <SelectTrigger className="h-8 w-full text-[13px] sm:w-44" aria-label="Resultado"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Resultado: todos</SelectItem>
-                <SelectItem value="incompleta">Incompletas</SelectItem>
-                <SelectItem value="rechazada">Rechazadas</SelectItem>
-                <SelectItem value="reprogramada">Reprogramadas</SelectItem>
-              </SelectContent>
-            </Select>
-          ) : undefined}
-          contador={cargando ? undefined : `${vista.length} ${modo === "almacen" ? "devoluciones" : "incidencias"}`}
+          filtros={<FiltrosLista filtros={f} resultados={vista.length} />}
+          contador={cargando ? undefined : contadorFiltrado(vista.length, enTab.length, f.activos || !!q.trim(), modo === "almacen" ? "devoluciones" : "incidencias")}
         />
       </Tabs>
 

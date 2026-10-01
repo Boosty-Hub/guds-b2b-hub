@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,9 @@ import { DireccionClienteDialog, type DireccionEntrega } from "@/components/clie
 import { HistorialOdooCliente } from "@/components/clientes/HistorialOdooCliente";
 import { EstadoOdooCliente, EstadoOdooContacto, type EstadoOdoo } from "@/components/clientes/EstadoOdooCliente";
 import { BotonUbicacionesCliente } from "@/components/delivery/UbicacionesClienteDialog";
+import { ContactosEntidad } from "@/components/contactos/ContactosEntidad";
+import { EmpresasPortalCliente } from "@/components/contactos/EmpresasPortalCliente";
+import { UsuariosPortalSinContacto } from "@/components/contactos/UsuariosPortalSinContacto";
 
 interface ClienteFull extends Cliente {
   lista_precios?: ListaPrecios | null;
@@ -58,6 +61,10 @@ const ESTADO: Record<string, { label: string; variant: "default" | "secondary" |
 };
 
 const consultaCliente = (id?: string) => supabase.from("clientes").select("*, lista_precios:listas_precios(*)").eq("id", id).maybeSingle();
+// Contactos del cliente (20v): la lista y su gestión viven en ContactosEntidad; aquí solo los conteos de la cabecera
+const consultaContactos = (id?: string) => supabase.from("cliente_contactos").select("id, nombre, cargo, email, es_principal").eq("cliente_id", id)
+  .order("es_principal", { ascending: false }).order("nombre");
+const consultaAccesos = (id?: string) => supabase.from("usuarios").select("contacto_id, activo").eq("cliente_id", id).eq("role", "cliente");
 const consultaDirecciones = (id?: string) => supabase.from("cliente_direcciones")
   .select("id, odoo_id, nombre, direccion, calle, complemento, ciudad, estado, telefono, activo")
   .eq("cliente_id", id)
@@ -88,6 +95,16 @@ const ClienteDetalle = () => {
   const [contactoAbierto, setContactoAbierto] = useState(false);
   const [dirDialogo, setDirDialogo] = useState<{ abierto: boolean; direccion: DireccionEntrega | null }>({ abierto: false, direccion: null });
   const [versionOdoo, setVersionOdoo] = useState(0);
+  // Pestaña en la URL (?tab=contactos: la usa el enlace viejo de "Contactos y portal")
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") || "ordenes";
+  const setTab = (v: string) => setParams((p) => { const n = new URLSearchParams(p); if (v === "ordenes") n.delete("tab"); else n.set("tab", v); return n; }, { replace: true });
+  const recargarContactos = useCallback(async () => {
+    const [{ data: kts }, { data: accs }] = await Promise.all([consultaContactos(clienteId), consultaAccesos(clienteId)]);
+    setContactos((kts as ContactoResumen[]) ?? []);
+    setAccesos((accs as { contacto_id: string | null; activo: boolean }[]) ?? []);
+    setVersionOdoo((v) => v + 1);
+  }, [clienteId]);
 
   // Después de un envío a Odoo: la ficha y las direcciones ya quedaron con lo que aceptó Odoo
   const recargarOdoo = async () => {
@@ -112,8 +129,8 @@ const ClienteDetalle = () => {
           .eq("cliente_id", clienteId)
           .eq("tipo", "consignacion"),
         consultaDirecciones(clienteId),
-        supabase.from("cliente_contactos").select("id, nombre, cargo, email, es_principal").eq("cliente_id", clienteId).order("es_principal", { ascending: false }).order("nombre"),
-        supabase.from("usuarios").select("contacto_id, activo").eq("cliente_id", clienteId).eq("role", "cliente"),
+        consultaContactos(clienteId),
+        consultaAccesos(clienteId),
         supabase.rpc("credito_disponible", { p_cliente_id: clienteId }),
       ]);
       if (activo) {
@@ -195,7 +212,7 @@ const ClienteDetalle = () => {
         </div>
         <div className="flex flex-wrap gap-1.5">
           <Link to={`/admin/cuentas/${cliente.id}`}><Button size="sm" variant="outline" className="h-8 gap-1.5"><CreditCard className="h-3.5 w-3.5" /> Estado de cuenta</Button></Link>
-          <Link to={`/admin/clientes/${cliente.id}/usuarios`}><Button size="sm" variant="outline" className="h-8 gap-1.5"><Users className="h-3.5 w-3.5" /> Contactos y portal</Button></Link>
+          <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setTab("contactos")}><Users className="h-3.5 w-3.5" /> Contactos y portal</Button>
           <Link to="/admin/clientes"><Button size="sm" variant="outline" className="h-8 gap-1.5"><Edit className="h-3.5 w-3.5" /> Editar</Button></Link>
         </div>
       </div>
@@ -246,7 +263,7 @@ const ClienteDetalle = () => {
         <EstadoOdooCliente clienteId={cliente.id} version={versionOdoo} puedeCrear={puedeCrearOdoo} onCambio={recargarOdoo} onEstado={setEstadoOdoo} />
       )}
 
-      <Tabs defaultValue="ordenes">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="ordenes"><ShoppingCart className="mr-1.5 h-3.5 w-3.5" />Órdenes ({ordenes.length})</TabsTrigger>
           <TabsTrigger value="contactos"><Users className="mr-1.5 h-3.5 w-3.5" />Contactos ({contactos.length})</TabsTrigger>
@@ -284,29 +301,11 @@ const ClienteDetalle = () => {
         </TabsContent>
 
         <TabsContent value="contactos">
-          <div className="rounded-lg border border-border bg-card">
-            {contactos.length === 0 ? (
-              <p className="p-6 text-center text-sm text-muted-foreground">Sin contactos. <Link to={`/admin/clientes/${cliente.id}/usuarios`} className="text-primary underline">Agregar contactos y darles acceso al portal</Link></p>
-            ) : (
-              <Table>
-                <TableHeader><TableRow><TableHead>Contacto</TableHead><TableHead>Cargo</TableHead><TableHead>Correo</TableHead><TableHead>Portal</TableHead>{puedeVerOdoo && <TableHead>Odoo</TableHead>}</TableRow></TableHeader>
-                <TableBody>
-                  {contactos.map((k) => {
-                    const acceso = accesos.find((a) => a.contacto_id === k.id);
-                    return (
-                      <TableRow key={k.id}>
-                        <TableCell className="whitespace-nowrap font-medium">{k.nombre}{k.es_principal && <Badge variant="secondary" className="ml-1.5">Principal</Badge>}</TableCell>
-                        <TableCell className="text-muted-foreground">{k.cargo || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground">{k.email || "—"}</TableCell>
-                        <TableCell className="whitespace-nowrap text-xs">{acceso ? (acceso.activo ? <span className="text-success">Con acceso</span> : <span className="text-destructive">Desactivado</span>) : <span className="text-muted-foreground">Sin acceso</span>}</TableCell>
-                        {puedeVerOdoo && <TableCell className="whitespace-nowrap text-xs"><EstadoOdooContacto contacto={estadoOdoo?.contactos.find((x) => x.id === k.id)} /></TableCell>}
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
-          </div>
+          <EmpresasPortalCliente clienteId={cliente.id} />
+          <ContactosEntidad tipo="cliente" entidadId={cliente.id} entidadNombre={cliente.nombre_negocio} onCambio={recargarContactos}
+            extraColumna={puedeVerOdoo && odoo ? { titulo: "Odoo", celda: (k) => (k.origen === "odoo"
+              ? <OdooBadge /> : <EstadoOdooContacto contacto={estadoOdoo?.contactos.find((x) => x.id === k.id)} />) } : undefined} />
+          <UsuariosPortalSinContacto clienteId={cliente.id} />
         </TabsContent>
 
         <TabsContent value="direcciones">

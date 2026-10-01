@@ -26,6 +26,9 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesPrueba, pasaPrueba, coincide, fechaLocal, contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 interface Cupon {
   id: string;
@@ -42,6 +45,8 @@ interface Cupon {
   fecha_fin: string | null;
   activo: boolean;
   solo_primera_compra: boolean;
+  cliente_especifico_id?: string | null;
+  empresa_id?: string | null;
 }
 
 const emptyForm = {
@@ -72,7 +77,8 @@ const Cupones = () => {
     setLoading(false);
   };
 
-  const hoy = new Date().toISOString().slice(0, 10);
+  // Fecha de hoy en la hora local (con toISOString, después de las 8 p. m. en Venezuela ya era "mañana")
+  const hoy = fechaLocal(new Date().toISOString())!;
   const vigente = (c: Cupon) => c.activo && (!c.fecha_inicio || c.fecha_inicio <= hoy) && (!c.fecha_fin || c.fecha_fin >= hoy);
   const vencido = (c: Cupon) => !!c.fecha_fin && c.fecha_fin < hoy;
 
@@ -138,10 +144,38 @@ const Cupones = () => {
     setToDelete(null);
   };
 
+  // ---- Filtros (en la URL) ----
+  const agotado = (c: Cupon) => c.usos_maximos != null && c.usos_actuales >= c.usos_maximos;
+  const pruebasEstado: OpcionPrueba<Cupon>[] = [
+    { valor: "vigentes", etiqueta: "Vigentes hoy", prueba: vigente },
+    { valor: "programados", etiqueta: "Programados (aún no empiezan)", prueba: (c) => c.activo && !!c.fecha_inicio && c.fecha_inicio > hoy },
+    { valor: "vencidos", etiqueta: "Vencidos", prueba: vencido },
+    { valor: "agotados", etiqueta: "Sin usos disponibles", prueba: agotado },
+    { valor: "inactivos", etiqueta: "Inactivos", prueba: (c) => !c.activo },
+  ];
+  const pruebasTipo: OpcionPrueba<Cupon>[] = [
+    { valor: "porcentaje", etiqueta: "Porcentaje", prueba: (c) => c.tipo === "porcentaje" },
+    { valor: "monto", etiqueta: "Monto exacto", prueba: (c) => c.tipo !== "porcentaje" },
+  ];
+  const pruebasCondicion: OpcionPrueba<Cupon>[] = [
+    { valor: "primera", etiqueta: "Solo primera compra", prueba: (c) => c.solo_primera_compra },
+    { valor: "cliente", etiqueta: "Para un cliente específico", prueba: (c) => !!c.cliente_especifico_id },
+    { valor: "minimo", etiqueta: "Con compra mínima", prueba: (c) => Number(c.minimo_compra) > 0 },
+  ];
+  const filtroEmpresa = useFiltroEmpresa(cupones);
+  const f = useFiltros([
+    { clave: "estado", etiqueta: "Estado", todos: "Todos", principal: true, opciones: opcionesPrueba(cupones, pruebasEstado) },
+    { clave: "tipo", etiqueta: "Tipo", todos: "Todos", principal: true, opciones: opcionesPrueba(cupones, pruebasTipo) },
+    { clave: "condicion", etiqueta: "Condición", todos: "Todas", opciones: opcionesPrueba(cupones, pruebasCondicion) },
+    filtroEmpresa,
+  ]);
   const filtrados = cupones.filter((c) =>
-    c.codigo.toLowerCase().includes(search.toLowerCase()) || (c.descripcion || "").toLowerCase().includes(search.toLowerCase()));
+    (c.codigo.toLowerCase().includes(search.toLowerCase()) || (c.descripcion || "").toLowerCase().includes(search.toLowerCase()))
+    && pasaPrueba(pruebasEstado, f.v("estado"), c) && pasaPrueba(pruebasTipo, f.v("tipo"), c)
+    && pasaPrueba(pruebasCondicion, f.v("condicion"), c) && (!filtroEmpresa || coincide(c.empresa_id, f.v("empresa"))));
+  const alternarEstado = (e: string) => () => f.set("estado", f.v("estado") === e ? "" : e);
 
-  const pagination = usePagination(filtrados, 50);
+  const pagination = usePagination(filtrados, 50, f.firma);
 
   const estadoBadge = (c: Cupon) => {
     if (vencido(c)) return <Badge variant="secondary">Vencido</Badge>;
@@ -153,16 +187,17 @@ const Cupones = () => {
   return (
     <MainLayout title="Cupones y Descuentos">
       <KpiStrip items={[
-        { label: "Cupones activos", valor: activos, tono: "positivo" },
+        { label: "Cupones activos", valor: activos, tono: "positivo", onClick: alternarEstado("vigentes"), activo: f.v("estado") === "vigentes", titulo: "Ver los vigentes hoy" },
         { label: "Usos totales", valor: totalUsos, tono: "primario" },
-        { label: "Cupones vencidos", valor: vencidos, tono: vencidos ? "alerta" : "normal" },
+        { label: "Cupones vencidos", valor: vencidos, tono: vencidos ? "alerta" : "normal", onClick: alternarEstado("vencidos"), activo: f.v("estado") === "vencidos", titulo: "Ver los vencidos" },
       ]} />
 
       <BarraLista
         busqueda={search}
         onBusqueda={setSearch}
         placeholder="Buscar cupón..."
-        contador={`${filtrados.length} registros`}
+        filtros={<FiltrosLista filtros={f} resultados={filtrados.length} />}
+        contador={loading ? undefined : contadorFiltrado(filtrados.length, cupones.length, f.activos || !!search)}
         acciones={<Button size="sm" className="gap-1.5" onClick={openNew}><Plus className="h-3.5 w-3.5" /> Nuevo Cupón</Button>}
       />
 
@@ -170,7 +205,9 @@ const Cupones = () => {
         {loading ? (
           <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
         ) : filtrados.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">No hay cupones. Crea el primero con "Nuevo Cupón".</div>
+          <div className="py-8 text-center text-sm text-muted-foreground">
+            {cupones.length > 0 ? "Ningún cupón coincide con la búsqueda o los filtros." : 'No hay cupones. Crea el primero con "Nuevo Cupón".'}
+          </div>
         ) : (
           <Table>
             <TableHeader>

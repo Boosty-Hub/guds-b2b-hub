@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,10 @@ import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { SelectorFacturas, type FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
+import {
+  FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, contadorFiltrado,
+  type DefFiltro, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 
 interface ClienteCuenta {
   id: string;
@@ -45,7 +49,12 @@ interface ClienteCuenta {
   limite_credito: number;
   credito_utilizado: number;
   dias_credito: number;
+  empresa_id?: string | null;
+  vendedor_asignado_id?: string | null;
+  vendedor?: { nombre: string; apellido: string | null } | null;
 }
+// Claves de filtro de cada pestaña: se limpian al cambiar de pestaña ("empresa" vale para las dos)
+const CLAVES_PESTANA = ["situacion", "vendedor", "ultimo", "m_tipo", "m_fecha"];
 interface PagoRow {
   id: string;
   numero: string;
@@ -99,12 +108,12 @@ const Cuentas = () => {
   const fetchAll = async () => {
     setLoading(true);
     const [cRes, pRes, fRes, bRes] = await Promise.all([
-      supabase.from("clientes").select("id, codigo, nombre_negocio, limite_credito, credito_utilizado, dias_credito"),
+      supabase.from("clientes").select("id, codigo, nombre_negocio, limite_credito, credito_utilizado, dias_credito, empresa_id, vendedor_asignado_id, vendedor:usuarios!clientes_vendedor_asignado_id_fkey(nombre, apellido)"),
       supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, estado, created_at, fecha_verificacion, banco:bancos(nombre)").order("created_at", { ascending: false }).limit(5000),
       supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, total_usd, saldo_usd, estado_cobro").eq("estado", "posted"),
       supabase.from("bancos").select("id, nombre, metodo_pago, metodos, moneda").eq("activo", true).order("nombre"),
     ]);
-    if (cRes.data) setClientes(cRes.data as ClienteCuenta[]);
+    if (cRes.data) setClientes(cRes.data as unknown as ClienteCuenta[]);
     if (pRes.data) setPagos(pRes.data as unknown as PagoRow[]);
     if (fRes.data) setFacturas(fRes.data as FacturaRow[]);
     if (bRes.data) setBancos(bRes.data as Banco[]);
@@ -158,28 +167,79 @@ const Cuentas = () => {
     .sort((a, b) => b.saldo - a.saldo), [clientes, deudaCliente]);
 
   // Movimientos (libro de cuenta): cobros verificados (+), facturas de tipo factura (cargo −), notas de crédito (crédito +)
+  const empresaCliente = useMemo(() => Object.fromEntries(clientes.map((c) => [c.id, c.empresa_id ?? null])), [clientes]);
   const movimientos = useMemo(() => [
     ...pagos.filter((p) => p.estado === "verificado").map((p) => ({
-      id: p.id, fecha: p.fecha_verificacion || p.created_at, cliente: clientesMap[p.cliente_id] || "—",
-      tipo: "pago" as const, monto: Number(p.monto), metodo: metodoLabel[p.metodo] || p.metodo, referencia: p.numero,
+      id: p.id, fecha: p.fecha_verificacion || p.created_at, cliente: clientesMap[p.cliente_id] || "—", empresa_id: empresaCliente[p.cliente_id] ?? null,
+      tipo: "pago" as const, clase: "cobro" as const, monto: Number(p.monto), metodo: metodoLabel[p.metodo] || p.metodo, referencia: p.numero,
     })),
     ...facturas.filter((f) => f.tipo === "factura").map((f) => ({
-      id: f.id, fecha: f.fecha_emision || "", cliente: clientesMap[f.cliente_id] || "—",
-      tipo: "cargo" as const, monto: Number(f.total_usd), metodo: "Factura", referencia: f.numero,
+      id: f.id, fecha: f.fecha_emision || "", cliente: clientesMap[f.cliente_id] || "—", empresa_id: empresaCliente[f.cliente_id] ?? null,
+      tipo: "cargo" as const, clase: "factura" as const, monto: Number(f.total_usd), metodo: "Factura", referencia: f.numero,
     })),
     ...facturas.filter((f) => f.tipo === "nota_credito").map((f) => ({
-      id: f.id, fecha: f.fecha_emision || "", cliente: clientesMap[f.cliente_id] || "—",
-      tipo: "pago" as const, monto: Math.abs(Number(f.total_usd)), metodo: "Nota de crédito", referencia: f.numero,
+      id: f.id, fecha: f.fecha_emision || "", cliente: clientesMap[f.cliente_id] || "—", empresa_id: empresaCliente[f.cliente_id] ?? null,
+      tipo: "pago" as const, clase: "nc" as const, monto: Math.abs(Number(f.total_usd)), metodo: "Nota de crédito", referencia: f.numero,
     })),
-  ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()), [pagos, facturas, clientesMap]);
+  ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()), [pagos, facturas, clientesMap, empresaCliente]);
+  type Movimiento = (typeof movimientos)[number];
+  type CuentaFila = (typeof cuentasCliente)[number];
 
-  const cuentasFiltradas = cuentasCliente.filter(({ c }) =>
-    c.nombre_negocio.toLowerCase().includes(searchAcc.toLowerCase()) || (c.codigo || "").toLowerCase().includes(searchAcc.toLowerCase()));
+  // ---- Filtros (en la URL), según la pestaña ----
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") === "movimientos" ? "transactions" : "accounts";
+  const setTab = (t: string) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    if (t === "transactions") n.set("tab", "movimientos"); else n.delete("tab");
+    for (const k of CLAVES_PESTANA) n.delete(k);
+    return n;
+  }, { replace: true });
+  const nombreVendedor = (c: ClienteCuenta) => (c.vendedor ? `${c.vendedor.nombre} ${c.vendedor.apellido || ""}`.trim() : null);
+  const pruebasSituacion: OpcionPrueba<CuentaFila>[] = [
+    { valor: "al_dia", etiqueta: "Al día", prueba: (x) => estadoCuenta(x.c, x.saldo).label === "Al día" },
+    { valor: "con_deuda", etiqueta: "Con deuda", prueba: (x) => x.saldo > 0.009 },
+    { valor: "excedido", etiqueta: "Deuda sobre el límite", prueba: (x) => estadoCuenta(x.c, x.saldo).label === "Excedido" },
+    { valor: "a_favor", etiqueta: "Con saldo a favor", prueba: (x) => x.saldo < -0.009 },
+  ];
+  const hoyMs = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }, []);
+  const diasUltimo = (id: string) => { const u = ultimoPagoByClient.get(id); return u ? Math.floor((hoyMs - new Date(u).getTime()) / 86400000) : null; };
+  const pruebasUltimo: OpcionPrueba<CuentaFila>[] = [
+    { valor: "30", etiqueta: "En los últimos 30 días", prueba: (x) => { const d = diasUltimo(x.c.id); return d != null && d <= 30; } },
+    { valor: "90", etiqueta: "Hace 31 a 90 días", prueba: (x) => { const d = diasUltimo(x.c.id); return d != null && d > 30 && d <= 90; } },
+    { valor: "mas90", etiqueta: "Hace más de 90 días", prueba: (x) => { const d = diasUltimo(x.c.id); return d != null && d > 90; } },
+    { valor: "nunca", etiqueta: "Sin cobros registrados", prueba: (x) => diasUltimo(x.c.id) == null },
+  ];
+  const pruebasTipoMov: OpcionPrueba<Movimiento>[] = [
+    { valor: "cobro", etiqueta: "Cobros", prueba: (m) => m.clase === "cobro" },
+    { valor: "factura", etiqueta: "Facturas (cargos)", prueba: (m) => m.clase === "factura" },
+    { valor: "nc", etiqueta: "Notas de crédito", prueba: (m) => m.clase === "nc" },
+  ];
+  const empCuentas = useFiltroEmpresa(clientes), empMov = useFiltroEmpresa(movimientos);
+  const defsPorTab: Record<string, (DefFiltro | null)[]> = {
+    accounts: [
+      { clave: "situacion", etiqueta: "Situación", todos: "Todas", principal: true, opciones: opcionesPrueba(cuentasCliente, pruebasSituacion) },
+      { clave: "vendedor", etiqueta: "Vendedor", principal: true, opciones: opcionesDe(clientes, (c) => c.vendedor_asignado_id, (c) => nombreVendedor(c) ?? "—", "Sin vendedor") },
+      { clave: "ultimo", etiqueta: "Último cobro", todos: "Cualquiera", principal: true, opciones: opcionesPrueba(cuentasCliente, pruebasUltimo) },
+      empCuentas,
+    ],
+    transactions: [
+      { clave: "m_tipo", etiqueta: "Tipo", todos: "Todos", principal: true, opciones: opcionesPrueba(movimientos, pruebasTipoMov) },
+      { clave: "m_fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+      empMov,
+    ],
+  };
+  const f = useFiltros(defsPorTab[tab]);
+
+  const cuentasFiltradas = cuentasCliente.filter((x) =>
+    pasaPrueba(pruebasSituacion, f.v("situacion"), x) && coincide(x.c.vendedor_asignado_id, f.v("vendedor"))
+    && pasaPrueba(pruebasUltimo, f.v("ultimo"), x) && (!empCuentas || coincide(x.c.empresa_id, f.v("empresa")))
+    && (x.c.nombre_negocio.toLowerCase().includes(searchAcc.toLowerCase()) || (x.c.codigo || "").toLowerCase().includes(searchAcc.toLowerCase())));
   const movimientosFiltrados = movimientos.filter((m) =>
-    m.cliente.toLowerCase().includes(searchTrx.toLowerCase()) || (m.referencia || "").toLowerCase().includes(searchTrx.toLowerCase()));
+    pasaPrueba(pruebasTipoMov, f.v("m_tipo"), m) && enRango(m.fecha, f.v("m_fecha")) && (!empMov || coincide(m.empresa_id, f.v("empresa")))
+    && (m.cliente.toLowerCase().includes(searchTrx.toLowerCase()) || (m.referencia || "").toLowerCase().includes(searchTrx.toLowerCase())));
 
-  const pagination = usePagination(cuentasFiltradas, 50);
-  const pagination2 = usePagination(movimientosFiltrados, 50);
+  const pagination = usePagination(cuentasFiltradas, 50, f.firma);
+  const pagination2 = usePagination(movimientosFiltrados, 50, f.firma);
 
   // Dialog: deudores + banco/método seleccionado
   const deudores = useMemo(() => [...deudaCliente.entries()]
@@ -249,7 +309,6 @@ const Cuentas = () => {
     fetchAll();
   };
 
-  const [tab, setTab] = useState<string>("accounts");
   const pestanas = (
     <TabsList>
       <TabsTrigger value="accounts">Estado de Cuentas</TabsTrigger>
@@ -274,7 +333,8 @@ const Cuentas = () => {
             busqueda={searchAcc}
             onBusqueda={setSearchAcc}
             placeholder="Buscar cliente..."
-            contador={`${cuentasFiltradas.length} registros`}
+            filtros={<FiltrosLista filtros={f} resultados={cuentasFiltradas.length} />}
+            contador={loading ? undefined : contadorFiltrado(cuentasFiltradas.length, cuentasCliente.length, f.activos || !!searchAcc)}
             acciones={
               <Button size="sm" className="gap-1.5" onClick={abrirCobro}>
                 <HandCoins className="h-3.5 w-3.5" /> Registrar Cobro
@@ -287,7 +347,8 @@ const Cuentas = () => {
             busqueda={searchTrx}
             onBusqueda={setSearchTrx}
             placeholder="Buscar por cliente o referencia..."
-            contador={`${movimientosFiltrados.length} registros`}
+            filtros={<FiltrosLista filtros={f} resultados={movimientosFiltrados.length} />}
+            contador={loading ? undefined : contadorFiltrado(movimientosFiltrados.length, movimientos.length, f.activos || !!searchTrx)}
           />
         )}
 

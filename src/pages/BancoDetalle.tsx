@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ArrowLeft, Loader2, Landmark, ArrowDownLeft, ArrowUpRight, AlertTriangle, ListChecks } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -15,6 +14,7 @@ import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { OdooBadge } from "@/components/OdooBadge";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
+import { FiltrosLista, useFiltros, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, contadorFiltrado, type DefFiltro, type OpcionPrueba } from "@/components/datos/FiltrosLista";
 
 interface Banco {
   id: string; nombre: string; moneda: string; numero_cuenta: string | null; cuenta_odoo: string | null; odoo_id: number | null; tipo_odoo: string | null;
@@ -48,6 +48,22 @@ const fmtMoneda = (n: number | null | undefined, moneda: string) => {
     : `${signo}Bs. ${v.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 const fmtFecha = (d?: string | null) => (d ? new Date(d.length === 10 ? `${d}T00:00:00` : d).toLocaleDateString("es-VE") : "—");
+// Pestañas (en la URL, ?tab=) y sus filtros: los de una pestaña se limpian al pasar a otra
+const PESTANAS_BANCO = ["movimientos", "extracto", "extractos"] as const;
+const CLAVES_PESTANA = ["origen", "tipo", "fecha", "conciliacion", "contacto", "estado"];
+const PRUEBAS_CONCILIACION: OpcionPrueba<LineaOdoo>[] = [
+  { valor: "pendientes", etiqueta: "Por conciliar en Odoo", prueba: (l) => !l.conciliada },
+  { valor: "conciliadas", etiqueta: "Conciliadas", prueba: (l) => l.conciliada },
+  { valor: "todas", etiqueta: "Todas", prueba: () => true },
+];
+const PRUEBAS_CONTACTO: OpcionPrueba<LineaOdoo>[] = [
+  { valor: "cliente", etiqueta: "De un cliente", prueba: (l) => !!l.cliente },
+  { valor: "proveedor", etiqueta: "De un proveedor", prueba: (l) => !!l.proveedor },
+  { valor: "sin", etiqueta: "Sin contacto identificado", prueba: (l) => !l.cliente && !l.proveedor },
+];
+const PRUEBAS_EXTRACTO: OpcionPrueba<ExtractoOdoo>[] = [
+  { valor: "valido", etiqueta: "Válidos", prueba: (x) => !!x.valido }, { valor: "diferencias", etiqueta: "Con diferencias", prueba: (x) => !x.valido },
+];
 
 const BancoDetalle = () => {
   const { bancoId } = useParams();
@@ -58,10 +74,16 @@ const BancoDetalle = () => {
   const [lineas, setLineas] = useState<LineaOdoo[]>([]);
   const [extractos, setExtractos] = useState<ExtractoOdoo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [origen, setOrigen] = useState("todos");
-  const [filtroLinea, setFiltroLinea] = useState("pendientes");
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState("movimientos");
+  const [params, setParams] = useSearchParams();
+  const tab = (PESTANAS_BANCO as readonly string[]).includes(params.get("tab") ?? "") ? params.get("tab")! : "movimientos";
+  const setTab = (t: string, extra: Record<string, string> = {}) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    for (const k of CLAVES_PESTANA) n.delete(k);
+    if (t === "movimientos") n.delete("tab"); else n.set("tab", t);
+    for (const [k, v] of Object.entries(extra)) n.set(k, v);
+    return n;
+  }, { replace: true });
 
   useEffect(() => {
     let vivo = true;
@@ -86,14 +108,41 @@ const BancoDetalle = () => {
     return () => { vivo = false; };
   }, [bancoId]);
 
+  // ---- Filtros de la pestaña activa (en la URL) ----
+  const defsPestana: Record<string, DefFiltro[]> = {
+    movimientos: [
+      { clave: "origen", etiqueta: "Origen", todos: "Todos los orígenes", principal: true, opciones: opcionesDe(movs, (m) => m.origen, (_m, v) => ORIGEN_MOV[v] ?? v) },
+      { clave: "tipo", etiqueta: "Tipo", todos: "Entradas y salidas", principal: true, opciones: opcionesDe(movs, (m) => m.tipo, (_m, v) => (v === "salida" ? "Salidas" : "Entradas")) },
+      { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+    ],
+    extracto: [
+      { clave: "conciliacion", etiqueta: "Conciliación", principal: true, porDefecto: "pendientes", opciones: opcionesPrueba(lineas, PRUEBAS_CONCILIACION) },
+      { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+      { clave: "contacto", etiqueta: "Contacto", todos: "Todos", opciones: opcionesPrueba(lineas, PRUEBAS_CONTACTO) },
+    ],
+    extractos: [
+      { clave: "estado", etiqueta: "Estado", todos: "Todos", principal: true, opciones: opcionesPrueba(extractos, PRUEBAS_EXTRACTO) },
+      { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+    ],
+  };
+  const f = useFiltros(defsPestana[tab]);
   const t = q.trim().toLowerCase();
-  const movsFiltrados = useMemo(() => movs.filter((m) => (origen === "todos" || m.origen === origen)
-    && (!t || [m.referencia, m.descripcion, m.pago?.numero, m.pago_proveedor?.numero, m.reintegro?.numero].some((v) => (v || "").toLowerCase().includes(t)))), [movs, origen, t]);
-  const lineasFiltradas = useMemo(() => lineas.filter((l) => (filtroLinea === "todas" || (filtroLinea === "pendientes" ? !l.conciliada : l.conciliada))
-    && (!t || [l.referencia, l.contacto].some((v) => (v || "").toLowerCase().includes(t)))), [lineas, filtroLinea, t]);
-  const pgMov = usePagination(movsFiltrados, 50);
-  const pgLin = usePagination(lineasFiltradas, 50);
-  const pgExt = usePagination(extractos, 50);
+  const movsFiltrados = useMemo(() => movs.filter((m) => coincide(m.origen, f.v("origen")) && coincide(m.tipo, f.v("tipo")) && enRango(m.fecha, f.v("fecha"))
+    && (!t || [m.referencia, m.descripcion, m.pago?.numero, m.pago_proveedor?.numero, m.reintegro?.numero].some((v) => (v || "").toLowerCase().includes(t)))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [movs, f.firma, t]);
+  const lineasFiltradas = useMemo(() => lineas.filter((l) => pasaPrueba(PRUEBAS_CONCILIACION, f.v("conciliacion"), l) && pasaPrueba(PRUEBAS_CONTACTO, f.v("contacto"), l)
+    && enRango(l.fecha, f.v("fecha")) && (!t || [l.referencia, l.contacto].some((v) => (v || "").toLowerCase().includes(t)))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lineas, f.firma, t]);
+  const extractosFiltrados = useMemo(() => extractos.filter((x) => pasaPrueba(PRUEBAS_EXTRACTO, f.v("estado"), x) && enRango(x.fecha, f.v("fecha"))
+    && (!t || (x.nombre || "").toLowerCase().includes(t))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [extractos, f.firma, t]);
+  const pgMov = usePagination(movsFiltrados, 50, f.firma);
+  const pgLin = usePagination(lineasFiltradas, 50, f.firma);
+  const pgExt = usePagination(extractosFiltrados, 50, f.firma);
+  const enPestana = tab === "movimientos" ? [movsFiltrados.length, movs.length] : tab === "extracto" ? [lineasFiltradas.length, lineas.length] : [extractosFiltrados.length, extractos.length];
 
   const volver = <Button variant="ghost" size="sm" className="mb-2 h-7 gap-1.5 px-2 text-xs" onClick={() => navigate(-1)}><ArrowLeft className="h-3.5 w-3.5" /> Volver</Button>;
   if (loading) return <MainLayout title="Banco">{volver}<div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div></MainLayout>;
@@ -135,10 +184,10 @@ const BancoDetalle = () => {
         { label: "Saldo último extracto", valor: banco.saldo_extracto !== null ? fmtMoneda(banco.saldo_extracto, banco.moneda) : "—" },
         { label: "Entradas registradas", valor: fmtMoneda(entradas, banco.moneda), tono: "positivo" },
         { label: "Salidas registradas", valor: fmtMoneda(salidas, banco.moneda), tono: "negativo" },
-        { label: "Por conciliar en Odoo", valor: pendientes, detalle: "líneas de extracto", tono: pendientes > 0 ? "alerta" : "normal", onClick: pendientes > 0 ? () => { setTab("extracto"); setFiltroLinea("pendientes"); } : undefined },
+        { label: "Por conciliar en Odoo", valor: pendientes, detalle: "líneas de extracto", tono: pendientes > 0 ? "alerta" : "normal", onClick: pendientes > 0 ? () => setTab("extracto") : undefined },
       ]} />
 
-      <Tabs value={tab} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v)}>
         {/* Pestañas, búsqueda y filtro de la pestaña activa en una sola fila */}
         <BarraLista
           pestanas={
@@ -151,24 +200,8 @@ const BancoDetalle = () => {
           busqueda={q}
           onBusqueda={setQ}
           placeholder="Buscar referencia, descripción o contacto..."
-          filtros={tab === "movimientos" ? (
-            <Select value={origen} onValueChange={setOrigen}>
-              <SelectTrigger className="h-8 w-full text-[13px] sm:w-52"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los orígenes</SelectItem>
-                {Object.entries(ORIGEN_MOV).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          ) : tab === "extracto" ? (
-            <Select value={filtroLinea} onValueChange={setFiltroLinea}>
-              <SelectTrigger className="h-8 w-full text-[13px] sm:w-52"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pendientes">Por conciliar en Odoo</SelectItem>
-                <SelectItem value="conciliadas">Conciliadas</SelectItem>
-                <SelectItem value="todas">Todas</SelectItem>
-              </SelectContent>
-            </Select>
-          ) : undefined}
+          filtros={<FiltrosLista filtros={f} resultados={enPestana[0]} />}
+          contador={contadorFiltrado(enPestana[0], enPestana[1], f.activos || !!t)}
         />
 
         <TabsContent value="movimientos" className="mt-0">

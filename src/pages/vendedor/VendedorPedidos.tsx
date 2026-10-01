@@ -19,7 +19,10 @@ import { useOrdenTabla, EncabezadoOrdenable } from "@/components/datos/tabla";
 import { useResumenVendedor, mesDe } from "@/components/vendedor/resumen";
 import { EditarPedidoDialog } from "@/components/vendedor/EditarPedidoDialog";
 import { EstadoPedidoBadge } from "@/components/vendedor/estadoPedidoVendedor";
-import { estadoVisible } from "@/components/pedidos/estadoPedido";
+import { estadoVisible, type ClaveEstado } from "@/components/pedidos/estadoPedido";
+import {
+  FiltrosLista, useFiltros, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, contadorFiltrado, type OpcionPrueba,
+} from "@/components/datos/FiltrosLista";
 import { pedidoEditable, type ResultadoEdicion } from "@/components/portal/pedidoEditable";
 import { textoPagoEdicion } from "@/components/portal/ResumenPagoPedido";
 
@@ -28,7 +31,24 @@ interface Orden { id: string; numero: string; numero_guds: string | null; total:
   aprobacion: "pendiente" | "aprobada" | "rechazada" | null; rechazo_motivo: string | null; cliente?: { nombre_negocio: string } | null;
   cliente_id: string; vendedor_id: string | null; ediciones: number | null; editado_at: string | null; }
 type Filtro = "todos" | "abiertos" | "por_aprobar" | "rechazados";
-const FILTROS: Filtro[] = ["todos", "abiertos", "por_aprobar", "rechazados"];
+
+// Estado visible: el mismo contrato que ven el admin y el cliente (estadoPedido.ts)
+const ESTADOS_VISIBLES: { clave: ClaveEstado; etiqueta: string }[] = [
+  { clave: "por_aprobar", etiqueta: "Por aprobar" }, { clave: "registrandose", etiqueta: "Aprobado" },
+  { clave: "cotizacion", etiqueta: "Cotización" }, { clave: "confirmado", etiqueta: "Confirmado" },
+  { clave: "en_preparacion", etiqueta: "En preparación" }, { clave: "despachado_parcial", etiqueta: "Despacho parcial" },
+  { clave: "entregado", etiqueta: "Despachado" }, { clave: "cancelado", etiqueta: "Cancelado" }, { clave: "rechazado", etiqueta: "No aprobado" },
+];
+const PRUEBAS_ESTADO: OpcionPrueba<Orden>[] = ESTADOS_VISIBLES.map((e) => ({ valor: e.clave, etiqueta: e.etiqueta, prueba: (o) => estadoVisible(o).clave === e.clave }));
+// "En curso" con la misma definición que resumen_vendedor(): estado abierto y no rechazado
+const ABIERTOS = ["pendiente", "confirmado", "procesando", "enviado"];
+const abierto = (o: Orden) => ABIERTOS.includes(o.estado) && o.aprobacion !== "rechazada";
+// Los indicadores de arriba (?filtro=, como enlaza el tablero Hoy)
+const PRUEBAS_SEGUIMIENTO: OpcionPrueba<Orden>[] = [
+  { valor: "abiertos", etiqueta: "En curso", prueba: abierto },
+  { valor: "por_aprobar", etiqueta: "Por aprobar", prueba: (o) => o.aprobacion === "pendiente" },
+  { valor: "rechazados", etiqueta: "No aprobados", prueba: (o) => o.aprobacion === "rechazada" },
+];
 
 // Los avisos (confirmado, despachado, facturado…) enlazan a /vendedor/pedidos?pedido=<id>: se abre el detalle del pedido.
 // "Duplicar y corregir" (enlaces viejos /vendedor/pedidos?duplicar=<id>) abre la venta rápida con la copia.
@@ -53,8 +73,6 @@ const ListaPedidos = () => {
   const [editar, setEditar] = useState<Orden | null>(null);
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get("q") || "");
-  // ?filtro= desde el tablero Hoy (por aprobar, rechazados, en curso)
-  const [estadoFiltro, setEstadoFiltro] = useState<Filtro>(() => (FILTROS.includes(params.get("filtro") as Filtro) ? params.get("filtro") as Filtro : "todos"));
   // Contadores desde resumen_vendedor() (misma fuente que el Dashboard y Metas)
   const { resumen, recargar: recargarResumen } = useResumenVendedor();
   // El buscador global abre esta página con ?q=
@@ -90,20 +108,25 @@ const ListaPedidos = () => {
 
   const fmt = (s: string) => new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
-  // "En curso" con la misma definición que resumen_vendedor(): estado abierto y no rechazado
-  const ABIERTOS = ["pendiente", "confirmado", "procesando", "enviado"];
-  const abierto = (o: Orden) => ABIERTOS.includes(o.estado) && o.aprobacion !== "rechazada";
+  const fechaDe = (o: Orden) => o.fecha_pedido || o.created_at;
+  // ---- Filtros (en la URL) ----
+  const f = useFiltros([
+    { clave: "estado", etiqueta: "Estado", principal: true, opciones: opcionesPrueba(ordenes, PRUEBAS_ESTADO, true) },
+    { clave: "fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
+    { clave: "cliente", etiqueta: "Cliente", todos: "Todos los clientes", opciones: opcionesDe(ordenes, (o) => o.cliente_id, (o) => o.cliente?.nombre_negocio ?? "—") },
+    { clave: "filtro", etiqueta: "Seguimiento", todos: "Todos", opciones: opcionesPrueba(ordenes, PRUEBAS_SEGUIMIENTO) },
+  ]);
+  const estadoFiltro = (PRUEBAS_SEGUIMIENTO.some((x) => x.valor === f.v("filtro")) ? f.v("filtro") : "todos") as Filtro;
+  const setEstadoFiltro = (v: Filtro) => f.set("filtro", v === "todos" ? "" : v);
   const texto = q.trim().toLowerCase();
-  const pasaFiltro = (o: Orden) => estadoFiltro === "todos" || (estadoFiltro === "abiertos" ? abierto(o)
-    : estadoFiltro === "por_aprobar" ? o.aprobacion === "pendiente" : o.aprobacion === "rechazada");
-  const filtradas = ordenes.filter((o) => pasaFiltro(o) &&
+  const filtradas = ordenes.filter((o) => pasaPrueba(PRUEBAS_SEGUIMIENTO, f.v("filtro"), o) && pasaPrueba(PRUEBAS_ESTADO, f.v("estado"), o)
+    && enRango(fechaDe(o), f.v("fecha")) && coincide(o.cliente_id, f.v("cliente")) &&
     (!texto || o.numero.toLowerCase().includes(texto) || (o.numero_guds || "").toLowerCase().includes(texto)
       || (o.cliente?.nombre_negocio || "").toLowerCase().includes(texto)));
-  const fechaDe = (o: Orden) => o.fecha_pedido || o.created_at;
   const { ordenadas, orden, alternar } = useOrdenTabla(filtradas, {
     numero: (o) => o.numero, cliente: (o) => o.cliente?.nombre_negocio, fecha: (o) => fechaDe(o), total: (o) => Number(o.total || 0), estado: (o) => estadoVisible(o).etiqueta,
   });
-  const pagination = usePagination(ordenadas, 50);
+  const pagination = usePagination(ordenadas, 50, f.firma);
   const ped = resumen?.pedidos;
   const abrirDetalle = (o: Orden) => navigate(`/vendedor/pedidos/${o.id}`);
   // Número de Odoo y, si el pedido nació en GUDS, el número con el que el vendedor lo conoció
@@ -128,13 +151,19 @@ const ListaPedidos = () => {
       ]} />
 
       <BarraLista busqueda={q} onBusqueda={setQ} placeholder="Buscar pedido o cliente..."
-        contador={loading ? undefined : `${filtradas.length} registros`}
+        filtros={<FiltrosLista filtros={f} resultados={filtradas.length} />}
+        contador={loading ? undefined : contadorFiltrado(filtradas.length, ordenes.length, f.activos || !!texto)}
         acciones={<Button size="sm" className="gap-1.5 bg-emerald-700 hover:bg-emerald-800" onClick={() => navigate("/vendedor/pedidos/nuevo")} data-testid="nuevo-pedido"><Plus className="h-3.5 w-3.5" />Nuevo Pedido</Button>} />
 
       <div className="rounded-lg border border-border bg-card">
         {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-emerald-700" /></div>
         : ordenes.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Aún no hay pedidos. Crea el primero con "Nuevo Pedido".</div>
-        : filtradas.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">Sin resultados{texto ? ` para "${q.trim()}"` : ""}</div>
+        : filtradas.length === 0 ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            Sin resultados{texto ? ` para "${q.trim()}"` : ""}
+            {f.activos > 0 && <button type="button" className="ml-2 font-medium text-primary hover:underline" onClick={f.limpiar}>Limpiar filtros</button>}
+          </div>
+        )
         : (
           <>
             {/* Teléfono: tarjetas con número, cliente, total, estado y fecha a la vista (sin desplazar de lado). Tocar abre el detalle. */}

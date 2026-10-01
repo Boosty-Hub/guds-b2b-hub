@@ -57,6 +57,7 @@ import { BannerVisual } from "@/components/BannerVisual";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { Panel } from "@/components/datos/FichaCampos";
+import { FiltrosLista, useFiltros, opcionesPrueba, pasaPrueba, fechaLocal, contadorFiltrado, type OpcionPrueba } from "@/components/datos/FiltrosLista";
 
 const MAX_BANNER_IMAGE_SIZE = 2 * 1024 * 1024;
 
@@ -241,6 +242,23 @@ const Banners = () => {
 
   const activeBanners = banners.filter(b => b.activo).length;
 
+  // ---- Filtros (en la URL). Vigencia con la regla del carrusel del portal: activo y hoy entre inicio y fin ----
+  const hoy = fechaLocal(new Date().toISOString())!;
+  const pruebasActivo: OpcionPrueba<Banner>[] = [
+    { valor: "si", etiqueta: "Activos", prueba: (b) => b.activo }, { valor: "no", etiqueta: "Inactivos", prueba: (b) => !b.activo },
+  ];
+  const pruebasVigencia: OpcionPrueba<Banner>[] = [
+    { valor: "portal", etiqueta: "En el portal hoy", prueba: (b) => b.activo && !!b.fechaInicio && !!b.fechaFin && b.fechaInicio <= hoy && b.fechaFin >= hoy },
+    { valor: "programados", etiqueta: "Programados (aún no empiezan)", prueba: (b) => !!b.fechaInicio && b.fechaInicio > hoy },
+    { valor: "vencidos", etiqueta: "Vencidos", prueba: (b) => !!b.fechaFin && b.fechaFin < hoy },
+    { valor: "sin_fechas", etiqueta: "Sin fechas (no salen en el portal)", prueba: (b) => !b.fechaInicio || !b.fechaFin },
+  ];
+  const f = useFiltros([
+    { clave: "activo", etiqueta: "Situación", todos: "Activos e inactivos", principal: true, opciones: opcionesPrueba(banners, pruebasActivo) },
+    { clave: "vigencia", etiqueta: "Vigencia", todos: "Todas", principal: true, opciones: opcionesPrueba(banners, pruebasVigencia) },
+  ]);
+  const filtrados = banners.filter((b) => pasaPrueba(pruebasActivo, f.v("activo"), b) && pasaPrueba(pruebasVigencia, f.v("vigencia"), b));
+
   return (
     <MainLayout title="Banners Promocionales">
       <KpiStrip items={[
@@ -251,12 +269,15 @@ const Banners = () => {
 
       <BarraLista
         filtros={
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold">Gestión de Banners</h2>
-            <p className="text-xs text-muted-foreground">Los banners se muestran en el carrusel del portal cliente</p>
-          </div>
+          <>
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold">Gestión de Banners</h2>
+              <p className="text-xs text-muted-foreground">Los banners se muestran en el carrusel del portal cliente</p>
+            </div>
+            <FiltrosLista filtros={f} resultados={filtrados.length} />
+          </>
         }
-        contador={`${banners.length} registros`}
+        contador={contadorFiltrado(filtrados.length, banners.length, f.activos)}
         acciones={
           <Button size="sm" className="gap-1.5" onClick={() => {
             resetForm();
@@ -284,9 +305,9 @@ const Banners = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {banners.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">No hay banners</TableCell></TableRow>
-            ) : banners.sort((a, b) => a.orden - b.orden).map((banner) => (
+            {filtrados.length === 0 ? (
+              <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">{banners.length ? "Ningún banner coincide con los filtros" : "No hay banners"}</TableCell></TableRow>
+            ) : [...filtrados].sort((a, b) => a.orden - b.orden).map((banner) => (
               <TableRow key={banner.id} className={!banner.activo ? "opacity-60" : ""}>
                 <TableCell className="pr-0">
                   <GripVertical className="h-3.5 w-3.5 cursor-grab text-muted-foreground hover:text-foreground" />
