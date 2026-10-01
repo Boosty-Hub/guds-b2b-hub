@@ -26,6 +26,13 @@ export interface Categoria {
   orden: number;
   productosCount: number;
   odooId?: number | null;   // categoría de Odoo: el nombre se edita en Odoo
+  /** Empresas de sus productos (derivado, fase 21a). Vacío = sin productos. */
+  empresas?: string[];
+  /** Tiene algún producto vendible (derivado). Si no, el portal no la ofrece. */
+  deVenta?: boolean;
+  /** Último tramo del nombre ("A / B" → "B") y grupo ("A"). */
+  etiqueta?: string;
+  grupo?: string | null;
 }
 
 interface StoreConfigContextType {
@@ -118,6 +125,10 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
         orden: c.orden,
         productosCount: c.productos?.[0]?.count || 0,
         odooId: c.odoo_id ?? null,
+        empresas: c.empresas ?? [],
+        deVenta: c.de_venta ?? true,
+        etiqueta: c.etiqueta ?? c.nombre,
+        grupo: c.grupo ?? null,
       })));
     }
   };
@@ -217,8 +228,9 @@ export const StoreConfigProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const getActiveCategories = () => {
+    // Activas (interruptor del portal) y de venta: no se ofrecen gastos de importación, servicios internos, etc.
     return categorias
-      .filter(c => c.activo)
+      .filter(c => c.activo && c.deVenta !== false)
       .sort((a, b) => a.orden - b.orden);
   };
 

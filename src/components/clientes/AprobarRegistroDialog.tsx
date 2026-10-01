@@ -59,9 +59,11 @@ export function AprobarRegistroDialog({ registro, open, onOpenChange, onAprobar 
       // Vendedores de la empresa del registro (opcional; se cargan después de mostrar la vista previa)
       setVendedores([]);
       if (v.empresa_id && v.accion !== "usar_existente") {
-        const { data: vs } = await supabase.from("usuarios").select("id, nombre, apellido, usuario_empresas!inner(empresa_id)")
-          .eq("role", "vendedor").eq("activo", true).eq("usuario_empresas.empresa_id", v.empresa_id).order("nombre");
-        if (vivo) setVendedores(((vs ?? []) as Vendedor[]).map(({ id, nombre, apellido }) => ({ id, nombre, apellido })));
+        // Vendedores de esa empresa (por su cartera de Odoo; sin usuarios de prueba) — vendedores_empresa, fase 21a
+        const { data: vs } = await supabase.rpc("vendedores_empresa");
+        const deEmpresa = ((vs ?? []) as (Vendedor & { activo: boolean; empresas: string[] | null })[])
+          .filter((x) => x.activo && (x.empresas ?? []).includes(v.empresa_id as string));
+        if (vivo) setVendedores(deEmpresa.map(({ id, nombre, apellido }) => ({ id, nombre, apellido })));
       }
     })();
     return () => { vivo = false; };

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +51,7 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { Panel } from "@/components/datos/FichaCampos";
 import { FiltrosLista, useFiltros, opcionesPrueba, pasaPrueba, normalizarTexto, contadorFiltrado, type OpcionPrueba } from "@/components/datos/FiltrosLista";
+import { useEmpresa } from "@/contexts/EmpresaContext";
 
 const colorOptions = [
   { value: "bg-yellow-500", label: "Amarillo" },
@@ -72,7 +73,14 @@ const iconOptions = [
 ];
 
 const Categorias = () => {
-  const { categorias, addCategoria, updateCategoria, deleteCategoria } = useStoreConfig();
+  const { categorias: todas, addCategoria, updateCategoria, deleteCategoria } = useStoreConfig();
+  // Categorías por empresa (fase 21a): Odoo no les asigna compañía, la empresa sale de sus productos (categorias.empresas).
+  // En una empresa se ven las suyas y las compartidas (marcadas); en «Ambas», todas con su empresa.
+  const { empresaActiva, empresas: listaEmpresas, soloLectura } = useEmpresa();
+  const categorias = useMemo(() => todas.filter((c) => !empresaActiva || !(c.empresas ?? []).length || (c.empresas ?? []).includes(empresaActiva.id)),
+    [todas, empresaActiva]);
+  const nombreEmpresa = (id: string) => listaEmpresas.find((e) => e.id === id)?.nombre_corto ?? "—";
+  const compartida = (c: Categoria) => (c.empresas ?? []).length > 1;
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -186,40 +194,55 @@ const Categorias = () => {
       return;
     }
     toast({
-      title: categoria.activo ? "Categoría Desactivada" : "Categoría Activada",
-      description: `"${categoria.nombre}" ha sido ${categoria.activo ? "desactivada" : "activada"}`,
+      title: categoria.activo ? "Categoría oculta del portal" : "Categoría visible en el portal",
+      description: `"${categoria.nombre}" ${categoria.activo ? "ya no se ofrece" : "se ofrece"} en el portal del cliente y del vendedor${categoria.deVenta === false ? " (no tiene productos vendibles: igual no aparece)" : ""}`,
     });
   };
 
-  const activeCategorias = categorias.filter(c => c.activo).length;
+  const activeCategorias = categorias.filter(c => c.activo && c.deVenta !== false).length;
+  const noVenta = categorias.filter(c => c.deVenta === false).length;
   const totalProductos = categorias.reduce((sum, c) => sum + c.productosCount, 0);
 
   // ---- Filtros (en la URL) ----
   const pruebasActivo: OpcionPrueba<Categoria>[] = [
-    { valor: "si", etiqueta: "Activas", prueba: (c) => c.activo }, { valor: "no", etiqueta: "Inactivas", prueba: (c) => !c.activo },
+    { valor: "si", etiqueta: "Visibles en el portal", prueba: (c) => c.activo }, { valor: "no", etiqueta: "Ocultas del portal", prueba: (c) => !c.activo },
   ];
   const pruebasProductos: OpcionPrueba<Categoria>[] = [
     { valor: "con", etiqueta: "Con productos", prueba: (c) => c.productosCount > 0 }, { valor: "sin", etiqueta: "Sin productos", prueba: (c) => c.productosCount === 0 },
+  ];
+  const pruebasVenta: OpcionPrueba<Categoria>[] = [
+    { valor: "si", etiqueta: "De venta", prueba: (c) => c.deVenta !== false },
+    { valor: "no", etiqueta: "No de venta (ocultas del portal)", prueba: (c) => c.deVenta === false },
+  ];
+  const pruebasEmpresa: OpcionPrueba<Categoria>[] = [
+    ...listaEmpresas.map((e) => ({ valor: e.id, etiqueta: `Solo ${e.nombre_corto || e.nombre}`, prueba: (c: Categoria) => (c.empresas ?? []).length === 1 && (c.empresas ?? [])[0] === e.id })),
+    { valor: "compartida", etiqueta: "Compartidas", prueba: (c) => compartida(c) },
+    { valor: "sin", etiqueta: "Sin productos", prueba: (c) => !(c.empresas ?? []).length },
   ];
   const pruebasOrigen: OpcionPrueba<Categoria>[] = [
     { valor: "odoo", etiqueta: "Odoo", prueba: (c) => !!c.odooId }, { valor: "guds", etiqueta: "Creada en GUDS", prueba: (c) => !c.odooId },
   ];
   const f = useFiltros([
-    { clave: "activo", etiqueta: "Situación", todos: "Activas e inactivas", principal: true, opciones: opcionesPrueba(categorias, pruebasActivo) },
+    { clave: "activo", etiqueta: "Portal", todos: "Visibles y ocultas", principal: true, opciones: opcionesPrueba(categorias, pruebasActivo) },
     { clave: "productos", etiqueta: "Productos", todos: "Todas", principal: true, opciones: opcionesPrueba(categorias, pruebasProductos) },
+    { clave: "venta", etiqueta: "Venta", todos: "De venta y no", principal: true, opciones: opcionesPrueba(categorias, pruebasVenta) },
+    ...(soloLectura && listaEmpresas.length > 1 ? [{ clave: "empresa", etiqueta: "Empresa", todos: "Todas", opciones: opcionesPrueba(categorias, pruebasEmpresa) }] : []),
     { clave: "origen", etiqueta: "Origen", todos: "Odoo y GUDS", opciones: opcionesPrueba(categorias, pruebasOrigen) },
   ]);
   const termino = normalizarTexto(busqueda);
   const filtradas = categorias.filter((c) => pasaPrueba(pruebasActivo, f.v("activo"), c) && pasaPrueba(pruebasProductos, f.v("productos"), c)
-    && pasaPrueba(pruebasOrigen, f.v("origen"), c) && (!termino || normalizarTexto(c.nombre).includes(termino)));
+    && pasaPrueba(pruebasOrigen, f.v("origen"), c) && pasaPrueba(pruebasVenta, f.v("venta"), c) && pasaPrueba(pruebasEmpresa, f.v("empresa"), c)
+    && (!termino || normalizarTexto(c.nombre).includes(termino)));
 
   return (
     <MainLayout title="Categorías">
       {/* Stats */}
       <KpiStrip
         items={[
-          { label: "Total Categorías", valor: categorias.length, tono: "primario" },
-          { label: "Activas", valor: activeCategorias, tono: "positivo" },
+          { label: empresaActiva ? `Categorías de ${empresaActiva.nombre_corto}` : "Total Categorías", valor: categorias.length, tono: "primario" },
+          { label: "En el portal", valor: activeCategorias, tono: "positivo", detalle: "activas y de venta" },
+          { label: "No de venta", valor: noVenta, detalle: "sin productos vendibles", activo: f.v("venta") === "no",
+            onClick: () => f.set("venta", f.v("venta") === "no" ? "" : "no") },
           { label: "Productos Total", valor: totalProductos },
         ]}
       />
@@ -250,18 +273,19 @@ const Categorias = () => {
               <TableHead className="w-6"></TableHead>
               <TableHead className="w-10">Icono</TableHead>
               <TableHead>Categoría</TableHead>
+              <TableHead>Empresa</TableHead>
               <TableHead className="text-right">Productos</TableHead>
-              <TableHead className="text-center">Activo</TableHead>
+              <TableHead className="text-center" title="Interruptor manual: mostrar la categoría en el portal del cliente y del vendedor">En el portal</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtradas.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">{categorias.length ? "Ninguna categoría coincide con la búsqueda o los filtros" : "No hay categorías"}</TableCell>
+                <TableCell colSpan={7} className="py-6 text-center text-sm text-muted-foreground">{categorias.length ? "Ninguna categoría coincide con la búsqueda o los filtros" : "No hay categorías"}</TableCell>
               </TableRow>
             ) : [...filtradas].sort((a, b) => a.orden - b.orden).map((categoria) => (
-              <TableRow key={categoria.id} className={!categoria.activo ? "opacity-60" : ""}>
+              <TableRow key={categoria.id} className={!categoria.activo || categoria.deVenta === false ? "opacity-60" : ""} data-testid="fila-categoria">
                 <TableCell className="pr-0">
                   <div className="cursor-grab text-muted-foreground hover:text-foreground">
                     <GripVertical className="h-3.5 w-3.5" />
@@ -274,11 +298,23 @@ const Categorias = () => {
                 </TableCell>
                 <TableCell>
                   <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-                    <span className="max-w-[260px] truncate font-medium" title={categoria.nombre}>{categoria.nombre}</span>
+                    <span className="max-w-[260px] truncate font-medium" title={categoria.nombre}>{categoria.etiqueta ?? categoria.nombre}</span>
                     {categoria.odooId && <OdooBadge />}
-                    {!categoria.activo && (
-                      <Badge variant="secondary" className="text-xs">Inactivo</Badge>
+                    {categoria.deVenta === false && (
+                      <Badge variant="outline" className="text-xs" title="Ningún producto es vendible: el portal no la ofrece">No de venta</Badge>
                     )}
+                    {categoria.deVenta !== false && !categoria.activo && (
+                      <Badge variant="secondary" className="text-xs">Oculta del portal</Badge>
+                    )}
+                    {categoria.grupo && <span className="min-w-0 max-w-[280px] truncate text-xs text-muted-foreground" title={`Subcategoría de ${categoria.grupo}`}>en {categoria.grupo}</span>}
+                  </div>
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  <div className="flex gap-1">
+                    {!(categoria.empresas ?? []).length ? <span className="text-xs text-muted-foreground">Sin productos</span>
+                      : empresaActiva ? (compartida(categoria) ? <Badge variant="outline" className="px-1.5 py-0 text-[10px]" title={(categoria.empresas ?? []).map(nombreEmpresa).join(" y ")}>Compartida</Badge>
+                        : <span className="text-xs text-muted-foreground">{empresaActiva.nombre_corto}</span>)
+                      : (categoria.empresas ?? []).map((id) => <Badge key={id} variant="outline" className="px-1.5 py-0 text-[10px]">{nombreEmpresa(id)}</Badge>)}
                   </div>
                 </TableCell>
                 <TableCell className="whitespace-nowrap text-right">{categoria.productosCount} productos</TableCell>
@@ -286,7 +322,9 @@ const Categorias = () => {
                   <Switch
                     checked={categoria.activo}
                     onCheckedChange={() => handleToggleActivo(categoria)}
-                    title={categoria.activo ? "Desactivar" : "Activar"}
+                    disabled={categoria.deVenta === false}
+                    title={categoria.deVenta === false ? "No tiene productos vendibles: el portal no la ofrece" : categoria.activo ? "Ocultar del portal" : "Mostrar en el portal"}
+                    aria-label={`Mostrar ${categoria.etiqueta ?? categoria.nombre} en el portal`}
                   />
                 </TableCell>
                 <TableCell className="text-right">
@@ -311,12 +349,12 @@ const Categorias = () => {
       <Panel className="mt-3" titulo={<><Smartphone className="h-3.5 w-3.5" /> Vista Previa - Portal Cliente</>}>
         <div className="mx-auto max-w-md rounded-lg bg-muted p-2">
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {categorias.filter(c => c.activo).sort((a, b) => a.orden - b.orden).map((cat) => (
-              <div key={cat.id} className="flex min-w-[56px] flex-col items-center gap-1">
+            {categorias.filter(c => c.activo && c.deVenta !== false && c.productosCount > 0).sort((a, b) => a.orden - b.orden).map((cat) => (
+              <div key={cat.id} className="flex w-[72px] shrink-0 flex-col items-center gap-1">
                 <div className={`h-10 w-10 rounded-full ${cat.color} flex items-center justify-center text-lg`}>
                   {cat.icono}
                 </div>
-                <span className="text-center text-[11px] leading-tight">{cat.nombre}</span>
+                <span className="line-clamp-2 w-full break-words text-center text-[11px] leading-tight" title={cat.nombre}>{cat.etiqueta ?? cat.nombre}</span>
               </div>
             ))}
           </div>

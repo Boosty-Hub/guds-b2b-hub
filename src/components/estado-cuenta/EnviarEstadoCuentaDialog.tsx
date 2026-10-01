@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Loader2, Mail, Paperclip, Send, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Mail, Paperclip, Send, UserPlus, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,8 @@ import type { EstadoCuentaCompleto } from "./tipos";
 // contactos (editables y validados), asunto, mensaje opcional y vista previa del correo tal como sale (la arma la
 // función edge enviar-estado-cuenta). Al enviar: se asegura el enlace público, se genera el PDF con el mismo componente
 // de siempre (con ese enlace en el pie) y la función lo adjunta y envía por Resend.
+// 21b (clientes sin correo): desde aquí se guarda el correo del cliente — se escribe en Odoo por la cola de escrituras,
+// como la dirección y los teléfonos — o se crea un contacto con correo (que su trigger también lleva a Odoo).
 
 const CORREO = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 const MAX = 10;
@@ -57,6 +59,13 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
   const [errorDestino, setErrorDestino] = useState<string | null>(null);
   const iniciado = useRef(false);
   const ultimaVista = useRef("");
+  // Agregar correo (cliente sin correo)
+  const [agregarAbierto, setAgregarAbierto] = useState(false);
+  const [modoCorreo, setModoCorreo] = useState<"cliente" | "contacto">("cliente");
+  const [correoNuevo, setCorreoNuevo] = useState("");
+  const [nombreContacto, setNombreContacto] = useState("");
+  const [guardandoCorreo, setGuardandoCorreo] = useState(false);
+  const [sugeridos, setSugeridos] = useState<number | null>(null);
 
   // Al abrir: vista previa con los destinatarios sugeridos y el asunto por defecto
   useEffect(() => {
@@ -65,11 +74,14 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
     iniciado.current = true;
     precargarPdfEstadoCuenta();
     setError(null); setErrorDestino(null); setMensaje(""); setNuevo(""); setHtml(null);
+    setAgregarAbierto(false); setCorreoNuevo(""); setNombreContacto(""); setModoCorreo("cliente"); setSugeridos(null);
     setCargando(true);
     llamar({ modo: "vista_previa", cliente_id: clienteId }, empresa).then((r) => {
       setCargando(false);
       if (r.error) { setError(r.error); return; }
       setDestinos((r.destinatarios ?? []).slice(0, MAX));
+      setSugeridos((r.destinatarios ?? []).length);
+      if (!(r.destinatarios ?? []).length) setAgregarAbierto(true);
       ultimaVista.current = JSON.stringify(["", r.asunto ?? ""]);
       setAsunto(r.asunto ?? "");
       setHtml(r.html ?? null);
@@ -134,6 +146,25 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
     }
   };
 
+  // Guardar el correo en el cliente (→ Odoo) o crear un contacto con correo; en los dos casos queda como destinatario
+  const guardarCorreo = async () => {
+    const correo = correoNuevo.trim().toLowerCase();
+    if (!CORREO.test(correo)) { toast({ title: "Correo inválido", description: correo || "Escribe un correo", variant: "destructive" }); return; }
+    if (modoCorreo === "contacto" && nombreContacto.trim().length < 2) { toast({ title: "Falta el nombre del contacto", variant: "destructive" }); return; }
+    setGuardandoCorreo(true);
+    const r = modoCorreo === "cliente"
+      ? await supabase.rpc("actualizar_contacto_cliente", { p_cliente_id: clienteId, p_datos: { email: correo } })
+      : await supabase.from("cliente_contactos").insert({ cliente_id: clienteId, nombre: nombreContacto.trim(), email: correo, activo: true }).select("id").single();
+    setGuardandoCorreo(false);
+    if (r.error) { toast({ title: "No se guardó el correo", description: r.error.message, variant: "destructive" }); return; }
+    toast({
+      title: modoCorreo === "cliente" ? "Correo enviado a Odoo" : "Contacto creado",
+      description: modoCorreo === "cliente" ? `${correo}: queda en la ficha del cliente cuando Odoo lo confirme (unos segundos).` : `${nombreContacto.trim()} · ${correo}`,
+    });
+    if (!destinos.includes(correo) && destinos.length < MAX) setDestinos([...destinos, correo]);
+    setCorreoNuevo(""); setNombreContacto(""); setAgregarAbierto(false); setErrorDestino(null);
+  };
+
   const archivo = datos ? nombreArchivoEstadoCuenta(datos.cliente.nombre, datos.periodo.hasta ?? datos.hoy) : "";
   const pasos = { enlace: "Preparando el enlace…", pdf: "Generando el PDF…", correo: "Enviando…" } as const;
 
@@ -165,6 +196,37 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
               </div>
               {errorDestino ? <p className="text-xs text-destructive">{errorDestino}</p>
                 : <p className="text-[11px] text-muted-foreground">Del cliente y sus contactos con correo. Enter o coma para agregar; hasta {MAX}.</p>}
+            </div>
+            <div className={cn("rounded-md border px-3 py-2", sugeridos === 0 ? "border-warning/50 bg-warning/5" : "border-border")} data-testid="ec-agregar-correo">
+              <button type="button" className="flex w-full items-center gap-1.5 text-left text-xs font-medium" onClick={() => setAgregarAbierto((a) => !a)} aria-expanded={agregarAbierto}>
+                {agregarAbierto ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                <UserPlus className="h-3.5 w-3.5" />
+                {sugeridos === 0 ? "Este cliente no tiene correo: agrégalo" : "Guardar un correo nuevo en el cliente"}
+              </button>
+              {agregarAbierto && (
+                <div className="mt-2 space-y-2">
+                  <div className="flex rounded-md border border-border bg-background p-0.5 text-xs" role="group" aria-label="Dónde guardar el correo">
+                    {([["cliente", "Correo del cliente (Odoo)"], ["contacto", "Nuevo contacto"]] as ["cliente" | "contacto", string][]).map(([v, t]) => (
+                      <button key={v} type="button" onClick={() => setModoCorreo(v)} aria-pressed={modoCorreo === v}
+                        className={cn("flex-1 rounded px-2 py-1", modoCorreo === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>{t}</button>
+                    ))}
+                  </div>
+                  {modoCorreo === "contacto" && (
+                    <Input value={nombreContacto} onChange={(e) => setNombreContacto(e.target.value)} placeholder="Nombre del contacto (p. ej. Cuentas por pagar)"
+                      maxLength={120} disabled={guardandoCorreo} data-testid="ec-contacto-nombre" />
+                  )}
+                  <div className="flex gap-2">
+                    <Input type="email" value={correoNuevo} onChange={(e) => setCorreoNuevo(e.target.value)} placeholder="correo@cliente.com" maxLength={254}
+                      disabled={guardandoCorreo} data-testid="ec-correo-nuevo" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); guardarCorreo(); } }} />
+                    <Button type="button" variant="secondary" onClick={guardarCorreo} disabled={guardandoCorreo || !correoNuevo.trim()} data-testid="ec-correo-guardar">
+                      {guardandoCorreo ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {modoCorreo === "cliente" ? "Se escribe en Odoo (como la dirección y los teléfonos) y queda como destinatario." : "El contacto se crea en GUDS y en Odoo, y queda como destinatario."}
+                  </p>
+                </div>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="ec-asunto" className="text-xs">Asunto</Label>

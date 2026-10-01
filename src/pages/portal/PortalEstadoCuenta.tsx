@@ -7,7 +7,8 @@ import {
   Antiguedad, DocumentoMovimiento, NavFinanzas, conceptoMovimiento, exportarEstadoCuentaCSV,
 } from "@/components/portal/finanzas";
 import { BotonPdfEstadoCuenta } from "@/components/estado-cuenta/BotonPdfEstadoCuenta";
-import type { EstadoCuentaCompleto } from "@/components/estado-cuenta/tipos";
+import type { EstadoCuentaCompleto, FiltroDocumentos } from "@/components/estado-cuenta/tipos";
+import { FiltroDocumentosSelector, TablaDocumentos } from "@/components/estado-cuenta/TablaDocumentos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,12 +19,15 @@ import { conSigno, condicionPagoTexto, hoyLocal, sumarDias, useEstadoCuenta, typ
 // Estado de cuenta del cliente (F5): saldo, vencido, por vencer y a favor con la regla de Cuentas por Cobrar del admin
 // (función estado_cuenta_portal), antigüedad por tramos, crédito y los movimientos del período con saldo corrido.
 // Descarga en CSV y en PDF con diseño (el mismo documento del admin y del enlace público, fase 20w).
+// 21b: documentos con el cruce por factura (base, IVA, abonos, saldo, qué falta y comentarios visibles) y movimientos
+// desde la factura abierta más antigua.
 
-type Rango = "30" | "90" | "anio" | "todo" | "fechas";
+type Rango = "abierta" | "30" | "90" | "anio" | "todo" | "fechas";
 const POR_PAGINA = 40;
 
-const periodoDe = (rango: Rango, hoy: string, fechas: { desde: string; hasta: string }) => {
+const periodoDe = (rango: Rango, hoy: string, fechas: { desde: string; hasta: string }): { desde: string | null; hasta: string | null; desdeAbierta?: boolean } => {
   switch (rango) {
+    case "abierta": return { desde: null, hasta: null, desdeAbierta: true };
     case "30": return { desde: sumarDias(hoy, -30), hasta: null };
     case "90": return { desde: sumarDias(hoy, -90), hasta: null };
     case "anio": return { desde: `${hoy.slice(0, 4)}-01-01`, hasta: null };
@@ -35,11 +39,14 @@ const periodoDe = (rango: Rango, hoy: string, fechas: { desde: string; hasta: st
 const PortalEstadoCuenta = () => {
   const { formatPrice, currency } = useCurrency();
   const hoy = useMemo(() => hoyLocal(), []);
-  const [rango, setRango] = useState<Rango>("90");
+  const [rango, setRango] = useState<Rango>("abierta");
+  const [filtroDocs, setFiltroDocs] = useState<FiltroDocumentos>("abiertas");
   const [fechas, setFechas] = useState({ desde: sumarDias(hoy, -90), hasta: hoy });
   const [aplicadas, setAplicadas] = useState(fechas);
   const periodo = useMemo(() => periodoDe(rango, hoy, aplicadas), [rango, hoy, aplicadas]);
-  const { datos, cargando, error, recargar } = useEstadoCuenta(periodo);
+  const periodoConFiltro = useMemo(() => ({ ...periodo, filtro: filtroDocs }), [periodo, filtroDocs]);
+  const { datos, cargando, error, recargar } = useEstadoCuenta(periodoConFiltro);
+  const ec = datos as EstadoCuentaCompleto | null;
   const [visibles, setVisibles] = useState(POR_PAGINA);
 
   useEffect(() => { setVisibles(POR_PAGINA); }, [periodo.desde, periodo.hasta]);
@@ -112,6 +119,24 @@ const PortalEstadoCuenta = () => {
             </Panel>
           </div>
 
+          {/* Documentos con el cruce por factura */}
+          <Panel
+            titulo={filtroDocs === "abiertas" ? "Documentos con saldo" : filtroDocs === "todas" ? "Documentos del período" : "Documentos pagados en el período"}
+            descripcion={filtroDocs === "abiertas" ? "Por factura: cuánto era, cuánto has abonado y qué falta. Toca un documento para ver sus abonos." : datos ? descripcionPeriodo(datos, hoy).replace(/^\d+ movimientos? · /, "") : undefined}
+            accion={<FiltroDocumentosSelector valor={filtroDocs} onCambio={setFiltroDocs} className="hidden sm:flex" />}
+            cuerpoClassName="p-0 sm:p-0"
+          >
+            <div className="border-b border-border px-4 py-2 sm:hidden"><FiltroDocumentosSelector valor={filtroDocs} onCambio={setFiltroDocs} className="w-full overflow-x-auto" /></div>
+            {primeraCarga ? <div className="p-4 sm:p-5"><SkeletonFilas n={3} alto="h-12" /></div> : !ec ? null : (
+              <div className={cn("transition-opacity", cargando && "opacity-60")}>
+                <TablaDocumentos docs={(filtroDocs === "abiertas" ? ec.abiertos : ec.documentos) ?? []} formato={formatPrice} limite={10}
+                  enlace={(d) => (d.factura_id ? `/portal/facturas/${d.factura_id}` : null)} totales={filtroDocs === "abiertas"} testId="ec-documentos"
+                  vacio={<p className="px-4 py-6 text-center text-sm text-muted-foreground">{filtroDocs === "abiertas" ? "No tienes documentos con saldo pendiente." : "No hay documentos en este período."}</p>} />
+                <p className="border-t border-border px-4 py-2 text-[11px] text-muted-foreground sm:px-5">«Qué falta» es una sugerencia automática según la base, el IVA y lo abonado; los comentarios los escribe nuestro equipo.</p>
+              </div>
+            )}
+          </Panel>
+
           {/* Movimientos */}
           <Panel
             titulo="Movimientos"
@@ -126,6 +151,7 @@ const PortalEstadoCuenta = () => {
                   valor={rango}
                   onCambio={setRango}
                   opciones={[
+                    { valor: "abierta", etiqueta: "Desde lo pendiente" },
                     { valor: "30", etiqueta: "30 días" }, { valor: "90", etiqueta: "90 días" },
                     { valor: "anio", etiqueta: "Este año" }, { valor: "todo", etiqueta: "Todo" },
                   ]}

@@ -130,8 +130,10 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       usuarioPorNombre.set(norm(`${u.nombre} ${u.apellido || ''}`), u.id);
       if (!usuarioPorNombre.has(norm(u.nombre))) usuarioPorNombre.set(norm(u.nombre), u.id);
     }
-    const usuariosOdoo = await odoo.leerTodo('res.users', [['share', '=', false]], ['name']);
+    const usuariosOdoo = await odoo.leerTodo('res.users', [['share', '=', false]], ['name', 'login', 'active', 'partner_id']);
     const vendedorGuds = new Map(usuariosOdoo.map((u) => [u.id, usuarioPorNombre.get(norm(u.name)) ?? null]));
+    // Contactos de los usuarios internos de Odoo: si tienen rango de cliente son empleados (compras de personal, 21a)
+    const partnersDeUsuarios = new Set(usuariosOdoo.map((u) => m2oId(u.partner_id)).filter(Boolean));
     log(`    ${partners.length} contactos · ${variantes.length} variantes · ${ubicaciones.length} ubicaciones · ${usuariosOdoo.length} usuarios Odoo (${[...vendedorGuds.values()].filter(Boolean).length} ligados a GUDS)`);
 
     // ── 2. Lectura por empresa ───────────────────────────────────────────
@@ -714,6 +716,9 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       // Se mantiene en Odoo (el espejo impide editarla en GUDS); solo se escriben las filas que cambian.
       const clasifClientes = d.clientes.map((p) => ({
         odoo_id: p.id, tipo_cliente: txt(m2oNombre(p.industry_id), 100),
+        // Empleado (21a): etiqueta "Empleado" o contacto de un usuario interno de Odoo
+        es_empleado: partnersDeUsuarios.has(p.id)
+          || (Array.isArray(p.category_id) ? p.category_id : []).some((id) => /^empleado$/i.test(etiquetaCliente.get(id) || '')),
         canal: txt(m2oNombre(p.eu_partner_channel_id), 100) || txt(p.channel, 100),
         segmento: txt(m2oNombre(p.eu_partner_segment_id), 100) || txt(p.segmentation, 100),
         etiquetas: (Array.isArray(p.category_id) ? p.category_id : []).map((id) => etiquetaCliente.get(id)).filter(Boolean),
@@ -721,13 +726,14 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       for (const lote of lotes(clasifClientes, 1000)) {
         await escribir(`
           with x as (
-            select x.odoo_id, x.tipo_cliente, x.canal, x.segmento,
+            select x.odoo_id, x.tipo_cliente, x.canal, x.segmento, coalesce(x.es_empleado, false) es_empleado,
               case when jsonb_array_length(x.etiquetas) > 0 then array(select jsonb_array_elements_text(x.etiquetas)) end etiquetas
-            from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, tipo_cliente text, canal text, segmento text, etiquetas jsonb)
+            from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, tipo_cliente text, canal text, segmento text, etiquetas jsonb, es_empleado boolean)
           )
-          update clientes c set tipo_cliente = x.tipo_cliente, canal = x.canal, segmento = x.segmento, etiquetas = x.etiquetas
+          update clientes c set tipo_cliente = x.tipo_cliente, canal = x.canal, segmento = x.segmento, etiquetas = x.etiquetas, es_empleado = x.es_empleado
           from x
-          where c.odoo_id = x.odoo_id and (c.tipo_cliente, c.canal, c.segmento, c.etiquetas) is distinct from (x.tipo_cliente, x.canal, x.segmento, x.etiquetas)`);
+          where c.odoo_id = x.odoo_id and (c.tipo_cliente, c.canal, c.segmento, c.etiquetas, c.es_empleado)
+            is distinct from (x.tipo_cliente, x.canal, x.segmento, x.etiquetas, x.es_empleado)`);
       }
 
       for (const lote of lotes(productos, 500)) {
@@ -1168,6 +1174,17 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
 
       // ── 6. Derivados ────────────────────────────────────────────────────
       log('\n[5] Recalculando derivados…');
+      // Empresa y "de venta" de cada categoría, a partir de sus productos (21a; Odoo no da compañía a product.category)
+      await sql(`select public.recalcular_categorias_empresas()`);
+      // Usuario de Odoo de cada usuario de GUDS (mismo nombre): su login es la sugerencia de correo real del vendedor (21a)
+      const ligados = usuariosOdoo.filter((u) => vendedorGuds.get(u.id)).map((u) => ({
+        usuario_id: vendedorGuds.get(u.id), odoo_user_id: u.id, login: txt(u.login, 200), activo: !!u.active }));
+      if (ligados.length) {
+        await sql(`
+          update usuarios u set odoo_user_id = x.odoo_user_id, odoo_login = x.login, odoo_activo = x.activo
+          from jsonb_to_recordset(${jsonbLit(ligados)}) as x(usuario_id uuid, odoo_user_id int, login text, activo boolean)
+          where u.id = x.usuario_id and (u.odoo_user_id, u.odoo_login, u.odoo_activo) is distinct from (x.odoo_user_id, x.login, x.activo)`);
+      }
       await escribir(`
         update productos p set stock_actual = s.stock
         from (select p2.id, greatest(0, round(coalesce(sum(ia.cantidad) filter (where a.tipo = 'propio'), 0)))::int stock

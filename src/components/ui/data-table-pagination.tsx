@@ -26,6 +26,8 @@ export function DataTablePagination({
   className,
 }: DataTablePaginationProps) {
   const { page, pageSize, pageCount, total, from, to, setPage, setPageSize } = pagination;
+  // Si la tabla arranca con un tamaño que no está en la lista (p. ej. 10), se agrega: si no, el selector queda vacío
+  const opciones = pageSizeOptions.includes(pageSize) ? pageSizeOptions : [...pageSizeOptions, pageSize].sort((a, b) => a - b);
 
   return (
     <div
@@ -46,7 +48,7 @@ export function DataTablePagination({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {pageSizeOptions.map((n) => (
+              {opciones.map((n) => (
                 <SelectItem key={n} value={String(n)}>
                   {n}
                 </SelectItem>

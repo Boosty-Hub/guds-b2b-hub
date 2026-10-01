@@ -8,8 +8,9 @@
 //         persona de contacto hija de un cliente o de un proveedor (parent_id + type contact), marcada "(GUDS)" en las notas (20s, 20v);
 //         cliente nuevo (sin parent_id, customer_rank 1, con su compañía), marcado "(GUDS)" en las notas (20s).
 // - `escribir`: solo `write`, solo en los modelos y CAMPOS de ESCRITURA_PERMITIDA (decisiones del dueño, 28 y 29-sep):
-//     · res.partner: dirección y teléfonos del cliente, editados en GUDS; límite de crédito (flanco 28); nombre, cargo y correo
-//       SOLO de personas de contacto que creó GUDS (se comprueba en Odoo antes de escribir).
+//     · res.partner: dirección y teléfonos del cliente, editados en GUDS; límite de crédito (flanco 28); nombre y cargo SOLO
+//       de personas de contacto que creó GUDS; correo de esas personas o del propio cliente (partner principal, sin padre;
+//       decisión del 30-sep, 21b). Se comprueba en Odoo antes de escribir.
 //     · stock.move / stock.move.line: cantidades entregadas de un documento de entrega asignado a un repartidor.
 //     · product.template: imagen y descripción de venta editadas en GUDS (decisión 15, migración 20r). La imagen solo se
 //       reemplaza: escribir image_1920 = false borraría su adjunto en Odoo y está bloqueado.
@@ -28,7 +29,9 @@ const ESCRITURA_PERMITIDA = {
   'product.template': new Set(['image_1920', 'description_sale']),
 };
 // Campos que solo se escriben en personas de contacto creadas por GUDS (type contact, con padre y marca "(GUDS)")
-const SOLO_CONTACTOS_GUDS = { 'res.partner': new Set(['name', 'function', 'email']) };
+const SOLO_CONTACTOS_GUDS = { 'res.partner': new Set(['name', 'function']) };
+// El correo, además, en el propio cliente (partner principal, sin padre), no en direcciones ni en contactos de Odoo
+const CORREO_CLIENTE_O_CONTACTO_GUDS = { 'res.partner': new Set(['email']) };
 const numeroNoNegativo = (campo) => (v) => (typeof v !== 'number' || !Number.isFinite(v) || v < 0 ? `${campo} debe ser un número mayor o igual a 0` : null);
 // Valores que no se aceptan aunque el campo esté permitido (lo que en Odoo equivale a borrar algo)
 const VALOR_PROHIBIDO = {
@@ -161,15 +164,28 @@ export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 
     }
     if (lang !== null && !RE_IDIOMA.test(lang)) throw new Error('escribir: idioma inválido');
     if (!uid) await autenticar();
-    // Nombre, cargo y correo: solo de personas de contacto que creó GUDS (nunca el nombre o el correo de un cliente)
-    if (Object.keys(vals).some((k) => SOLO_CONTACTOS_GUDS[model]?.has(k))) {
+    // Nombre y cargo: solo de personas de contacto que creó GUDS (nunca el nombre de un cliente). Correo: de esas personas
+    // o del propio cliente (21b)
+    const soloContacto = Object.keys(vals).some((k) => SOLO_CONTACTOS_GUDS[model]?.has(k));
+    const correo = Object.keys(vals).some((k) => CORREO_CLIENTE_O_CONTACTO_GUDS[model]?.has(k));
+    if (soloContacto || correo) {
       const regs = await rpc('object', 'execute_kw', [db, uid, apiKey, model, 'read', [ids, ['type', 'parent_id', 'comment']],
         { context: { active_test: false, allowed_company_ids: empresasPermitidas } }]);
+      const deGuds = (r) => r.type === 'contact' && Array.isArray(r.parent_id) && RE_MARCA_GUDS.test(String(r.comment || '').trim());
+      // customer_rank no sirve (clientes con facturas quedan en 0): basta con el partner principal (sin padre, tipo contacto);
+      // que sea un cliente de GUDS lo exige la cola (clientes.odoo_id)
+      const esCliente = (r) => !Array.isArray(r.parent_id) && (r.type === 'contact' || !r.type);
       const ajenos = ids.filter((id) => {
         const r = regs.find((x) => x.id === id);
-        return !r || r.type !== 'contact' || !Array.isArray(r.parent_id) || !RE_MARCA_GUDS.test(String(r.comment || '').trim());
+        if (!r) return true;
+        if (soloContacto) return !deGuds(r);
+        return !(deGuds(r) || esCliente(r));
       });
-      if (ajenos.length) throw new Error(`Bloqueado: nombre, cargo y correo solo se editan en personas de contacto creadas por GUDS (${ajenos.join(', ')})`);
+      if (ajenos.length) {
+        throw new Error(soloContacto
+          ? `Bloqueado: nombre y cargo solo se editan en personas de contacto creadas por GUDS (${ajenos.join(', ')})`
+          : `Bloqueado: el correo solo se edita en el cliente o en personas de contacto creadas por GUDS (${ajenos.join(', ')})`);
+      }
     }
     return rpc('object', 'execute_kw', [db, uid, apiKey, model, 'write', [ids, vals], { context: contextoEmpresa(empresaActiva, lang ? { lang } : {}) }]);
   }

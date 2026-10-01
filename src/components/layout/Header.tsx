@@ -2,6 +2,7 @@ import { Bell, User, LogOut, Settings, Rows3, Rows4 } from "lucide-react";
 import { useState } from "react";
 import { leerDensidad, guardarDensidad, type Densidad } from "@/lib/densidad";
 import { BuscadorGlobal } from "@/components/BuscadorGlobal";
+import { cn } from "@/lib/utils";
 import { useNotifications } from "@/contexts/NotificationsContext";
 import { useControlTower } from "@/contexts/ControlTowerContext";
 import { usePendingActions } from "@/hooks/use-pending-actions";
@@ -32,7 +33,10 @@ export function Header({ title }: HeaderProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { unreadCount } = useNotifications();
-  const { toggle: toggleTorre, open: torreAbierta } = useControlTower();
+  const { toggle: toggleTorre, open: torreAbierta, collapsed: torreColapsada } = useControlTower();
+  // La torre abierta (w-96) empuja el contenido: los breakpoints miden la ventana, no el ancho que queda, así que con ella
+  // abierta se ocultan el buscador (sigue Ctrl+K), el estado de Odoo y el nombre salvo en pantallas muy anchas.
+  const torreEmpuja = torreAbierta && !torreColapsada;
   const { total: totalPendientes } = usePendingActions();
   const totalBadge = unreadCount + totalPendientes;
 
@@ -50,17 +54,18 @@ export function Header({ title }: HeaderProps) {
 
   return (
     <header className="sticky top-0 z-30 flex h-12 items-center justify-between gap-4 border-b border-border bg-card px-4">
-      <h1 className="truncate text-base font-semibold text-foreground">{title}</h1>
+      {/* El título cede espacio (se trunca) antes que el estado de Odoo y la tasa BCV, que nunca pasan a dos líneas */}
+      <h1 className="min-w-[7rem] flex-1 truncate text-base font-semibold text-foreground" title={title}>{title}</h1>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
         {/* Buscador global (Ctrl/⌘ + K) */}
-        <BuscadorGlobal className="hidden md:flex" />
+        <BuscadorGlobal className={cn("hidden w-48 min-[1500px]:w-72", torreEmpuja ? "min-[1800px]:flex" : "md:flex")} />
 
         {/* Empresa activa */}
         <EmpresaSelector />
 
         {/* Sincronización con Odoo */}
-        <EstadoSyncOdoo className="hidden xl:flex" />
+        <EstadoSyncOdoo className={cn("hidden", torreEmpuja ? "min-[1800px]:flex" : "xl:flex")} />
 
         {/* Tasa BCV */}
         <TasaBcv />
@@ -93,7 +98,7 @@ export function Header({ title }: HeaderProps) {
                   {user ? getInitials(user.nombre, user.apellido) : 'U'}
                 </AvatarFallback>
               </Avatar>
-              <span className="hidden text-sm font-medium md:block">
+              <span className={cn("hidden text-sm font-medium", torreEmpuja ? "min-[1800px]:block" : "min-[1400px]:block")}>
                 {user?.nombre || 'Usuario'}
               </span>
             </Button>

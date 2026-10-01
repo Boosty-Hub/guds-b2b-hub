@@ -20,15 +20,21 @@ import { conSigno, sumarDias, type Movimiento } from "@/hooks/useFinanzasPortal"
 import { BotonPdfEstadoCuenta } from "@/components/estado-cuenta/BotonPdfEstadoCuenta";
 import { EnlacePublicoPanel } from "@/components/estado-cuenta/EnlacePublicoPanel";
 import { EnviarEstadoCuentaDialog } from "@/components/estado-cuenta/EnviarEstadoCuentaDialog";
-import { TIPO_DOCUMENTO, fechaHora, textoDias, textoPeriodo } from "@/components/estado-cuenta/formato";
-import type { EstadoCuentaCompleto } from "@/components/estado-cuenta/tipos";
+import { fechaHora, textoPeriodo } from "@/components/estado-cuenta/formato";
+import type { DocumentoAbierto, EstadoCuentaCompleto, FiltroDocumentos } from "@/components/estado-cuenta/tipos";
 import { rpcConReintento } from "@/components/estado-cuenta/reintento";
+import { FiltroDocumentosSelector, TablaDocumentos } from "@/components/estado-cuenta/TablaDocumentos";
+import { ComentariosFacturaDialog } from "@/components/estado-cuenta/ComentariosFacturaDialog";
+import { TarjetaMetricas } from "@/components/cuentas/metricas";
 
 // Estado de cuenta de un cliente en el admin (/admin/cuentas/:clienteId). El resumen, la antigüedad, los documentos con
 // saldo y el libro de movimientos salen de estado_cuenta_cliente (fase 20w): la MISMA función del servidor que el portal
 // del cliente y el enlace público (y la regla de Cuentas por Cobrar), con las notas de débito etiquetadas. Desde aquí se
 // descarga el PDF, se comparte el enlace público revocable y se envía por correo. Abajo, el detalle crudo de facturas,
 // notas, pagos, reintegros y retenciones.
+// 21b: abre en "Documentos" (el cruce por factura: base, IVA, abonos por tipo, saldo, qué falta y comentarios, con filtro
+// con saldo / todas / pagadas en el período) y los movimientos desde la factura abierta más antigua. Tarjeta interna de
+// cobranza (DSO, mora ponderada, tendencia, días de pago, a favor por aplicar).
 
 interface ClienteLite { id: string; nombre_negocio: string; codigo: string | null; rif: string | null; limite_credito: number; }
 interface FacturaRow {
@@ -46,9 +52,10 @@ interface RetencionRow { id: string; numero: string; tipo: string; estado: strin
 interface EnvioRow {
   id: string; creado_at: string; enviado_at: string | null; estado: "enviando" | "enviado" | "fallido"; destinatarios: string[];
   asunto: string; resend_id: string | null; error: string | null; enviado_por: string | null; adjunto_bytes: number | null;
+  lote_id?: string | null; entrega?: "entregado" | "rebotado" | "queja" | "retrasado" | null; entrega_detalle?: string | null;
 }
 
-type Rango = "30" | "90" | "anio" | "todo";
+type Rango = "abierta" | "30" | "90" | "anio" | "todo";
 
 const ESTADO_RETENCION: Record<string, { label: string; variant: "default" | "secondary" | "destructive" }> = {
   pendiente: { label: "Pendiente", variant: "secondary" },
@@ -70,8 +77,16 @@ const ESTADO_ENVIO: Record<EnvioRow["estado"], { label: string; variant: "defaul
 };
 
 const hoyCaracas = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" });
-const periodoDe = (rango: Rango, hoy: string) => {
+const ENTREGA: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  entregado: { label: "Entregado", variant: "outline" },
+  rebotado: { label: "Rebotó", variant: "destructive" },
+  queja: { label: "Marcado como spam", variant: "destructive" },
+  retrasado: { label: "Retrasado", variant: "secondary" },
+};
+
+const periodoDe = (rango: Rango, hoy: string): { desde: string | null; hasta: string | null; desdeAbierta?: boolean } => {
   switch (rango) {
+    case "abierta": return { desde: null, hasta: null, desdeAbierta: true };
     case "30": return { desde: sumarDias(hoy, -30), hasta: null };
     case "90": return { desde: sumarDias(hoy, -90), hasta: null };
     case "anio": return { desde: `${hoy.slice(0, 4)}-01-01`, hasta: null };
@@ -95,7 +110,10 @@ const CuentaDetalle = () => {
 
   // Estado de cuenta (misma fuente que el portal y el enlace público)
   const hoy = useMemo(hoyCaracas, []);
-  const [rango, setRango] = useState<Rango>("90");
+  const [rango, setRango] = useState<Rango>("abierta");
+  const [filtroDocs, setFiltroDocs] = useState<FiltroDocumentos>("abiertas");
+  const [tab, setTab] = useState("documentos");
+  const [comentando, setComentando] = useState<DocumentoAbierto | null>(null);
   const periodo = useMemo(() => periodoDe(rango, hoy), [rango, hoy]);
   const [ec, setEc] = useState<EstadoCuentaCompleto | null>(null);
   const [ecError, setEcError] = useState<string | null>(null);
@@ -144,14 +162,16 @@ const CuentaDetalle = () => {
   useEffect(() => {
     let activo = true;
     setEcCargando(true);
-    rpcConReintento(() => supabase.rpc("estado_cuenta_cliente", { p_cliente_id: clienteId, p_desde: periodo.desde, p_hasta: periodo.hasta })).then(({ data, error }) => {
+    rpcConReintento(() => supabase.rpc("estado_cuenta_cliente", {
+      p_cliente_id: clienteId, p_desde: periodo.desde, p_hasta: periodo.hasta, p_filtro: filtroDocs, p_desde_abierta: !!periodo.desdeAbierta,
+    })).then(({ data, error }) => {
       if (!activo) return;
       // Si falla un cambio de período se conserva lo que ya estaba en pantalla (con el aviso y "Reintentar")
       if (error) setEcError(error.message); else { setEc(data as EstadoCuentaCompleto); setEcError(null); }
       setEcCargando(false);
     });
     return () => { activo = false; };
-  }, [clienteId, periodo.desde, periodo.hasta, ecIntento]);
+  }, [clienteId, periodo.desde, periodo.hasta, periodo.desdeAbierta, filtroDocs, ecIntento]);
 
   const cargarEnvios = useCallback(async () => {
     const { data, error } = await supabase.rpc("envios_estado_cuenta", { p_cliente_id: clienteId });
@@ -172,7 +192,7 @@ const CuentaDetalle = () => {
   const ncPag = usePagination(notasCredito, 10);
   const pagPag = usePagination(pagos, 10);
   const movPag = usePagination(movs, 25);
-  const abiertosPag = usePagination(ec?.abiertos ?? [], 10);
+  const docsTabla = (filtroDocs === "abiertas" ? ec?.abiertos : ec?.documentos) ?? [];
 
   const facturasAplicadasPorPago = (pagoId: string) => pagoFacturas.filter((pf) => pf.pago_id === pagoId);
 
@@ -274,39 +294,7 @@ const CuentaDetalle = () => {
             </div>
           </div>
 
-          <div className="rounded-lg border border-border bg-card">
-            <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
-              <div className="rounded-lg bg-primary/10 p-1.5"><FileText className="h-4 w-4 text-primary" /></div>
-              <h2 className="text-[13px] font-semibold">Documentos con saldo ({ec?.abiertos?.length ?? 0})</h2>
-            </div>
-            {!ec?.abiertos?.length ? (
-              <p className="p-4 text-center text-sm text-muted-foreground">{ecCargando ? "Cargando…" : "No hay documentos con saldo."}</p>
-            ) : (
-              <Table data-testid="cd-abiertos">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nº</TableHead><TableHead>Tipo</TableHead><TableHead>Vence</TableHead><TableHead>Situación</TableHead>
-                    <TableHead className="text-right">Total</TableHead><TableHead className="text-right">Saldo</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {abiertosPag.pageItems.map((d, i) => (
-                    <TableRow key={d.factura_id ?? `${d.numero}-${i}`} data-tipo={d.tipo}>
-                      <TableCell className="font-mono text-sm">
-                        {d.factura_id ? <Link to={`/admin/facturas/${d.factura_id}`} className="text-primary hover:underline">{d.numero}</Link> : d.numero}
-                      </TableCell>
-                      <TableCell>{d.tipo === "factura" ? <span className="text-muted-foreground">Factura</span> : <Badge variant={d.tipo === "nota_debito" ? "outline" : "secondary"} className="whitespace-nowrap px-1.5 py-0 text-[11px]">{TIPO_DOCUMENTO[d.tipo]}</Badge>}</TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{fmtFecha(d.vence ?? d.emision)}</TableCell>
-                      <TableCell className={cn("whitespace-nowrap text-xs", d.saldo < 0 ? "text-success" : d.dias > 0 ? "text-destructive" : "text-muted-foreground")}>{textoDias(d)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{formatPrice(d.total)}</TableCell>
-                      <TableCell className={cn("text-right font-semibold tabular-nums", d.saldo < 0 ? "text-success" : "text-destructive")}>{conSigno(formatPrice, d.saldo)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-            {(ec?.abiertos?.length ?? 0) > 10 && <DataTablePagination pagination={abiertosPag} />}
-          </div>
+          <TarjetaMetricas clienteId={cliente.id} formatPrice={formatPrice} />
         </div>
 
         <div className="space-y-3 min-w-0">
@@ -327,8 +315,11 @@ const CuentaDetalle = () => {
                 {envios.map((e) => (
                   <li key={e.id} className="space-y-0.5 px-3 py-2 text-xs" data-testid="ec-envio">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">{fechaHora(e.enviado_at ?? e.creado_at)}</span>
-                      <Badge variant={ESTADO_ENVIO[e.estado].variant} className="px-1.5 py-0 text-[10px]">{ESTADO_ENVIO[e.estado].label}</Badge>
+                      <span className="text-muted-foreground">{fechaHora(e.enviado_at ?? e.creado_at)}{e.lote_id ? " · masivo" : ""}</span>
+                      <span className="flex gap-1">
+                        {e.entrega && <Badge variant={ENTREGA[e.entrega].variant} className="px-1.5 py-0 text-[10px]" title={e.entrega_detalle ?? undefined}>{ENTREGA[e.entrega].label}</Badge>}
+                        <Badge variant={ESTADO_ENVIO[e.estado].variant} className="px-1.5 py-0 text-[10px]">{ESTADO_ENVIO[e.estado].label}</Badge>
+                      </span>
                     </div>
                     <p className="truncate font-medium" title={e.destinatarios.join(", ")}>{e.destinatarios.join(", ")}</p>
                     <p className="truncate text-muted-foreground" title={e.error ?? undefined}>
@@ -342,9 +333,10 @@ const CuentaDetalle = () => {
         </div>
       </div>
 
-      <Tabs defaultValue="movimientos">
+      <Tabs value={tab} onValueChange={setTab}>
         <div className="-mx-1 overflow-x-auto px-1">
           <TabsList className="h-8">
+            <TabsTrigger value="documentos" className="h-6 text-xs" data-testid="tab-documentos">Documentos ({ec?.abiertos?.length ?? 0} con saldo)</TabsTrigger>
             <TabsTrigger value="movimientos" className="h-6 text-xs">Movimientos ({ec?.movimientos.length ?? 0})</TabsTrigger>
             <TabsTrigger value="facturas" className="h-6 text-xs">Facturas y ND ({facturasNormales.length})</TabsTrigger>
             <TabsTrigger value="nc" className="h-6 text-xs">Notas de crédito ({notasCredito.length})</TabsTrigger>
@@ -353,6 +345,34 @@ const CuentaDetalle = () => {
             {tabActivos[1] && <TabsTrigger value="retenciones" className="h-6 text-xs">Retenciones ({retenciones.length})</TabsTrigger>}
           </TabsList>
         </div>
+
+        {/* Cruce por documento (el mismo del enlace público, el PDF, el correo y el portal) */}
+        <TabsContent value="documentos" className="mt-2">
+          <div className="rounded-lg border border-border bg-card">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
+              <div className="flex items-center gap-2">
+                <div className="rounded-lg bg-primary/10 p-1.5"><FileText className="h-4 w-4 text-primary" /></div>
+                <h2 className="text-[13px] font-semibold">{filtroDocs === "abiertas" ? "Documentos con saldo" : filtroDocs === "todas" ? "Documentos emitidos en el período" : "Documentos pagados en el período"}</h2>
+                {filtroDocs !== "abiertas" && ec && <span className="text-xs text-muted-foreground">{textoPeriodo(ec)}</span>}
+                {ecCargando && ec && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+              </div>
+              <FiltroDocumentosSelector valor={filtroDocs} onCambio={setFiltroDocs} />
+            </div>
+            {!ec ? (
+              <p className="p-5 text-center text-sm text-muted-foreground">{ecCargando ? "Cargando…" : ecError ?? "Sin datos"}</p>
+            ) : (
+              <TablaDocumentos docs={docsTabla} modo="admin" formato={formatPrice} enlace={(d) => (d.factura_id ? `/admin/facturas/${d.factura_id}` : null)}
+                onComentar={(d) => setComentando(d)} totales={filtroDocs === "abiertas"} testId="cd-documentos"
+                vacio={<p className="p-5 text-center text-sm text-muted-foreground">{filtroDocs === "abiertas" ? "No hay documentos con saldo." : "No hay documentos en este período."}</p>} />
+            )}
+            {ec && filtroDocs !== "abiertas" && (
+              <p className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">El período es el de la pestaña Movimientos ({textoPeriodo(ec).toLowerCase()}).</p>
+            )}
+            <p className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+              «Qué falta» es una sugerencia automática (tolerancia {formatPrice(ec?.tolerancia ?? 0.05)}); los comentarios los escribe el equipo. Los visibles salen en el enlace, el PDF, el correo y el portal; los internos (candado) solo aquí.
+            </p>
+          </div>
+        </TabsContent>
 
         {/* Libro de movimientos con saldo corrido (el mismo del PDF y del enlace público) */}
         <TabsContent value="movimientos" className="mt-2">
@@ -365,7 +385,7 @@ const CuentaDetalle = () => {
                 {ecCargando && ec && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
               </div>
               <div className="flex rounded-md border border-border bg-background p-0.5" role="group" aria-label="Período">
-                {([["30", "30 días"], ["90", "90 días"], ["anio", "Este año"], ["todo", "Todo"]] as [Rango, string][]).map(([v, t]) => (
+                {([["abierta", "Desde la abierta más antigua"], ["30", "30 días"], ["90", "90 días"], ["anio", "Este año"], ["todo", "Todo"]] as [Rango, string][]).map(([v, t]) => (
                   <button key={v} type="button" onClick={() => setRango(v)} aria-pressed={rango === v}
                     className={cn("rounded px-2 py-0.5 text-xs", rango === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>{t}</button>
                 ))}
@@ -612,6 +632,8 @@ const CuentaDetalle = () => {
       </Tabs>
 
       <EnviarEstadoCuentaDialog open={correoAbierto} onOpenChange={setCorreoAbierto} clienteId={cliente.id} datos={ec} onEnviado={alEnviar} />
+      <ComentariosFacturaDialog facturaId={comentando?.factura_id ?? null} numero={comentando?.numero} open={!!comentando}
+        onOpenChange={(o) => { if (!o) setComentando(null); }} puedeEditar={puedeEditar} onCambio={() => setEcIntento((n) => n + 1)} />
     </MainLayout>
   );
 };

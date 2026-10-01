@@ -63,6 +63,7 @@ import {
 } from "@/components/datos/FiltrosLista";
 import { EtiquetaIva } from "@/components/portal/EtiquetaIva";
 import { textoIva } from "@/lib/iva";
+import { useEmpresa } from "@/contexts/EmpresaContext";
 
 interface ProductoConRelaciones extends Producto {
   categoria: Categoria | null;
@@ -91,7 +92,11 @@ const CostoOdoo = ({ productoId }: { productoId?: string }) => {
 
 const Productos = () => {
   const [productos, setProductos] = useState<ProductoConRelaciones[]>([]);
-  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [todasCategorias, setCategorias] = useState<(Categoria & { empresas?: string[] | null })[]>([]);
+  // Selector de categoría: solo las de la empresa activa (y las compartidas o sin productos) — fase 21a
+  const { empresaActiva } = useEmpresa();
+  const categorias = useMemo(() => todasCategorias.filter((c) => !empresaActiva || !(c.empresas ?? []).length || (c.empresas ?? []).includes(empresaActiva.id)),
+    [todasCategorias, empresaActiva]);
   const [empaques, setEmpaques] = useState<TipoEmpaque[]>([]);
   const [loading, setLoading] = useState(true);
   const [params] = useSearchParams();
@@ -135,7 +140,7 @@ const Productos = () => {
     setLoading(true);
     const [productosRes, categoriasRes, empaquesRes] = await Promise.all([
       supabase.from('productos').select('*, categoria:categorias(*), tipo_empaque:tipos_empaque(*), producto_empaques(*, tipo_empaque:tipos_empaque(*))').order('nombre'),
-      supabase.from('categorias').select('*').eq('activo', true).order('orden'),
+      supabase.from('categorias').select('*').order('orden'),
       supabase.from('tipos_empaque').select('*').eq('activo', true).order('orden')
     ]);
     
@@ -318,7 +323,7 @@ const Productos = () => {
   const handleBulkChangeCategory = async () => {
     const { error } = await supabase
       .from('productos')
-      .update({ categoria_id: bulkCategoryId || null })
+      .update({ categoria_id: bulkCategoryId && bulkCategoryId !== "_sin" ? bulkCategoryId : null })
       .in('id', selectedIds);
 
     if (error) {
@@ -869,7 +874,7 @@ const Productos = () => {
                 <SelectValue placeholder="Seleccionar categoría" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Sin Categoría</SelectItem>
+                <SelectItem value="_sin">Sin Categoría</SelectItem>
                 {categorias.map((cat) => (
                   <SelectItem key={cat.id} value={cat.id}>{cat.nombre}</SelectItem>
                 ))}

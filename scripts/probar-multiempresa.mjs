@@ -738,8 +738,8 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
     como({ empresa: guds.id }, contacto({ calle: 'Av. Principal 1', ciudad: 'Caracas', estado: 'Narnia' })));
   await caso('Clientes→Odoo: dirección incompleta se rechaza (ciudad obligatoria)', 'La ciudad es obligatoria',
     como({ empresa: guds.id }, contacto({ calle: 'Av. Principal 1', estado: 'Miranda' })));
-  await caso('Clientes→Odoo: campos fuera de teléfonos/dirección se rechazan', 'Campos no permitidos: email',
-    como({ empresa: guds.id }, contacto({ email: 'otro@correo.com' })));
+  await caso('Clientes→Odoo: campos fuera de teléfonos/dirección/correo se rechazan', 'Campos no permitidos: rif',
+    como({ empresa: guds.id }, contacto({ rif: 'J-12345678-9' })));
   await caso('Clientes→Odoo: una dirección nueva necesita nombre', 'necesita un nombre',
     como({ empresa: guds.id }, direccion(null, { calle: 'Av. Principal 1', ciudad: 'Caracas', estado: 'Miranda' })));
   const dirAjena = (await sql(`select id from cliente_direcciones where cliente_id <> '${cliGuds}' and odoo_id is not null limit 1`))[0]?.id;
@@ -2582,6 +2582,333 @@ await caso('Sync Odoo: anónimo no ve el estado', 'permission denied',
       from public.buscar_global('4145550132', 5) where tipo = 'contacto') t`));
 }
 
+
+// ── Fase 21d: bandeja de calidad y cuadre (tareas, cierre automático, corrección asistida, normalización) ──
+{
+  const G = { empresa: guds.id };
+  const claims21 = JSON.stringify({ sub: admin, role: 'authenticated' }).replace(/'/g, "''");
+  const hdr21 = (e) => JSON.stringify({ 'x-empresa-id': e }).replace(/'/g, "''");
+  const admin21 = (e = guds.id) => `perform set_config('request.jwt.claims', '${claims21}', true); perform set_config('request.headers', '${hdr21(e)}', true);`;
+  const PG = { rol: 'postgres', uid: null };
+  const t1 = async (w) => (await sql(`select id, entidad_id from calidad_tareas where ${w} limit 1`))[0];
+  const tGuds = await t1(`empresa_id = '${guds.id}' and estado = 'pendiente' and tipo = 'cobro_sin_aplicar'`);
+  const tQrt = await t1(`empresa_id = '${qrt.id}' and estado = 'pendiente'`);
+  const tEc = await t1(`empresa_id = '${guds.id}' and estado = 'pendiente' and tipo = 'cliente_estado_extranjero'`);
+  const tCiudad = await t1(`empresa_id = '${guds.id}' and estado = 'pendiente' and tipo = 'cliente_sin_ciudad'`);
+  const fila = (q) => `select row_to_json(t)::text from (${q}) t`;
+
+  await caso('Calidad 21d: admin en GUDS ve solo tareas de GUDS y compartidas', (r) => r.n > 0 && r.otras === 0 && r.compartidas > 0,
+    como(G, fila(`select count(*) n, count(*) filter (where empresa_id = '${qrt.id}') otras, count(*) filter (where empresa_id is null) compartidas from calidad_tareas`)));
+  await caso('Calidad 21d: en "Ambas" se ven las dos empresas', (r) => r.empresas === 2,
+    como({ empresa: 'todas' }, fila(`select count(distinct empresa_id) empresas from calidad_tareas`)));
+  await caso('Calidad 21d: anónimo no lee tareas ni historial', (r, e) => !!e || (r?.n === 0 && r?.h === 0),
+    como({ rol: 'anon', uid: null }, fila(`select (select count(*) from calidad_tareas) n, (select count(*) from calidad_tareas_historial) h`)));
+  if (vendGuds) {
+    await caso('Calidad 21d: un vendedor (sin permiso de reportes) no ve tareas ni responsables', (r) => r?.n === 0 && r?.resp === 0,
+      como({ uid: vendGuds, ...G }, fila(`select (select count(*) from calidad_tareas) n, (select count(*) from public.calidad_responsables()) resp`)));
+  }
+  await caso('Calidad 21d: nadie escribe directo en la tabla (solo por las funciones)', (r, e) => /permission denied/i.test(e ?? ''),
+    como(G, `with x as (update calidad_tareas set comentario = 'x' where id = '${tGuds.id}' returning id) select row_to_json(x)::text from x`));
+  await caso('Calidad 21d: las funciones internas no se ejecutan por la API', (r, e) => /permission denied/i.test(e ?? ''),
+    como(G, fila(`select public.calidad_sincronizar_tareas() x`)));
+  await caso('Calidad 21d: en "Ambas" no se trabaja una tarea', 'Modo consulta',
+    como({ empresa: 'todas' }, fila(`select public.calidad_actualizar_tareas(array['${tGuds.id}']::uuid[], null, null, false, 'nota') n`)));
+  await caso('Calidad 21d: desde GUDS no se toca una tarea de Quirutec', 'No se encontraron',
+    como(G, fila(`select public.calidad_actualizar_tareas(array['${tQrt.id}']::uuid[], null, null, false, 'nota') n`)));
+  await caso('Calidad 21d: "explicado" exige comentario', 'escribe por qué',
+    como(G, fila(`select public.calidad_actualizar_tareas(array['${tGuds.id}']::uuid[], 'explicado', null, false, null) n`)));
+  await caso('Calidad 21d: "corregido" no se marca a mano', 'lo marca la sincronización',
+    como(G, fila(`select public.calidad_actualizar_tareas(array['${tGuds.id}']::uuid[], 'corregido', null, false, 'x') n`)));
+  await caso('Calidad 21d: explicar con comentario y responsable deja estado e historial', (r) => r?.estado === 'explicado' && r?.comentario === 'Revisado en prueba' && r?.resp && r?.hist === 2,
+    como({ ...PG, previo: `${admin21()} perform public.calidad_actualizar_tareas(array['${tGuds.id}']::uuid[], 'explicado', (select id from usuarios where auth_id = '${admin}'), false, 'Revisado en prueba');` },
+      fila(`select estado, comentario, responsable_id is not null resp, (select count(*) from calidad_tareas_historial h where h.tarea_id = '${tGuds.id}' and h.accion in ('explicada', 'responsable') and h.at > now() - interval '1 minute') hist from calidad_tareas where id = '${tGuds.id}'`)));
+
+  // Cierre automático: la "sincronización" trae la ciudad → la tarea se cierra sola; si vuelve a faltar, se reabre
+  await caso('Calidad 21d: la tarea se cierra sola cuando el dato llega corregido', (r) => r?.estado === 'corregido' && r?.auto === true && r?.hist === 1,
+    como({ ...PG, previo: `update clientes set ciudad = 'Ciudad Prueba 21d' where id = '${tCiudad.entidad_id}'; perform public.calidad_sincronizar_tareas(array['cliente_sin_ciudad']);` },
+      fila(`select estado, cierre_automatico auto, (select count(*) from calidad_tareas_historial h where h.tarea_id = '${tCiudad.id}' and h.accion = 'corregida' and h.at > now() - interval '1 minute') hist from calidad_tareas where id = '${tCiudad.id}'`)));
+  await caso('Calidad 21d: si el problema vuelve, la tarea se reabre', (r) => r?.estado === 'pendiente' && r?.hist === 1,
+    como({ ...PG, previo: `update clientes set ciudad = 'Ciudad Prueba 21d' where id = '${tCiudad.entidad_id}'; perform public.calidad_sincronizar_tareas(array['cliente_sin_ciudad']);
+      update clientes set ciudad = null where id = '${tCiudad.entidad_id}'; perform public.calidad_sincronizar_tareas(array['cliente_sin_ciudad']);` },
+      fila(`select estado, (select count(*) from calidad_tareas_historial h where h.tarea_id = '${tCiudad.id}' and h.accion = 'reabierta' and h.at > now() - interval '1 minute') hist from calidad_tareas where id = '${tCiudad.id}'`)));
+  await caso('Calidad 21d: revisar dos veces no duplica tareas', (r) => r?.dup === 0,
+    como({ ...PG, previo: `perform public.calidad_sincronizar_tareas(); perform public.calidad_sincronizar_tareas();` },
+      fila(`select count(*) dup from (select tipo, clave, empresa_id from calidad_tareas group by 1, 2, 3 having count(*) > 1) x`)));
+
+  // Normalización de presentación: la base reconoce el estado, pero el dato guardado no cambia (ni al revisar)
+  const huella = (await sql(`select md5(string_agg(coalesce(estado, '∅') || coalesce(ciudad, '∅'), ',' order by id)) h from clientes`))[0].h;
+  await caso('Calidad 21d: normalizar "Sucre. (VE)" no cambia el dato guardado', (r) => r?.ve === 'Sucre' && r?.bol === 'Bolívar' && r?.h === huella && r?.punto > 0,
+    como({ ...PG, previo: `perform public.calidad_sincronizar_tareas();` },
+      fila(`select public.estado_ve('Sucre. (VE)') ve, public.estado_ve('Bolivar. (VE)') bol, (select md5(string_agg(coalesce(estado, '∅') || coalesce(ciudad, '∅'), ',' order by id)) from clientes) h,
+        (select count(*) from clientes where estado = 'Sucre. (VE)') punto`)));
+
+  // Corrección asistida [escribe en Odoo]: encola por la cola de 19w (en rollback: pg_net no envía nada)
+  if (tEc) {
+    await caso('Calidad 21d: corrección asistida encola la dirección a Odoo y liga la tarea', (r) => r?.estado_dest === 'Bolívar' && r?.tipo === 'cliente_contacto' && r?.ligada === true && r?.hist === 1,
+      como({ ...PG, previo: `${admin21()} perform public.calidad_corregir_direccion('${tEc.id}', jsonb_build_object('calle', (select coalesce(calle, direccion) from clientes where id = '${tEc.entidad_id}'), 'ciudad', 'Puerto Ordaz', 'estado', 'Bolívar'));` },
+        fila(`select o.tipo, o.datos -> 'campos' ->> 'estado' estado_dest, t.escritura_id = o.id ligada,
+          (select count(*) from calidad_tareas_historial h where h.tarea_id = t.id and h.accion = 'enviada_odoo' and h.at > now() - interval '1 minute') hist
+          from calidad_tareas t join odoo_escrituras o on o.id = t.escritura_id where t.id = '${tEc.id}'`)));
+    await caso('Calidad 21d: en "Ambas" no se corrige hacia Odoo', 'empresa',
+      como({ empresa: 'todas' }, fila(`select public.calidad_corregir_direccion('${tEc.id}', '{"calle":"Calle prueba","ciudad":"Puerto Ordaz","estado":"Bolívar"}'::jsonb) x`)));
+    await caso('Calidad 21d: un estado de otro país no se acepta en la corrección', 'estado de Venezuela',
+      como(G, fila(`select public.calidad_corregir_direccion('${tEc.id}', '{"calle":"Calle prueba","ciudad":"Puerto Ordaz","estado":"Pichincha"}'::jsonb) x`)));
+  }
+  await caso('Calidad 21d: lo contable no tiene corrección asistida', 'no tiene corrección asistida',
+    como(G, fila(`select public.calidad_corregir_direccion('${tGuds.id}', '{"calle":"Calle prueba","ciudad":"Caracas","estado":"Miranda"}'::jsonb) x`)));
+  await caso('Calidad 21d: el cuadre sigue cuadrando y trae el avance de la revisión', (r) => r?.docs > 0 && r?.cuadran > 0 && r?.rev > 0,
+    como(G, fila(`select (x->'totales'->>'documentos')::int docs, (x->'totales'->>'cuadran')::int cuadran, jsonb_array_length(x->'revision') rev from public.reporte_cuadre_profit_odoo() x`)));
+  await caso('Calidad 21d: ocultar la sección exige empresa activa', 'Modo consulta',
+    como({ empresa: 'todas' }, fila(`select public.calidad_seccion(true) x`)));
+  await caso('Calidad 21d: ocultar en GUDS no la oculta en Quirutec', (r) => r?.guds === true && r?.qrt === false,
+    como({ empresa: qrt.id, previo: `${admin21()} perform public.calidad_seccion(true);` },
+      fila(`select (select (public.calidad_seccion() ->> 'oculta')::boolean) qrt, (select (valor::jsonb ? '${guds.id}') from configuracion where clave = 'calidad_seccion_oculta') guds`)));
+}
+
+// ── Fase 21c: planificación de pagos (planes por empresa y permiso, aprobación, cierre automático con la sincronización) ──
+{
+  const G = { empresa: guds.id };
+  const cl = (uid = admin) => JSON.stringify({ sub: uid, role: 'authenticated' }).replace(/'/g, "''");
+  const hdr = (e) => JSON.stringify({ 'x-empresa-id': e }).replace(/'/g, "''");
+  const comoUsr = (e = guds.id, uid = admin) => `perform set_config('request.jwt.claims', '${cl(uid)}', true); perform set_config('request.headers', '${hdr(e)}', true);`;
+  const sinSesion = `perform set_config('request.jwt.claims', '', true); perform set_config('request.headers', '{}', true);`;
+  const [fa, fb] = await sql(`select id, saldo_usd::float s from v_cxp_planificacion where empresa_id = '${guds.id}' and plan_id is null and saldo_usd > 50 order by saldo_usd limit 2`);
+  const [fq] = await sql(`select id from v_cxp_planificacion where empresa_id = '${qrt.id}' limit 1`);
+  const it = (f, m) => `[{"factura_proveedor_id":"${f}","monto_usd":${m}}]`;
+  const nuevoPlan = (items, e = guds.id, uid = admin) => `${comoUsr(e, uid)} perform public.guardar_plan_pago(null, current_date, current_date, 'prueba 21c', '${items}', 'reemplazar');`;
+  const elPlan = `(select id from planes_pago where notas = 'prueba 21c' order by created_at desc limit 1)`;
+  const aprobar = `${comoUsr()} perform public.cambiar_estado_plan_pago(${elPlan}, 'aprobar');`;
+  // La sincronización (sin sesión) trae un pago de Odoo aplicado a la factura y luego llama a conciliar_planes_pago
+  const pagoOdoo = (f, monto) => `${sinSesion} insert into factura_proveedor_aplicaciones (empresa_id, odoo_id, factura_proveedor_id, tipo, monto_usd, fecha)
+    values ('${guds.id}', 999921001, '${f}', 'pago', ${monto}, current_date); perform public.conciliar_planes_pago('${guds.id}');`;
+  const estado = `select row_to_json(t)::text from (select p.estado, p.cierre, i.estado item, i.monto_pagado_usd::float pagado, i.diferencia_usd::float dif, i.motivo_diferencia motivo
+    from planes_pago p join planes_pago_items i on i.plan_id = p.id where p.notas = 'prueba 21c' order by p.created_at desc limit 1) t`;
+  const rol = (nombre) => `perform set_config('guds.bypass_guard', 'on', true); update usuarios set rol_id = (select id from roles where nombre = '${nombre}') where auth_id = '${admin}'; perform set_config('guds.bypass_guard', 'off', true);`;
+
+  if (fa && fb && fq) {
+    await caso('Planes 21c: en GUDS se crea un plan GUDS-PP-… en borrador y el ítem hereda la empresa', (r) => /^GUDS-PP-\d{5}$/.test(r?.numero) && r?.estado === 'borrador' && r?.item_empresa === guds.id,
+      como({ ...G, previo: nuevoPlan(it(fa.id, 10)) }, `select row_to_json(t)::text from (select p.numero, p.estado, i.empresa_id item_empresa from planes_pago p join planes_pago_items i on i.plan_id = p.id where p.notas = 'prueba 21c') t`));
+    await caso('Planes 21c: en «Ambas empresas» no se crean planes', 'Modo consulta',
+      como({ empresa: 'todas' }, `select public.guardar_plan_pago(null, current_date, current_date, 'prueba 21c', '${it(fa.id, 10)}', 'reemplazar')::text`));
+    await caso('Planes 21c: un plan de GUDS no acepta facturas de Quirutec', 'pertenece a otra empresa',
+      como(G, `select public.guardar_plan_pago(null, current_date, current_date, 'prueba 21c', '${it(fq.id, 10)}', 'reemplazar')::text`));
+    await caso('Planes 21c: el monto no puede superar el saldo de la factura', 'supera su saldo',
+      como(G, `select public.guardar_plan_pago(null, current_date, current_date, 'prueba 21c', '${it(fa.id, Math.ceil(fa.s + 5))}', 'reemplazar')::text`));
+    await caso('Planes 21c: una factura no está en dos planes activos a la vez', 'ya está en el plan',
+      como({ ...G, previo: nuevoPlan(it(fa.id, 10)) }, `select public.guardar_plan_pago(null, current_date, current_date, 'otro 21c', '${it(fa.id, 5)}', 'reemplazar')::text`));
+    await caso('Planes 21c: desde Quirutec no se ven los planes de GUDS (RLS por empresa)', (r) => r?.n === 0,
+      como({ empresa: qrt.id, previo: nuevoPlan(it(fa.id, 10)) }, `select row_to_json(t)::text from (select count(*)::int n from planes_pago where notas = 'prueba 21c') t`));
+    await caso('Planes 21c: nadie escribe directo en planes_pago (solo por las funciones)', (r, e) => !!e && /permission denied|row-level security/i.test(e),
+      como(G, `with x as (insert into planes_pago (empresa_id, numero, fecha_corte, fecha_pago) values ('${guds.id}', 'X-21c', current_date, current_date) returning id) select row_to_json(x)::text from x`));
+    await caso('Planes 21c: anónimo no lee planes ni la vista de planificación', (r, e) => !!e && /permission denied/i.test(e),
+      como({ rol: 'anon', uid: null }, `select ((select count(*) from planes_pago) + (select count(*) from v_cxp_planificacion))::text`));
+    await caso('Planes 21c: rol sin permiso (Almacén) no ve planes ni facturas a planificar', (r) => r?.planes === 0 && r?.facturas === 0,
+      como({ ...G, previo: `${nuevoPlan(it(fa.id, 10))} ${rol('Almacén')}` }, `select row_to_json(t)::text from (select (select count(*)::int from planes_pago) planes, (select count(*)::int from v_cxp_planificacion) facturas) t`));
+    await caso('Planes 21c: rol sin permiso (Almacén) no crea planes', 'No tienes permiso',
+      como({ ...G, previo: rol('Almacén') }, `select public.guardar_plan_pago(null, current_date, current_date, 'prueba 21c', '${it(fa.id, 10)}', 'reemplazar')::text`));
+    await caso('Planes 21c: el Contador planifica pero no aprueba', 'No tienes permiso para aprobar',
+      como({ ...G, previo: `${rol('Contador')} ${nuevoPlan(it(fa.id, 10))}` }, `select public.cambiar_estado_plan_pago(${elPlan}, 'aprobar')::text`));
+    await caso('Planes 21c: el aprobador aprueba (borrador → aprobado)', (r) => r?.estado === 'aprobado' && r?.item === 'pendiente',
+      como({ ...G, previo: `${nuevoPlan(it(fa.id, 10))} ${aprobar}` }, estado));
+    await caso('Planes 21c: un plan aprobado ya no se modifica', 'Solo se modifica un plan en borrador',
+      como({ ...G, previo: `${nuevoPlan(it(fa.id, 10))} ${aprobar}` }, `select public.guardar_plan_pago(${elPlan}, null, null, null, '${it(fa.id, 8)}', 'reemplazar')::text`));
+    await caso('Planes 21c: cierre automático — el pago de Odoo igual a lo planificado cierra el ítem y el plan', (r) => r?.estado === 'pagado' && r?.cierre === 'automatico' && r?.item === 'pagado' && r?.pagado === 10,
+      como({ ...G, previo: `${nuevoPlan(it(fa.id, 10))} ${aprobar} ${pagoOdoo(fa.id, 10)}` }, estado));
+    await caso('Planes 21c: pago menor a lo planificado con saldo pendiente queda parcial (el plan sigue aprobado)', (r) => r?.estado === 'aprobado' && r?.item === 'parcial' && r?.dif === -6,
+      como({ ...G, previo: `${nuevoPlan(it(fa.id, 10))} ${aprobar} ${pagoOdoo(fa.id, 4)}` }, estado));
+    await caso('Planes 21c: pago mayor a lo planificado se señala como diferencia', (r) => r?.estado === 'pagado' && r?.item === 'diferencia' && r?.dif === 5 && /más/.test(r?.motivo ?? ''),
+      como({ ...G, previo: `${nuevoPlan(it(fa.id, 10))} ${aprobar} ${pagoOdoo(fa.id, 15)}` }, estado));
+    await caso('Planes 21c: factura saldada sin pago (p. ej. nota de crédito) se señala como diferencia', (r) => r?.item === 'diferencia' && /sin pago/.test(r?.motivo ?? ''),
+      como({ ...G, previo: `${nuevoPlan(it(fa.id, 10))} ${aprobar} ${sinSesion} update facturas_proveedor set saldo_usd = 0 where id = '${fa.id}'; perform public.conciliar_planes_pago('${guds.id}');` }, estado));
+    await caso('Planes 21c: con pagos registrados no se devuelve a borrador', 'ya tiene pagos registrados',
+      como({ ...G, previo: `${nuevoPlan(it(fa.id, 10))} ${aprobar} ${pagoOdoo(fa.id, 4)}` }, `select public.cambiar_estado_plan_pago(${elPlan}, 'devolver')::text`));
+    await caso('Planes 21c: un pago anterior a la fecha del plan no lo cierra', (r) => r?.item === 'pendiente',
+      como({ ...G, previo: `${nuevoPlan(it(fa.id, 10))} ${aprobar} ${sinSesion} insert into factura_proveedor_aplicaciones (empresa_id, odoo_id, factura_proveedor_id, tipo, monto_usd, fecha)
+        values ('${guds.id}', 999921002, '${fa.id}', 'pago', 10, current_date - 3); perform public.conciliar_planes_pago('${guds.id}');` }, estado));
+    await caso('Planes 21c: anular libera la factura para otro plan', (r) => /^[0-9a-f-]{36}$/.test(r?.id ?? ''),
+      como({ ...G, previo: `${nuevoPlan(it(fa.id, 10))} ${comoUsr()} perform public.cambiar_estado_plan_pago(${elPlan}, 'anular', 'prueba');` },
+        `select row_to_json(t)::text from (select public.guardar_plan_pago(null, current_date, current_date, 'otro 21c', '${it(fa.id, 5)}', 'reemplazar') id) t`));
+  }
+  // Vista de planificación = facturas de proveedor con saldo (mismo total por empresa)
+  await caso('Planes 21c: la vista de planificación suma lo mismo que las facturas con saldo', (r) => r?.ok === true,
+    como(G, `select row_to_json(t)::text from (select (select round(sum(saldo_usd), 2) from v_cxp_planificacion) = (select round(sum(saldo_usd), 2) from facturas_proveedor
+      where estado = 'posted' and tipo = 'factura' and saldo_usd > 0.009) ok) t`));
+  await caso('Planes 21c: día de caja — sin permiso de configuración no se cambia', 'No tienes permiso',
+    como({ ...G, previo: rol('Almacén') }, `select public.fijar_dia_caja('${guds.id}', 2::smallint)::text`));
+  await caso('Planes 21c: día de caja — el admin lo cambia para cualquier empresa permitida', (r) => r?.dia === 2,
+    como({ ...G, previo: `${comoUsr()} perform public.fijar_dia_caja('${qrt.id}', 2::smallint);` }, `select row_to_json(t)::text from (select dia_semana dia from dias_caja where empresa_id = '${qrt.id}') t`));
+}
+
+
+// ── Fase 21a: categorías, vendedores y empleados por empresa (plan de revisión del 30-sep) ──
+{
+  const G21 = { empresa: guds.id }, Q21 = { empresa: qrt.id };
+  // Cliente del portal temporal (en rollback): auth + usuario cliente ligado a un cliente de la empresa
+  const portal21 = (n, clienteId) => `
+    insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+      values ('00000000-0000-4000-a000-0000000021${n}', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'portal.21a.${n}@guds.test', '', now(), '{}', '{}', now(), now());
+    insert into usuarios (auth_id, email, nombre, role, cliente_id, activo) values ('00000000-0000-4000-a000-0000000021${n}', 'portal.21a.${n}@guds.test', 'Portal 21a', 'cliente', '${clienteId}', true);`;
+  const cliPortalG = (await sql(`select id from clientes where empresa_id = '${guds.id}' and activo and not es_empleado order by codigo limit 1`))[0].id;
+  const cliPortalQ = (await sql(`select id from clientes where empresa_id = '${qrt.id}' and activo and not es_empleado order by codigo limit 1`))[0].id;
+  const catQ = (await sql(`select array_agg(id) ids from categorias where empresas = array['${qrt.id}']::uuid[]`))[0].ids ?? [];
+  const catG = (await sql(`select array_agg(id) ids from categorias where empresas = array['${guds.id}']::uuid[]`))[0].ids ?? [];
+  const catNoVenta = (await sql(`select array_agg(id) ids from categorias where not de_venta`))[0].ids ?? [];
+  const arr = (ids) => `array[${ids.map((x) => `'${x}'`).join(',') || `'00000000-0000-0000-0000-000000000000'`}]::uuid[]`;
+  const catsPortal = (lista) => `select row_to_json(t)::text from (select count(*) n,
+      count(*) filter (where (e ->> 'id')::uuid = any (${arr(catQ)})) de_quirutec, count(*) filter (where (e ->> 'id')::uuid = any (${arr(catG)})) de_guds,
+      count(*) filter (where (e ->> 'id')::uuid = any (${arr(catNoVenta)})) no_venta,
+      bool_or(e ->> 'grupo' is not null and e ->> 'etiqueta' not like '%/%') con_grupo
+    from jsonb_array_elements(public.categorias_portal()) e) t`;
+  const uidPortal = (n) => `00000000-0000-4000-a000-0000000021${n}`;
+
+  await caso('Categorías 21a: en el portal de GUDS no aparece ninguna categoría solo de Quirutec ni las que no son de venta', (r) => r?.n > 0 && r.de_quirutec === 0 && r.no_venta === 0 && r.de_guds > 0,
+    como({ ...G21, uid: uidPortal('01'), previo: portal21('01', cliPortalG) }, catsPortal()));
+  await caso('Categorías 21a: en el portal de Quirutec, solo las suyas, con el padre como grupo ("A / B" → grupo A)', (r) => r?.n > 0 && r.de_guds === 0 && r.de_quirutec > 0 && r.con_grupo === true,
+    como({ ...Q21, uid: uidPortal('02'), previo: portal21('02', cliPortalQ) }, catsPortal()));
+  const catQVisible = (await sql(`select c.id from categorias c where c.empresas = array['${qrt.id}']::uuid[] and c.activo
+    and exists (select 1 from productos p where p.categoria_id = c.id and p.activo and p.vendible and not coalesce(p.oculto_tienda, false)) limit 1`))[0]?.id;
+  await caso('Categorías 21a: el interruptor manual (activo = false) la saca del portal', (r) => r?.antes === 1 && r?.oculta === 0,
+    como({ ...Q21, uid: uidPortal('03'), previo: `${portal21('03', cliPortalQ)} update categorias set activo = false where id = '${catQVisible}';` },
+      `select row_to_json(t)::text from (select count(*) filter (where (e ->> 'id')::uuid = '${catQVisible}') oculta,
+        (select count(*) from categorias where id = '${catQVisible}' and de_venta) antes from jsonb_array_elements(public.categorias_portal()) e) t`));
+  const prodQ = (await sql(`select id, categoria_id from productos where empresa_id = '${qrt.id}' and categoria_id is not null limit 1`))[0];
+  const catSoloG = (await sql(`select id from categorias where empresas = array['${guds.id}']::uuid[] limit 1`))[0]?.id;
+  await caso('Categorías 21a: al mover un producto de Quirutec a una categoría de GUDS, la categoría pasa a compartida', (r) => r?.n === 2,
+    como({ rol: 'postgres', uid: null, previo: `update productos set categoria_id = '${catSoloG}' where id = '${prodQ.id}';` },
+      `select row_to_json(t)::text from (select cardinality(empresas) n from categorias where id = '${catSoloG}') t`));
+
+  // Vendedores por empresa
+  const vendQ = (await sql(`select id from usuarios where role = 'vendedor' and not es_prueba and public.vendedor_empresas(id) = array['${qrt.id}']::uuid[] limit 1`))[0].id;
+  const vendG = (await sql(`select id from usuarios where role = 'vendedor' and not es_prueba and public.vendedor_empresas(id) = array['${guds.id}']::uuid[] limit 1`))[0].id;
+  const listaV = `select row_to_json(t)::text from (select count(*) n, bool_or(id = '${vendQ}') de_quirutec, bool_or(id = '${vendG}') de_guds,
+      count(*) filter (where es_prueba) prueba from public.vendedores_empresa()) t`;
+  await caso('Vendedores 21a: en GUDS no sale un vendedor que solo tiene clientes en Quirutec (ni los de prueba)', (r) => r?.n > 0 && r.de_quirutec === false && r.de_guds === true && r.prueba === 0,
+    como(G21, listaV));
+  await caso('Vendedores 21a: en Quirutec no sale un vendedor que solo tiene clientes en GUDS', (r) => r?.n > 0 && r.de_quirutec === true && r.de_guds === false,
+    como(Q21, listaV));
+  await caso('Vendedores 21a: un vendedor no ve la lista de vendedores', 'No tienes permiso',
+    como({ ...G21, uid: (await sql(`select auth_id from usuarios where id = '${vendG}'`))[0].auth_id }, `select count(*)::text from public.vendedores_empresa()`));
+  await caso('Vendedores 21a: metas solo con vendedores de la empresa (sin QA)', (r) => r?.otro === 0 && r?.prueba === 0 && r?.n > 0,
+    como(G21, `select row_to_json(t)::text from (select count(*) n, count(*) filter (where (v ->> 'id')::uuid = '${vendQ}' and (v ->> 'venta')::numeric = 0 and coalesce((v ->> 'meta')::numeric, 0) = 0) otro,
+      count(*) filter (where (v ->> 'email') ~ '@gudsqa\\.com$|^qa\\.') prueba
+      from jsonb_array_elements(public.metas_vendedores(extract(year from now())::int, extract(month from now())::int) -> 'vendedores') v) t`));
+
+  // Correo real y acceso (0.4)
+  await caso('Vendedores 21a: el admin carga el correo real, genera la clave temporal y pide cambio', (r) => r?.temporal === 'si' && r?.perfil === 'real.21a@ejemplo.com' && r?.cambio === true && r?.auth === 'real.21a@ejemplo.com',
+    como({ ...G21, previo: `perform set_config('request.jwt.claims', ${lit(JSON.stringify({ sub: admin, role: 'authenticated' }))}, true);
+      perform set_config('guds.t21', (select case when password_temporal is not null then 'si' else 'no' end from public.actualizar_acceso_vendedor('${vendG}', 'Real.21a@Ejemplo.com')), true);
+      perform set_config('guds.t21_auth', (select a.email from auth.users a join usuarios u on u.auth_id = a.id where u.id = '${vendG}'), true);` },
+      `select row_to_json(t)::text from (select current_setting('guds.t21', true) temporal, current_setting('guds.t21_auth', true) auth,
+        email perfil, debe_cambiar_clave cambio from usuarios where id = '${vendG}') t`));
+  await caso('Vendedores 21a: no acepta un correo de relleno @guds.test', 'correo real',
+    como(G21, `select email from public.actualizar_acceso_vendedor('${vendG}', 'otro.nombre@guds.test')`));
+  await caso('Vendedores 21a: no acepta el correo de otro usuario', 'Ya existe un usuario',
+    como(G21, `select email from public.actualizar_acceso_vendedor('${vendG}', (select email from usuarios where role = 'admin' and email not like '%@guds.test' limit 1))`));
+  await caso('Vendedores 21a: un vendedor no puede cambiar el acceso de otro', 'No tienes permiso',
+    como({ ...G21, uid: (await sql(`select auth_id from usuarios where id = '${vendG}'`))[0].auth_id }, `select email from public.actualizar_acceso_vendedor('${vendQ}', 'x.21a@ejemplo.com')`));
+  await caso('Usuarios 21a: un usuario nuevo qa./e2e. o @gudsqa.com queda marcado de prueba', (r) => r?.a === true && r?.b === true && r?.c === false,
+    como({ rol: 'postgres', uid: null }, `select row_to_json(t)::text from (select public.es_correo_prueba('e2e.filtros.admin@guds.test') a,
+      public.es_correo_prueba('test.vendedor@gudsqa.com') b, public.es_correo_prueba('adrian.gonzalez@guds.test') c) t`));
+
+  // Empleados
+  const vendEmpleado = (await sql(`select u.auth_id, u.id from usuarios u where exists (select 1 from clientes c where c.vendedor_asignado_id = u.id and c.es_empleado and c.activo) and u.role = 'vendedor' and u.auth_id is not null limit 1`))[0];
+  if (vendEmpleado) {
+    await caso('Empleados 21a: no cuentan en la cartera del portal del vendedor', (r) => r?.empleados === 0,
+      como({ uid: vendEmpleado.auth_id, empresa: 'todas' }, `select row_to_json(t)::text from (select count(*) filter (where (x ->> 'id')::uuid in (select id from clientes where es_empleado)) empleados
+        from jsonb_array_elements(public.cartera_vendedor() -> 'clientes') x) t`));
+    await caso('Empleados 21a: no cuentan en los clientes del vendedor en Vendedores', (r) => r?.clientes === r?.esperado,
+      como({ empresa: 'todas' }, `select row_to_json(t)::text from (select v.clientes, (select count(*)::int from clientes c where c.vendedor_asignado_id = '${vendEmpleado.id}' and c.activo and not c.es_empleado) esperado
+        from public.vendedores_empresa(true) v where v.id = '${vendEmpleado.id}') t`));
+  }
+  await caso('Empleados 21a: las compras de personal salen como canal "Personal" en el cubo de ventas', (r) => r?.personal > 0,
+    como(G21, `select row_to_json(t)::text from (select coalesce(sum(venta_usd) filter (where k1 = 'Personal'), 0) personal
+      from public.reporte_ventas_cubo('2025-01-01', current_date, array['canal'], 'odoo') where nivel = 1) t`));
+}
+
+
+// ── Fase 21b: estado de cuenta a profundidad (cruce por factura, comentarios, correo, envío masivo) y métricas de cobranza ──
+{
+  const G = { empresa: guds.id };
+  const doc = (await sql(`select f.id, f.cliente_id from facturas f join clientes c on c.id = f.cliente_id
+    where f.estado = 'posted' and f.tipo = 'factura' and f.saldo_usd > 1 and f.empresa_id = '${guds.id}' and c.empresa_id = '${guds.id}' limit 1`))[0];
+  const TOKEN = 'Prueba21bPrueba21bPrueba21bPrueba21bPrueba2';   // 43 caracteres url-safe
+  const previoComentarios = `insert into factura_comentarios (factura_id, empresa_id, texto, visible_cliente) values
+      ('${doc.id}', '${guds.id}', 'TXT21B_VISIBLE esto es el IGTF', true), ('${doc.id}', '${guds.id}', 'TXT21B_INTERNO cliente difícil', false);
+    insert into estado_cuenta_enlaces (cliente_id, empresa_id, token) values ('${doc.cliente_id}', '${guds.id}', '${TOKEN}')
+      on conflict do nothing;
+    update estado_cuenta_enlaces set revocado_at = now(), revocado_motivo = 'reemplazado' where cliente_id = '${doc.cliente_id}' and empresa_id = '${guds.id}' and token <> '${TOKEN}' and revocado_at is null;`;
+  const ANON = { rol: 'anon', uid: null };
+
+  await caso('Estado de cuenta 21b: el enlace público muestra el comentario visible y NO el interno', (r) => r?.visible === true && r?.interno === false && r?.autor === false,
+    como({ ...ANON, previo: previoComentarios }, `select row_to_json(t)::text from (select v::text like '%TXT21B_VISIBLE%' visible, v::text like '%TXT21B_INTERNO%' interno,
+      (v -> 'abiertos') @? '$[*].comentarios[*].autor' autor from (select public.estado_cuenta_publico('${TOKEN}') v) x) t`));
+  await caso('Estado de cuenta 21b: el enlace público no trae ids internos (documentos, cobros ni comentarios)', (r) => r?.ids === false,
+    como({ ...ANON, previo: previoComentarios }, `select row_to_json(t)::text from (select ((v -> 'abiertos') @? '$[*].factura_id' or (v -> 'abiertos') @? '$[*].comentarios[*].id'
+      or (v -> 'abiertos') @? '$[*].abonos[*].pago_id') ids from (select public.estado_cuenta_publico('${TOKEN}') v) x) t`));
+  await caso('Estado de cuenta 21b: el admin ve el comentario interno con su marca y autor', (r) => r?.interno === true && r?.marca === true,
+    como({ ...G, previo: previoComentarios }, `select row_to_json(t)::text from (select v::text like '%TXT21B_INTERNO%' interno,
+      (v -> 'abiertos') @? '$[*].comentarios[*] ? (@.visible == false)' marca from (select public.estado_cuenta_cliente('${doc.cliente_id}') v) x) t`));
+  await caso('Estado de cuenta 21b: anónimo no lee la tabla de comentarios', (r, err) => /permission denied/.test(err || ''),
+    como(ANON, `select row_to_json(t)::text from (select count(*) n from factura_comentarios) t`));
+  if (cliUser) {
+    await caso('Estado de cuenta 21b: un cliente del portal no lee comentarios de la tabla (ni internos ni de otros)', (r) => r?.n === 0,
+      como({ uid: cliUser, previo: previoComentarios }, `select row_to_json(t)::text from (select count(*) n from factura_comentarios) t`));
+  }
+  await caso('Estado de cuenta 21b: comentar y editar deja historial (1 vigente, 1 reemplazado, con autor)', (r) => r?.vigentes === 1 && r?.reemplazados === 1 && r?.autor === true,
+    como({ ...G, previo: `perform set_config('request.jwt.claims', '${claimsAdmin}', true); perform set_config('request.headers', '${hdr(guds.id)}', true);
+      perform public.comentar_factura('${doc.id}', 'TXT21B_V1', true, (select id from factura_comentarios where texto = 'nada'));
+      perform public.comentar_factura('${doc.id}', 'TXT21B_V2', false, (select id from factura_comentarios where texto = 'TXT21B_V1'));` },
+      `select row_to_json(t)::text from (select count(*) filter (where retirado_at is null and texto like 'TXT21B_V%') vigentes,
+        count(*) filter (where retirado_motivo = 'reemplazado' and texto = 'TXT21B_V1') reemplazados, bool_and(autor_id is not null) autor
+        from factura_comentarios where factura_id = '${doc.id}' and texto like 'TXT21B_V%') t`));
+  await caso('Estado de cuenta 21b: en "Ambas" no se comenta', 'Modo consulta',
+    como({ empresa: 'todas' }, `select row_to_json(t)::text from (select public.comentar_factura('${doc.id}', 'x') r) t`));
+  if (vendGuds) {
+    await caso('Estado de cuenta 21b: un vendedor no escribe comentarios', 'No tienes permiso',
+      como({ uid: vendGuds, ...G }, `select row_to_json(t)::text from (select public.comentar_factura('${doc.id}', 'x') r) t`));
+    await caso('Métricas 21b: el vendedor solo ve métricas de su cartera', (r) => r?.ajenos === 0,
+      como({ uid: vendGuds, ...G }, `select row_to_json(t)::text from (select count(*) filter (where (m ->> 'cliente_id')::uuid not in (select public.mis_clientes_vendedor())) ajenos
+        from jsonb_array_elements(public.metricas_cobranza() -> 'clientes') m) t`));
+  }
+  await caso('Métricas 21b: anónimo no ve métricas de cobranza', (r, err) => /permission denied|No autenticado/.test(err || ''),
+    como(ANON, `select row_to_json(t)::text from (select public.metricas_cobranza() v) t`));
+  await caso('Métricas 21b: la deuda de las métricas cuadra con Cuentas (Σ saldo > 0 de facturas visibles)', (r) => Math.abs(r?.dif ?? 99) < 0.05,
+    como(G, `select row_to_json(t)::text from (select round((select sum((m ->> 'deuda')::numeric) from jsonb_array_elements(public.metricas_cobranza() -> 'clientes') m)
+      - (select sum(saldo_usd) from facturas where estado = 'posted' and saldo_usd > 0.009), 2) dif) t`));
+  await caso('Métricas 21b: la tendencia reconstruida coincide con el saldo actual (total − aplicado hasta hoy = saldo)', (r) => r?.malos === 0,
+    como({ rol: 'postgres' }, `select row_to_json(t)::text from (select count(*) malos from facturas f
+      left join (select factura_id, sum(monto_usd) s from factura_aplicaciones group by 1) a on a.factura_id = f.id
+      where f.estado = 'posted' and f.tipo = 'factura' and abs(f.total_usd - coalesce(a.s, 0) - f.saldo_usd) > 0.02) t`));
+
+  // Cruce por documento en una muestra de 40 clientes de las dos empresas (como postgres, la función interna)
+  const docsCuadre = `with cl as (select distinct f.cliente_id, f.empresa_id from facturas f where f.estado = 'posted' and abs(f.saldo_usd) > 0.009 and f.empresa_id is not null
+      order by 1 limit 40), d as (select x from cl, jsonb_array_elements(public.estado_cuenta_documentos(cl.cliente_id, cl.empresa_id, 'abiertas', null, null, true)) x)
+    select row_to_json(t)::text from (select count(*) docs,
+      count(*) filter (where abs((x ->> 'abonado')::numeric - (abs((x ->> 'total')::numeric) - abs((x ->> 'saldo')::numeric))) > 0.02) abonos_mal,
+      count(*) filter (where abs((x ->> 'base')::numeric + (x ->> 'iva')::numeric - (x ->> 'total')::numeric) > 0.02) base_iva_mal,
+      count(*) filter (where abs((select coalesce(sum((a ->> 'monto')::numeric), 0) from jsonb_array_elements(x -> 'abonos') a) - (x ->> 'abonado')::numeric) > 0.02) detalle_mal
+      from d) t`;
+  await caso('Estado de cuenta 21b: por documento, abonos = total − saldo, base + IVA = total y el desglose suma lo abonado (40 clientes)',
+    (r) => r?.docs > 0 && r?.abonos_mal === 0 && r?.base_iva_mal === 0 && r?.detalle_mal === 0, como({ rol: 'postgres' }, docsCuadre));
+
+  // Envíos y correo
+  await caso('Correo 21b: un usuario no registra envíos directo (solo la función edge)', (r, err) => /permission denied/.test(err || ''),
+    como(G, `select row_to_json(t)::text from (select public.registrar_envio_estado_cuenta(null, '${doc.cliente_id}', '${guds.id}', null, array['a@b.co'], 'x', null, null, null, null) r) t`));
+  await caso('Correo 21b: un usuario no marca entregas ni rebotes (solo el webhook firmado)', (r, err) => /permission denied/.test(err || ''),
+    como(G, `select row_to_json(t)::text from (select public.registrar_entrega_envio_estado_cuenta('x', 'email.bounced', null) r) t`));
+  await caso('Correo 21b: un envío masivo admite hasta 200 clientes', 'Máximo 200',
+    como(G, `select row_to_json(t)::text from (select public.crear_lote_estado_cuenta((select array_agg(id) from (select id from clientes where empresa_id = '${guds.id}' limit 201) x)) r) t`));
+  await caso('Correo 21b: un envío del lote no se registra para un cliente fuera del lote', 'no corresponde',
+    como({ rol: 'postgres', previo: `insert into estado_cuenta_lotes (id, empresa_id, creado_por, clientes) values ('${'2'.repeat(8)}-2222-2222-2222-${'2'.repeat(12)}', '${guds.id}', null, array['${doc.cliente_id}'::uuid]);` },
+      `select row_to_json(t)::text from (select public.registrar_envio_estado_cuenta(null, '${cliGuds === doc.cliente_id ? cliQrt : cliGuds}', '${guds.id}', null, array['a@resend.dev'], 'x', null, null, null, '${'2'.repeat(8)}-2222-2222-2222-${'2'.repeat(12)}') r) t`));
+  await caso('Correo 21b: el correo del cliente se valida antes de ir a Odoo', 'formato válido',
+    como({ ...G, previo: '' }, `select row_to_json(t)::text from (select public.actualizar_contacto_cliente('${cliOdoo}', '{"email": "no-es-correo"}') r) t`));
+  await caso('Correo 21b: el correo del cliente se encola hacia Odoo (cliente_contacto, en minúsculas)', (r) => r?.email === 'cuentas.prueba21b@resend.dev',
+    como({ ...G, previo: `perform set_config('request.jwt.claims', '${claimsAdmin}', true); perform set_config('request.headers', '${hdr(guds.id)}', true);
+      perform public.actualizar_contacto_cliente('${cliOdoo}', '{"email": " Cuentas.Prueba21b@Resend.dev "}');` },
+      `select row_to_json(t)::text from (select datos -> 'campos' ->> 'email' email from odoo_escrituras
+        where tipo = 'cliente_contacto' and referencia_id = '${cliOdoo}' order by created_at desc limit 1) t`));
+}
 
 // ── Rendimiento de RLS (18r): las funciones constantes deben ir envueltas en (select …) para evaluarse una vez ──
 {

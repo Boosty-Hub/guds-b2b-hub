@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,10 @@ import {
   FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, contadorFiltrado,
   type DefFiltro, type OpcionPrueba,
 } from "@/components/datos/FiltrosLista";
+import { usePermissions } from "@/contexts/PermissionsContext";
+import { PlanificacionPagos } from "@/components/planificacion-pagos/PlanificacionPagos";
+import { PlanesPagoLista } from "@/components/planificacion-pagos/PlanesPagoLista";
+import { ESTADO_PLAN } from "@/components/planificacion-pagos/comun";
 
 interface FacturaProv {
   id: string; numero: string; referencia: string | null; tipo: string; es_nota_debito: boolean; proveedor_id: string | null;
@@ -58,8 +62,8 @@ const FACTURACION: Record<string, string> = { invoiced: "Facturada", "to invoice
 const ESTADO_PAGO_PROV: Record<string, string> = { verificado: "Verificado", pendiente: "Pendiente", rechazado: "Rechazado" };
 const ESTADO_RET: Record<string, string> = { confirmado: "Confirmado", borrador: "Borrador", anulado: "Anulado" };
 // Pestañas (en la URL, ?tab=) y filtros propios de cada una: se limpian al cambiar de pestaña; proveedor y empresa se conservan
-const PESTANAS_CXP = ["pagar", "facturas", "pagos", "ordenes", "retenciones"] as const;
-const CLAVES_PESTANA = ["antiguedad", "estado", "tipo", "vence", "fecha", "banco", "moneda", "recepcion", "facturacion", "periodo"];
+const PESTANAS_CXP = ["pagar", "planificacion", "planes", "facturas", "pagos", "ordenes", "retenciones"] as const;
+const CLAVES_PESTANA = ["antiguedad", "estado", "tipo", "vence", "fecha", "banco", "moneda", "recepcion", "facturacion", "periodo", "corte", "grupo", "plan"];
 const hoyISO = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" });
 const fmtFecha = (d?: string | null) => (d ? new Date(d.length === 10 ? `${d}T00:00:00` : d).toLocaleDateString("es-VE") : "—");
 
@@ -72,6 +76,13 @@ const CuentasPorPagar = () => {
   const [retenciones, setRetenciones] = useState<RetEmitida[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const { can } = usePermissions();
+  const verPlanes = can("planificacion_pagos", "ver");
+  // Conteos que informan las pestañas de planificación (filas visibles / total)
+  const [conteoPlan, setConteoPlan] = useState<[number, number]>([0, 0]);
+  const [conteoPlanes, setConteoPlanes] = useState<[number, number]>([0, 0]);
+  const alContarPlan = useCallback((n: number, t: number) => setConteoPlan([n, t]), []);
+  const alContarPlanes = useCallback((n: number, t: number) => setConteoPlanes([n, t]), []);
 
   useEffect(() => {
     (async () => {
@@ -119,7 +130,8 @@ const CuentasPorPagar = () => {
 
   // ---- Pestaña y filtros (en la URL) ----
   const [params, setParams] = useSearchParams();
-  const tabCxp = (PESTANAS_CXP as readonly string[]).includes(params.get("tab") ?? "") ? params.get("tab")! : "pagar";
+  const tabPedida = (PESTANAS_CXP as readonly string[]).includes(params.get("tab") ?? "") ? params.get("tab")! : "pagar";
+  const tabCxp = (tabPedida === "planificacion" || tabPedida === "planes") && !verPlanes ? "pagar" : tabPedida;
   const setTabCxp = (t: string) => setParams((p) => {
     const n = new URLSearchParams(p);
     for (const k of CLAVES_PESTANA) n.delete(k);
@@ -159,11 +171,13 @@ const CuentasPorPagar = () => {
     for (const x of todos) if (x.id && !vistos.has(x.id)) vistos.set(x.id, x.nombre || "—");
     return opcionesDe([...vistos.entries()], ([id]) => id, ([, nombre]) => nombre).map((o) => ({ ...o, n: undefined }));
   }, [facturas, pagos, ordenes, retenciones]);
-  const filasEmpresa: { empresa_id: string | null }[] = tabCxp === "pagar" ? acreedores : tabCxp === "facturas" ? facturas : tabCxp === "pagos" ? pagos : tabCxp === "ordenes" ? ordenes : retenciones;
+  const filasEmpresa: { empresa_id: string | null }[] = tabCxp === "pagar" ? acreedores : tabCxp === "facturas" || tabCxp === "planificacion" || tabCxp === "planes" ? facturas : tabCxp === "pagos" ? pagos : tabCxp === "ordenes" ? ordenes : retenciones;
   const filtroEmpresa = useFiltroEmpresa(filasEmpresa);
   const defProveedor: DefFiltro = { clave: "proveedor", etiqueta: "Proveedor", todos: "Todos los proveedores", principal: true, opciones: opcionesProveedor };
   const defsPestana: Record<string, (DefFiltro | null)[]> = {
     pagar: [{ clave: "antiguedad", etiqueta: "Antigüedad", todos: "Todas", principal: true, opciones: opcionesPrueba(acreedores, pruebasAntiguedad) }],
+    planificacion: [],
+    planes: [{ clave: "estado", etiqueta: "Estado", todos: "Todos", principal: true, opciones: Object.entries(ESTADO_PLAN).map(([valor, e]) => ({ valor, etiqueta: e.label })) }],
     facturas: [
       { clave: "estado", etiqueta: "Estado", principal: true, opciones: Object.entries(ESTADO_PAGO).map(([valor, e]) => ({ valor, etiqueta: e.label, n: facturas.filter((f) => f.estado_pago === valor).length })) },
       { clave: "vence", etiqueta: "Vencimiento", todos: "Todas", principal: true, opciones: opcionesPrueba(facturas, pruebasVence) },
@@ -219,7 +233,7 @@ const CuentasPorPagar = () => {
   const pgPag = usePagination(pagFiltrados, 50, f.firma);
   const pgOc = usePagination(ocFiltradas, 50, f.firma);
   const pgRet = usePagination(retFiltradas, 50, f.firma);
-  const enPestana = { pagar: [acrOrdenados.length, acreedores.length], facturas: [facFiltradas.length, facturas.length], pagos: [pagFiltrados.length, pagos.length],
+  const enPestana = { pagar: [acrOrdenados.length, acreedores.length], planificacion: conteoPlan, planes: conteoPlanes, facturas: [facFiltradas.length, facturas.length], pagos: [pagFiltrados.length, pagos.length],
     ordenes: [ocFiltradas.length, ordenes.length], retenciones: [retFiltradas.length, retenciones.length] }[tabCxp] ?? [0, 0];
 
   const cols = useColumnas("cxp-antiguedad", [{ etiqueta: "Proveedor", fija: true }, { etiqueta: "Facturas" }, ...["Por vencer", "1–30 días", "31–60 días", "61–90 días", "+90 días"].map((etiqueta) => ({ etiqueta })), { etiqueta: "Saldo" }, { etiqueta: "A favor" }, { etiqueta: "Neto" }]);
@@ -239,6 +253,8 @@ const CuentasPorPagar = () => {
           pestanas={
             <TabsList className="h-auto flex-wrap justify-start">
               <TabsTrigger value="pagar">Por pagar ({acreedores.length})</TabsTrigger>
+              {verPlanes && <TabsTrigger value="planificacion">Planificación</TabsTrigger>}
+              {verPlanes && <TabsTrigger value="planes">Planes de pago</TabsTrigger>}
               <TabsTrigger value="facturas">Facturas de proveedor ({facturas.length})</TabsTrigger>
               <TabsTrigger value="pagos">Pagos ({pagos.length})</TabsTrigger>
               <TabsTrigger value="ordenes">Órdenes de compra ({ordenes.length})</TabsTrigger>
@@ -304,6 +320,17 @@ const CuentasPorPagar = () => {
               <DataTablePagination pagination={pgAcr} />
             </div>
           </TabsContent>
+
+          {verPlanes && tabCxp === "planificacion" && (
+            <TabsContent value="planificacion">
+              <PlanificacionPagos q={q} proveedor={f.v("proveedor") ?? null} empresa={filtroEmpresa ? f.v("empresa") ?? null : null} onConteo={alContarPlan} />
+            </TabsContent>
+          )}
+          {verPlanes && tabCxp === "planes" && (
+            <TabsContent value="planes">
+              <PlanesPagoLista q={q} estado={f.v("estado") ?? null} empresa={filtroEmpresa ? f.v("empresa") ?? null : null} onConteo={alContarPlanes} />
+            </TabsContent>
+          )}
 
           <TabsContent value="facturas">
             <div className="rounded-lg border border-border bg-card">

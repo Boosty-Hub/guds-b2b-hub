@@ -121,14 +121,18 @@ export function AccesoPortalDialog({ open, onOpenChange, contacto, usuarioId, on
 }
 
 /** Muestra las credenciales una sola vez (la contraseña solo si la generó GUDS) y un mensaje listo para enviar. */
-export function CredencialesDialog({ credenciales, onClose }: { credenciales: Credenciales | null; onClose: () => void }) {
+export function CredencialesDialog({ credenciales, onClose, destino = "portal de clientes de GUDS", quien = "el contacto" }: {
+  credenciales: Credenciales | null; onClose: () => void;
+  /** A qué entra (texto del mensaje para enviar). */ destino?: string;
+  /** Quién recibe el acceso (texto de la ayuda). */ quien?: string;
+}) {
   const { toast } = useToast();
   const copiar = async (texto: string) => {
     try { await navigator.clipboard.writeText(texto); toast({ title: "Copiado" }); } catch { toast({ title: "No se pudo copiar", variant: "destructive" }); }
   };
   const c = credenciales;
   const mensaje = c
-    ? `Hola, ya tienes acceso al portal de clientes de GUDS.\nEntra en ${window.location.origin}/login\nUsuario: ${c.email}\n`
+    ? `Hola, ya tienes acceso al ${destino}.\nEntra en ${window.location.origin}/login\nUsuario: ${c.email}\n`
       + (c.password ? `Contraseña temporal: ${c.password}\nAl entrar se te pedirá crear tu propia contraseña.` : "Tu contraseña te la envío por separado.")
     : "";
   return (
@@ -138,7 +142,7 @@ export function CredencialesDialog({ credenciales, onClose }: { credenciales: Cr
           <DialogTitle>{c?.titulo}</DialogTitle>
           <DialogDescription>
             {c?.password
-              ? "Compártela por un canal privado. Solo se muestra ahora; al entrar, el contacto deberá crear su propia contraseña."
+              ? `Compártela por un canal privado. Solo se muestra ahora; al entrar, ${quien} deberá crear su propia contraseña.`
               : "Listo. La contraseña que estableciste no se guarda ni se vuelve a mostrar: compártela por un canal privado."}
           </DialogDescription>
         </DialogHeader>

@@ -34,7 +34,31 @@ export interface ClienteEstadoCuenta {
 
 export type TipoDocumentoAbierto = "factura" | "nota_debito" | "nota_credito";
 
-/** Documento con saldo (lo que se debe, o una nota de crédito a favor). */
+/** Un abono aplicado a un documento (fase 21b): cobro, nota de crédito, retención, reintegro u otro ajuste. */
+export interface AbonoDocumento {
+  fecha: string | null;
+  /** pago · nota_credito (NC usada en esta factura) · aplicada (esta NC usada en otro documento) · retencion · reintegro · otro */
+  tipo: "pago" | "nota_credito" | "aplicada" | "retencion" | "reintegro" | "otro" | string;
+  documento: string | null;
+  documento_tipo?: TipoDocumentoAbierto | null;
+  /** Retenciones: iva | municipal */
+  clase?: string | null;
+  referencia?: string | null;
+  banco?: string | null;
+  metodo?: string | null;
+  moneda?: "USD" | "VES" | null;
+  /** Lo aplicado en la moneda del cobro (Bs) a la tasa del cobro. */
+  monto_moneda?: number | null;
+  monto: number;
+}
+
+/** Sugerencia automática de GUDS sobre por qué queda saldo (no es un comentario de una persona). */
+export interface QueFalta { codigo: string; texto: string; esperado: number | null }
+
+/** Comentario de una persona sobre una factura (los internos y el autor solo en el admin). */
+export interface ComentarioDocumento { id?: string; texto: string; fecha: string; visible?: boolean; autor?: string | null }
+
+/** Documento con saldo (lo que se debe, o una nota de crédito a favor), con el cruce de la fase 21b. */
 export interface DocumentoAbierto {
   factura_id?: string;
   numero: string;
@@ -46,7 +70,27 @@ export interface DocumentoAbierto {
   /** Días desde el vencimiento (o la emisión): > 0 vencido, ≤ 0 por vencer. */
   dias: number;
   estado: string | null;
+  moneda?: "USD" | "VES";
+  /** Bs por USD del documento (solo documentos en bolívares). */
+  tasa?: number | null;
+  base?: number;
+  iva?: number;
+  base_bs?: number | null;
+  iva_bs?: number | null;
+  total_bs?: number | null;
+  saldo_bs?: number | null;
+  pagos?: number;
+  nc?: number;
+  retenciones?: number;
+  otros?: number;
+  abonado?: number;
+  ultimo_abono?: string | null;
+  que_falta?: QueFalta | null;
+  comentarios?: ComentarioDocumento[];
+  abonos?: AbonoDocumento[];
 }
+
+export type FiltroDocumentos = "abiertas" | "todas" | "pagadas";
 
 export type MovimientoEstadoCuenta = Omit<Movimiento, "factura_id"> & { factura_id?: string | null };
 
@@ -56,6 +100,12 @@ export interface EstadoCuentaCompleto extends Omit<EstadoCuenta, "empresa" | "cl
   resumen: EstadoCuenta["resumen"] & { notas_debito_abiertas?: number; notas_debito_saldo?: number };
   movimientos: MovimientoEstadoCuenta[];
   abiertos?: DocumentoAbierto[];
+  /** Documentos según el filtro (todas las emitidas o las pagadas en el período); null con el filtro 'abiertas'. */
+  documentos?: DocumentoAbierto[] | null;
+  filtro?: FiltroDocumentos;
+  /** Emisión de la factura abierta más antigua (inicio por defecto de los movimientos). */
+  desde_abierta?: string | null;
+  tolerancia?: number;
   /** Notas de débito y de crédito de 0,00 USD (diferencial cambiario en bolívares) que no se listan en el período. */
   ajustes_cambiarios?: number;
   /** Solo en el enlace público. */

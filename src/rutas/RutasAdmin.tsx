@@ -45,6 +45,7 @@ const Proveedores = pagina(["proveedores"], () => import("../pages/Proveedores")
 const ProveedorDetalle = pagina(["proveedores/:proveedorId"], () => import("../pages/ProveedorDetalle"));
 const CuentasPorPagar = pagina(["cuentas-por-pagar"], () => import("../pages/CuentasPorPagar"));
 const FacturaProveedorDetalle = pagina(["facturas-proveedor/:facturaId"], () => import("../pages/FacturaProveedorDetalle"));
+const PlanPagoDetalle = pagina(["planes-pago/:planId"], () => import("../pages/PlanPagoDetalle"));
 const Conciliacion = pagina(["conciliacion"], () => import("../pages/Conciliacion"));
 const Cupones = pagina(["cupones"], () => import("../pages/Cupones"));
 const Banners = pagina(["banners"], () => import("../pages/Banners"));
@@ -65,6 +66,8 @@ const ConfigPlantillas = pagina(["configuracion/plantillas"], () => import("../p
 const ConfigMoneda = pagina(["configuracion/moneda"], () => import("../pages/configuracion/ConfigMoneda"));
 const ConfigEmpaques = pagina(["configuracion/empaques"], () => import("../pages/configuracion/ConfigEmpaques"));
 const ConfigIconos = pagina(["configuracion/iconos"], () => import("../pages/configuracion/ConfigIconos"));
+const ConfigDiasCaja = pagina(["configuracion/dias-caja"], () => import("../pages/configuracion/ConfigDiasCaja"));
+const ConfigVerificacionOdoo = pagina(["configuracion/verificacion-odoo"], () => import("../pages/configuracion/ConfigVerificacionOdoo"));
 const NotFound = lazy(() => import("../pages/NotFound"));
 
 // Precarga la pantalla de la URL actual (la más específica si hay varias)
@@ -78,6 +81,7 @@ const NotFound = lazy(() => import("../pages/NotFound"));
 export default function RutasAdmin() {
   return (
     <Routes>
+      <Route index element={<Navigate to="/admin/dashboard" replace />} />
       <Route path="dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><Index /></ProtectedRoute>} />
       <Route path="reportes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="reportes"><Reportes /></ProtectedRoute>} />
       <Route path="ordenes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="ordenes"><Ordenes /></ProtectedRoute>} />
@@ -110,6 +114,7 @@ export default function RutasAdmin() {
       <Route path="proveedores/:proveedorId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="compras"><ProveedorDetalle /></ProtectedRoute>} />
       <Route path="cuentas-por-pagar" element={<ProtectedRoute allowedRoles={["admin"]} modulo="compras"><CuentasPorPagar /></ProtectedRoute>} />
       <Route path="facturas-proveedor/:facturaId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="compras"><FacturaProveedorDetalle /></ProtectedRoute>} />
+      <Route path="planes-pago/:planId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="planificacion_pagos"><PlanPagoDetalle /></ProtectedRoute>} />
       <Route path="conciliacion" element={<ProtectedRoute allowedRoles={["admin"]} modulo="bancos"><Conciliacion /></ProtectedRoute>} />
       <Route path="cupones" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cupones"><Cupones /></ProtectedRoute>} />
       <Route path="banners" element={<ProtectedRoute allowedRoles={["admin"]} modulo="banners"><Banners /></ProtectedRoute>} />
@@ -132,6 +137,8 @@ export default function RutasAdmin() {
       <Route path="configuracion/moneda" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigMoneda /></ProtectedRoute>} />
       <Route path="configuracion/empaques" element={<ProtectedRoute allowedRoles={["admin"]} modulo="productos"><ConfigEmpaques /></ProtectedRoute>} />
       <Route path="configuracion/iconos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigIconos /></ProtectedRoute>} />
+      <Route path="configuracion/dias-caja" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigDiasCaja /></ProtectedRoute>} />
+      <Route path="configuracion/verificacion-odoo" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigVerificacionOdoo /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

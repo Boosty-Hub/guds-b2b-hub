@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ChevronDown, Loader2, PackageSearch, RotateCcw, Search, SlidersHorizontal, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -209,17 +209,24 @@ const PortalCatalogo = () => {
             <nav className="mt-6" aria-label="Categorías">
               <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Categorías</p>
               <ul className="max-h-[calc(100vh-18rem)] space-y-0.5 overflow-y-auto pr-1">
-                {[{ id: null as string | null, etiqueta: "Todos", nombre: "Todos", n: nTodos }, ...(categorias ?? [])].map((c) => {
+                {[{ id: null as string | null, etiqueta: "Todos", nombre: "Todos", n: nTodos, grupo: null as string | null | undefined }, ...(categorias ?? [])].map((c, i, lista) => {
                   const activa = (c.id ?? null) === (categoria ?? null);
+                  // "MATERIAL MEDICO QUIRURGICO / GUANTES": el padre como encabezado y la categoría como subcategoría
+                  const nuevoGrupo = !!c.grupo && c.grupo !== lista[i - 1]?.grupo;
                   return (
-                    <li key={c.id ?? "todas"}>
+                    <Fragment key={c.id ?? "todas"}>
+                    {nuevoGrupo && (
+                      <li className="px-2 pb-0.5 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80" data-grupo-categoria>{c.grupo}</li>
+                    )}
+                    <li>
                       <button type="button" onClick={() => cambiarParams({ cat: c.id })} aria-pressed={activa} title={c.nombre}
-                        className={cn("flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                        className={cn("flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors", c.grupo && "pl-4",
                           activa ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground")}>
                         <span className="truncate">{c.etiqueta}</span>
                         {c.n != null && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{c.n}</span>}
                       </button>
                     </li>
+                    </Fragment>
                   );
                 })}
               </ul>

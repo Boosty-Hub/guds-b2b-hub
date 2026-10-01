@@ -10,23 +10,27 @@ import { Antiguedad, conceptoMovimiento } from "@/components/portal/finanzas";
 import { condicionPagoTexto, sumarDias, type Movimiento } from "@/hooks/useFinanzasPortal";
 import { BotonPdfEstadoCuenta } from "@/components/estado-cuenta/BotonPdfEstadoCuenta";
 import {
-  TIPO_DOCUMENTO, colorEmpresa, direccionTexto, fechaLarga, fmtUsd, textoDias, textoPeriodo, urlEstadoCuenta,
+  colorEmpresa, direccionTexto, fechaLarga, fmtUsd, textoPeriodo, urlEstadoCuenta,
 } from "@/components/estado-cuenta/formato";
-import type { DocumentoAbierto, EmpresaEstadoCuenta, EstadoCuentaCompleto, MovimientoEstadoCuenta } from "@/components/estado-cuenta/tipos";
+import type { EmpresaEstadoCuenta, EstadoCuentaCompleto, FiltroDocumentos, MovimientoEstadoCuenta } from "@/components/estado-cuenta/tipos";
 import { rpcConReintento } from "@/components/estado-cuenta/reintento";
+import { FiltroDocumentosSelector, TablaDocumentos } from "@/components/estado-cuenta/TablaDocumentos";
 
 // Estado de cuenta público (fase 20w): lo que ve el cliente con el enlace que le comparte GUDS, sin iniciar sesión.
 // La función estado_cuenta_publico valida el token (revocable al instante) y devuelve solo el estado de cuenta de ESE
 // cliente y empresa. Se recarga al abrir y cada 3 minutos (esas recargas no suman accesos). Sin enlaces al resto de la
 // app salvo "Iniciar sesión" si el cliente tiene cuenta en el portal. noindex y sin referrer (el token va en la URL).
+// 21b: documentos con el cruce por factura (base, IVA, abonos, saldo, qué falta y comentarios visibles) y movimientos
+// desde la factura abierta más antigua.
 
-type Rango = "30" | "90" | "anio" | "todo";
+type Rango = "abierta" | "30" | "90" | "anio" | "todo";
 const RECARGA_MS = 3 * 60 * 1000;
 const POR_PAGINA = 40;
 
 const hoyCaracas = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" });
-const periodoDe = (rango: Rango, hoy: string) => {
+const periodoDe = (rango: Rango, hoy: string): { desde: string | null; hasta: string | null; desdeAbierta?: boolean } => {
   switch (rango) {
+    case "abierta": return { desde: null, hasta: null, desdeAbierta: true };
     case "30": return { desde: sumarDias(hoy, -30), hasta: null };
     case "90": return { desde: sumarDias(hoy, -90), hasta: null };
     case "anio": return { desde: `${hoy.slice(0, 4)}-01-01`, hasta: null };
@@ -59,7 +63,8 @@ function useCabeceraPrivada(titulo: string) {
 const EstadoCuentaPublico = () => {
   const { token = "" } = useParams();
   const hoy = useMemo(hoyCaracas, []);
-  const [rango, setRango] = useState<Rango>("90");
+  const [rango, setRango] = useState<Rango>("abierta");
+  const [filtroDocs, setFiltroDocs] = useState<FiltroDocumentos>("abiertas");
   const periodo = useMemo(() => periodoDe(rango, hoy), [rango, hoy]);
   const [datos, setDatos] = useState<EstadoCuentaCompleto | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -79,6 +84,7 @@ const EstadoCuentaPublico = () => {
     contado.current = true;
     const { data, error: err } = await rpcConReintento(() => supabase.rpc("estado_cuenta_publico", {
       p_token: token, p_desde: periodo.desde, p_hasta: periodo.hasta, p_contar: contar,
+      p_filtro: filtroDocs, p_desde_abierta: !!periodo.desdeAbierta,
     }));
     if (mio !== turno.current) return;
     ultima.current = Date.now();
@@ -93,7 +99,7 @@ const EstadoCuentaPublico = () => {
       setError(null);
     }
     setCargando(false);
-  }, [token, periodo.desde, periodo.hasta]);
+  }, [token, periodo.desde, periodo.hasta, periodo.desdeAbierta, filtroDocs]);
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => { setVisibles(POR_PAGINA); }, [periodo.desde, periodo.hasta]);
@@ -124,7 +130,7 @@ const EstadoCuentaPublico = () => {
     <div className="min-h-screen bg-muted/40 text-foreground">
       <div className="h-1 w-full" style={{ backgroundColor: color }} aria-hidden />
       <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <MarcaEmpresa empresa={empresa} />
             <div className="min-w-0">
@@ -136,7 +142,7 @@ const EstadoCuentaPublico = () => {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-5 px-4 py-5 sm:px-6 sm:py-6">
+      <main className="mx-auto max-w-7xl space-y-5 px-4 py-5 sm:px-6 sm:py-6">
         {/* Encabezado del estado de cuenta */}
         <section className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
@@ -205,17 +211,25 @@ const EstadoCuentaPublico = () => {
               </Panel>
             </div>
 
-            <Panel titulo="Documentos con saldo" descripcion="Facturas y notas de débito por pagar, y notas de crédito a favor." cuerpoClassName="p-0 sm:p-0">
+            <Panel titulo={filtroDocs === "abiertas" ? "Documentos con saldo" : filtroDocs === "todas" ? "Documentos del período" : "Documentos pagados en el período"}
+              descripcion={filtroDocs === "abiertas" ? "Por factura: cuánto era, cuánto se ha abonado y qué falta. Toca un documento para ver sus abonos."
+                : datos ? textoPeriodo(datos) : undefined}
+              accion={<FiltroDocumentosSelector valor={filtroDocs} onCambio={setFiltroDocs} className="hidden sm:flex" />}
+              cuerpoClassName="p-0 sm:p-0">
+              <div className="border-b border-border px-4 py-2 sm:hidden"><FiltroDocumentosSelector valor={filtroDocs} onCambio={setFiltroDocs} className="w-full overflow-x-auto" /></div>
               {primeraCarga ? <div className="p-4"><SkeletonFilas n={3} alto="h-12" /></div>
-                : !datos?.abiertos?.length ? <p className="px-4 py-6 text-center text-sm text-muted-foreground">No hay documentos con saldo pendiente.</p>
-                : <DocumentosAbiertos docs={datos.abiertos} />}
+                : !datos ? null
+                : <div className={cn("transition-opacity", cargando && "opacity-60")}>
+                    <TablaDocumentos docs={(filtroDocs === "abiertas" ? datos.abiertos : datos.documentos) ?? []} limite={10} totales={filtroDocs === "abiertas"} testId="ecp-documentos"
+                      vacio={<p className="px-4 py-6 text-center text-sm text-muted-foreground">{filtroDocs === "abiertas" ? "No hay documentos con saldo pendiente." : "No hay documentos en este período."}</p>} />
+                  </div>}
             </Panel>
 
             <Panel titulo="Movimientos" descripcion={datos ? `${movs.length} ${movs.length === 1 ? "movimiento" : "movimientos"} · ${textoPeriodo(datos).toLowerCase()}` : undefined}
               cuerpoClassName="p-0 sm:p-0">
               <div className="border-b border-border px-4 py-3 sm:px-5">
                 <Segmentado<Rango> className="sm:max-w-md" etiqueta="Período" valor={rango} onCambio={setRango}
-                  opciones={[{ valor: "30", etiqueta: "30 días" }, { valor: "90", etiqueta: "90 días" }, { valor: "anio", etiqueta: "Este año" }, { valor: "todo", etiqueta: "Todo" }]} />
+                  opciones={[{ valor: "abierta", etiqueta: "Desde lo pendiente" }, { valor: "30", etiqueta: "30 días" }, { valor: "90", etiqueta: "90 días" }, { valor: "anio", etiqueta: "Este año" }, { valor: "todo", etiqueta: "Todo" }]} />
               </div>
               {primeraCarga ? <div className="p-4"><SkeletonFilas n={6} alto="h-12" /></div> : !datos ? null : (
                 <div className={cn("transition-opacity", cargando && "opacity-60")} aria-busy={cargando}>
@@ -245,7 +259,8 @@ const EstadoCuentaPublico = () => {
         <footer className="space-y-3 pb-6 pt-1 text-xs text-muted-foreground">
           <p>
             Montos en dólares (USD). Los documentos en bolívares se expresan en USD a la tasa de cada documento. Los pagos declarados
-            quedan pendientes hasta su verificación.
+            quedan pendientes hasta su verificación. «Qué falta» es una sugerencia automática según la base, el IVA y lo abonado; los
+            comentarios los escribe nuestro equipo.
             {datos?.ajustes_cambiarios ? ` No se listan ${datos.ajustes_cambiarios} ${datos.ajustes_cambiarios === 1 ? "ajuste" : "ajustes"} por diferencial cambiario (notas en bolívares de 0,00 USD), que no cambian el saldo.` : ""}
           </p>
           {empresa && (
@@ -295,62 +310,6 @@ function FilaSaldo({ etiqueta, valor, fuerte }: { etiqueta: string; valor: numbe
       <span>{etiqueta}</span>
       <span className="tabular-nums" data-testid={fuerte ? "ecp-saldo-final" : undefined}>{fmtUsd(valor)}</span>
     </div>
-  );
-}
-
-const claseDias = (d: DocumentoAbierto) => (d.saldo < 0 ? "text-success" : d.dias > 0 ? "text-destructive" : "text-muted-foreground");
-
-function DocumentosAbiertos({ docs: todos }: { docs: DocumentoAbierto[] }) {
-  const [todosVisibles, setTodosVisibles] = useState(false);
-  const docs = todosVisibles ? todos : todos.slice(0, 10);
-  return (
-    <>
-      <div className="hidden md:block">
-        <table className="w-full text-sm" data-testid="ecp-abiertos">
-          <thead>
-            <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="px-5 py-2 font-medium">Documento</th>
-              <th className="px-3 py-2 font-medium">Emisión</th>
-              <th className="px-3 py-2 font-medium">Vence</th>
-              <th className="px-3 py-2 font-medium">Situación</th>
-              <th className="px-3 py-2 text-right font-medium">Total</th>
-              <th className="px-5 py-2 text-right font-medium">Saldo</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {docs.map((d, i) => (
-              <tr key={`${d.numero}-${i}`}>
-                <td className="px-5 py-2.5"><span className="font-medium tabular-nums">{d.numero}</span><span className="ml-2 text-xs text-muted-foreground">{TIPO_DOCUMENTO[d.tipo]}</span></td>
-                <td className="whitespace-nowrap px-3 py-2.5 tabular-nums text-muted-foreground">{fechaLarga(d.emision)}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 tabular-nums text-muted-foreground">{fechaLarga(d.vence ?? d.emision)}</td>
-                <td className={cn("whitespace-nowrap px-3 py-2.5", claseDias(d))}>{textoDias(d)}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{fmtUsd(d.total)}</td>
-                <td className={cn("whitespace-nowrap px-5 py-2.5 text-right font-semibold tabular-nums", d.saldo < 0 && "text-success")}>{fmtUsd(d.saldo)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <ul className="divide-y divide-border md:hidden" data-testid="ecp-abiertos-movil">
-        {docs.map((d, i) => (
-          <li key={`${d.numero}-${i}`} className="flex items-start justify-between gap-3 px-4 py-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium"><span className="tabular-nums">{d.numero}</span> <span className="font-normal text-muted-foreground">· {TIPO_DOCUMENTO[d.tipo]}</span></p>
-              <p className={cn("mt-0.5 text-xs", claseDias(d))}>{textoDias(d)}{d.saldo >= 0 && ` · ${fechaLarga(d.vence ?? d.emision)}`}</p>
-            </div>
-            <div className="shrink-0 text-right">
-              <p className={cn("text-sm font-semibold tabular-nums", d.saldo < 0 && "text-success")}>{fmtUsd(d.saldo)}</p>
-              <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">de {fmtUsd(d.total)}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
-      {todos.length > docs.length && (
-        <div className="border-t border-border px-4 py-3 text-center">
-          <Button variant="outline" onClick={() => setTodosVisibles(true)} data-testid="ecp-abiertos-todos">Ver todos los documentos ({todos.length})</Button>
-        </div>
-      )}
-    </>
   );
 }
 

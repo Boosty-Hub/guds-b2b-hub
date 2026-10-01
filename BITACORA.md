@@ -10,6 +10,29 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-01 · Plan de revisión 30-sep: fases 0–4 y 6 (21a–21d) cerradas tras el corte de la noche
+
+- **Contexto:** el 30-sep a las 22:31 se cayó la base de producción (db/rest UNHEALTHY; incidente de red de Supabase en el
+  este de EE. UU.) y cortó a los 4 agentes en la verificación final. La base volvió sola hacia las 00:45 del 1-oct, sin
+  reiniciar.
+- **Hecho (fases 0+1, 2+3, 4 y 6 del `docs/PLAN-REVISION-30SEP.md`):** categorías, vendedores y empleados por empresa
+  (21a); estado de cuenta con cruce por factura, comentarios, envío masivo con registro, métricas de cobranza (DSO, mora
+  ponderada, NC sin aplicar) (21b); planificación de pagos a proveedores con condición de pago desde Odoo y cierre
+  automático (21c); bandeja de calidad con tareas que se cierran con la sync (21d). Las 8 migraciones `20261001_fase21*`
+  aplicadas.
+- **Reparaciones al retomar:** `sync-odoo` redesplegado desde el árbol de trabajo (el último deploy de la noche había pisado
+  `compras.js`, `odoo.js` y `escribir-cliente.js`); corrida `ok`. Borrados los usuarios e2e que quedaron.
+- **Bugs encontrados en la verificación y arreglados:** el PDF del estado de cuenta incluía comentarios **internos** (se
+  adjunta al correo del cliente) → solo visibles; `/admin` sin subruta daba 404 → redirige al dashboard; con la torre de
+  control abierta la barra superior se recortaba → bajo 1800 px se ocultan buscador, estado de Odoo y nombre.
+- **Verificación:** suite multiempresa 558/558; `tsc` y `build` limpios; Playwright 1440/390 px en GUDS, Quirutec y
+  «Ambas» (A admin+portal, B estado de cuenta/PDF/envío, C 28/28, D calidad) sin errores ni desborde; conteos UI = SQL.
+  Sin datos de prueba en producción; sin escrituras nuevas a Odoo.
+- **Pendiente:** catálogo del portal del vendedor por empresa (fase 1), métricas de cobranza en la ficha del vendedor
+  (fase 3), fase 5 (listas de precios) y decisiones abiertas de `PENDIENTE.md` §4.
+
+---
+
 ## 2026-09-29 · Repaso completo de la sincronización con Odoo y letra Plus Jakarta Sans (decisión F)
 
 - **Repaso Odoo ↔ GUDS** (solo lectura): `cuadre-odoo.mjs` 68/68 tras el arreglo de abajo (montos, saldos, cobros, compras,

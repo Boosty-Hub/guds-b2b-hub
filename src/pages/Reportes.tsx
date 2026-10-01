@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Loader2 } from "lucide-react";
+import { ClipboardCheck, Loader2 } from "lucide-react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,10 +13,11 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { Panel } from "@/components/datos/FichaCampos";
 import { TablaReporte } from "@/components/reportes/TablaReporte";
+import { CobranzaDso } from "@/components/reportes/CobranzaDso";
 import { HistoricoProfit } from "@/components/reportes/HistoricoProfit";
 import { AnalisisVentas } from "@/components/reportes/AnalisisVentas";
 import { MetasVendedores } from "@/components/reportes/MetasVendedores";
-import { CalidadDatos } from "@/components/reportes/CalidadDatos";
+import { CalidadDatos, useCalidadOculta } from "@/components/reportes/CalidadDatos";
 import { InsigniaProfit, colorFuente, periodoComparacion, Variacion, fechaCorta, TEXTO_COMPARACION } from "@/components/reportes/comun";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -352,6 +353,7 @@ const Reportes = () => {
   const textoVar = (v: number | null) => (v === null ? "sin datos del período anterior" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}% vs período anterior`);
   const textoVarAnio = (v: number | null) => (v === null ? "sin datos del año anterior" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}% vs año anterior`);
 
+  const calidadOculta = useCalidadOculta();   // Fase 21d: la sección se oculta al terminar la revisión
   const pestanas = (
     <TabsList>
       <TabsTrigger value="ventas">Ventas</TabsTrigger>
@@ -360,7 +362,9 @@ const Reportes = () => {
       <TabsTrigger value="cobranza">Cobranza</TabsTrigger>
       <TabsTrigger value="inventario"><span className="sm:hidden">Inventario</span><span className="hidden sm:inline">Inventario y rotación</span></TabsTrigger>
       <TabsTrigger value="profit"><span className="sm:hidden">Profit</span><span className="hidden sm:inline">Histórico Profit</span></TabsTrigger>
-      <TabsTrigger value="calidad"><span className="sm:hidden">Calidad</span><span className="hidden sm:inline">Calidad y cuadre</span></TabsTrigger>
+      {calidadOculta && tab !== "calidad"
+        ? <TabsTrigger value="calidad" title="Calidad y cuadre (sección oculta)" aria-label="Calidad y cuadre (sección oculta)" className="px-2 text-muted-foreground/70"><ClipboardCheck className="h-3.5 w-3.5" /></TabsTrigger>
+        : <TabsTrigger value="calidad"><span className="sm:hidden">Calidad</span><span className="hidden sm:inline">Calidad y cuadre</span></TabsTrigger>}
     </TabsList>
   );
   const selectorPeriodo = (
@@ -400,7 +404,7 @@ const Reportes = () => {
             </>
           ) : tab === "profit" || tab === "calidad" ? null : selectorPeriodo}
           acciones={cargando ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            : <span className="text-[11px] text-muted-foreground">{tab === "calidad" ? "Solo lectura · se corrige en Odoo"
+            : <span className="text-[11px] text-muted-foreground">{tab === "calidad" ? "Bandeja de trabajo · Odoo manda"
               : <>USD · neto de IVA · fuente {tab === "ventas" || tab === "analisis" ? FUENTES[fuente].replace("Solo ", "") : tab === "profit" ? "Profit (solo lectura)" : "Odoo"}</>}</span>} />
 
         <TabsContent value="ventas" className="mt-0">
@@ -585,6 +589,8 @@ const Reportes = () => {
               { clave: "monto", titulo: "Cobrado", valor: (f) => num(f.monto_usd), render: (f) => formatPrice(num(f.monto_usd)), derecha: true },
             ]} />
           </div>
+          {/* 21b (agente F2-3): DSO y mora por vendedor y por cliente */}
+          <CobranzaDso />
         </TabsContent>
 
         <TabsContent value="inventario" className="mt-0">

@@ -12,7 +12,9 @@ import {
   Wallet,
   DollarSign,
   Package,
-  Smile
+  Smile,
+  CalendarClock,
+  ClipboardCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
@@ -27,8 +29,10 @@ export const configNavItems = [
   { icon: Bell, label: "Notificaciones", path: "/admin/configuracion/notificaciones" },
   { icon: Shield, label: "Seguridad", path: "/admin/configuracion/seguridad" },
   { icon: CreditCard, label: "Facturación", path: "/admin/configuracion/facturacion" },
+  { icon: CalendarClock, label: "Días de caja", path: "/admin/configuracion/dias-caja" },
   { icon: Truck, label: "Envíos", path: "/admin/configuracion/envios" },
   { icon: FileText, label: "Plantillas", path: "/admin/configuracion/plantillas" },
+  { icon: ClipboardCheck, label: "Verificación con Odoo", path: "/admin/configuracion/verificacion-odoo" },
 ];
 
 export const ConfiguracionSidebar = () => {

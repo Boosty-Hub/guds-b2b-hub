@@ -1,5 +1,8 @@
 // Correo del estado de cuenta (fase 20w): HTML de marca compatible con clientes de correo (tablas, estilos en línea, botón
 // a prueba de Outlook) y su versión en texto plano. Todo lo variable se escapa.
+// 21b: la franja aprobada (por cobrar, vencido con su antigüedad, por vencer, a favor, neto y notas de débito) y los
+// documentos con saldo con lo abonado, el saldo, "qué falta" y el comentario visible para el cliente (hasta 15; el resto
+// en el PDF y en el enlace).
 
 export interface DatosCorreo {
   hoy: string;
@@ -8,12 +11,23 @@ export interface DatosCorreo {
     nombre: string; nombre_corto?: string | null; rif?: string | null; direccion?: string | null; ciudad?: string | null;
     telefono?: string | null; email?: string | null; sitio_web?: string | null; color?: string | null; logo_url?: string | null;
   };
-  resumen: { saldo: number; vencido: number; por_vencer: number; a_favor: number; neto: number; facturas_vencidas: number; facturas_abiertas: number };
+  resumen: {
+    saldo: number; vencido: number; por_vencer: number; a_favor: number; neto: number; facturas_vencidas: number; facturas_abiertas: number;
+    d1_30?: number; d31_60?: number; d61_90?: number; mas_90?: number; notas_debito_saldo?: number; notas_debito_abiertas?: number;
+  };
+  documentos?: DocumentoCorreo[];
   url: string;
   mensaje?: string | null;
   remitente?: string | null;
   responder?: boolean;
 }
+
+export interface DocumentoCorreo {
+  numero: string; tipo: string; vence: string | null; dias: number; total: number; abonado: number; saldo: number;
+  que_falta?: string | null; comentario?: string | null;
+}
+
+const MAX_DOCS = 15;
 
 const esc = (s: unknown) => String(s ?? "")
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -48,12 +62,39 @@ export function armarCorreo(d: DatosCorreo) {
   const FUENTE = "'Plus Jakarta Sans', 'Segoe UI', Helvetica, Arial, sans-serif";
   const pre = `Saldo por pagar ${fmtUsd(r.saldo)}${vencido ? `, vencido ${fmtUsd(r.vencido)}` : ""}. Consulta tu estado de cuenta actualizado en línea.`;
 
-  const filas: [string, string, string?][] = [
-    ["Saldo por pagar", fmtUsd(r.saldo)],
+  // Antigüedad del vencido (en la misma franja, como en el PDF)
+  const tramos = ([["1–30 días", r.d1_30], ["31–60 días", r.d31_60], ["61–90 días", r.d61_90], ["Más de 90 días", r.mas_90]] as [string, number | undefined][])
+    .filter(([, v]) => Number(v) > 0.004);
+  type Fila = [string, string, string | undefined, boolean?];
+  const filas: Fila[] = [
+    ["Saldo por pagar", fmtUsd(r.saldo), undefined],
     ["Vencido", fmtUsd(r.vencido), vencido ? "#b91c1c" : undefined],
-    ["Por vencer", fmtUsd(r.por_vencer)],
+    ...tramos.map(([k, v]): Fila => [`· ${k}`, fmtUsd(v), "#6b7280", true]),
+    ["Por vencer", fmtUsd(r.por_vencer), undefined],
     ["A favor (notas de crédito y anticipos)", fmtUsd(-Number(r.a_favor || 0)), Number(r.a_favor) > 0.004 ? "#047857" : undefined],
+    ...(Number(r.notas_debito_saldo) > 0.004 ? [["Notas de débito (incluidas en el saldo)", fmtUsd(r.notas_debito_saldo), "#6b7280", true] as Fila] : []),
   ];
+  const docs = (d.documentos ?? []).filter((x) => x.tipo !== "nota_credito");
+  const docsVisibles = docs.slice(0, MAX_DOCS);
+  const vence = (x: DocumentoCorreo) => (x.dias > 0 ? `vencida hace ${x.dias} ${x.dias === 1 ? "día" : "días"}` : x.dias === 0 ? "vence hoy" : `vence en ${-x.dias} ${x.dias === -1 ? "día" : "días"}`);
+  const celda = "padding:9px 12px; font-size:13px; line-height:18px; border-top:1px solid #f0f1f3;";
+  const cab = "padding:8px 12px; font-size:11px; line-height:16px; color:#6b7280; font-weight:600;";
+  const tablaDocs = docsVisibles.length ? `<p style="margin:26px 0 8px 0; font-size:14px; line-height:20px; font-weight:700;">Documentos con saldo</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e5e7eb; border-radius:8px; border-collapse:separate;">
+              <tr><td style="${cab}">Documento</td><td align="right" style="${cab}">Total</td><td align="right" style="${cab}">Abonado</td><td align="right" style="${cab}">Saldo</td></tr>
+              ${docsVisibles.map((x) => `<tr>
+                <td style="${celda}">
+                  <strong>${esc(x.numero)}</strong>${x.tipo === "nota_debito" ? ` <span style="color:#6b7280;">(nota de débito)</span>` : ""}
+                  <div style="font-size:11px; line-height:16px; color:${x.dias > 0 ? "#b91c1c" : "#6b7280"};">${esc(vence(x))}</div>
+                  ${x.que_falta ? `<div style="font-size:11px; line-height:16px; color:#92400e;">${esc(x.que_falta)}</div>` : ""}
+                  ${x.comentario ? `<div style="font-size:11px; line-height:16px; color:#374151; font-style:italic;">${esc(x.comentario)}</div>` : ""}
+                </td>
+                <td align="right" valign="top" style="${celda} white-space:nowrap;">${esc(fmtUsd(x.total))}</td>
+                <td align="right" valign="top" style="${celda} white-space:nowrap; color:#047857;">${esc(fmtUsd(x.abonado))}</td>
+                <td align="right" valign="top" style="${celda} white-space:nowrap; font-weight:700;">${esc(fmtUsd(x.saldo))}</td>
+              </tr>`).join("")}
+            </table>
+            ${docs.length > docsVisibles.length ? `<p style="margin:8px 0 0 0; font-size:12px; line-height:18px; color:#6b7280;">Y ${docs.length - docsVisibles.length} documentos más: están en el PDF adjunto y en el enlace.</p>` : ""}` : "";
 
   const html = `<!DOCTYPE html>
 <html lang="es" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -103,7 +144,10 @@ export function armarCorreo(d: DatosCorreo) {
               <tr><td style="border-left:3px solid ${color}; background-color:#f7f8fa; padding:12px 16px; font-size:14px; line-height:22px; color:#111827;">${esc(mensaje).replace(/\r?\n/g, "<br>")}${d.remitente ? `<div style="margin-top:8px; font-size:13px; color:#6b7280;">${esc(d.remitente)}</div>` : ""}</td></tr>
             </table>` : ""}
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e5e7eb; border-radius:8px; border-collapse:separate;">
-              ${filas.map(([k, v, c], i) => `<tr>
+              ${filas.map(([k, v, c, sub], i) => sub ? `<tr>
+                <td style="padding:0 16px 7px 30px; font-size:12px; line-height:16px; color:#6b7280;">${esc(k)}</td>
+                <td align="right" style="padding:0 16px 7px 16px; font-size:12px; line-height:16px; color:${c ?? "#6b7280"}; white-space:nowrap;">${esc(v)}</td>
+              </tr>` : `<tr>
                 <td style="padding:11px 16px; font-size:14px; line-height:20px; color:#4b5563;${i ? " border-top:1px solid #f0f1f3;" : ""}">${esc(k)}</td>
                 <td align="right" style="padding:11px 16px; font-size:14px; line-height:20px; font-weight:600; color:${c ?? "#111827"}; white-space:nowrap;${i ? " border-top:1px solid #f0f1f3;" : ""}">${esc(v)}</td>
               </tr>`).join("")}
@@ -112,6 +156,7 @@ export function armarCorreo(d: DatosCorreo) {
                 <td bgcolor="#f7f8fa" align="right" style="background-color:#f7f8fa; padding:13px 16px; font-size:17px; line-height:20px; font-weight:700; white-space:nowrap; border-top:1px solid #e5e7eb; border-radius:0 0 8px 0;">${esc(fmtUsd(r.neto))}</td>
               </tr>
             </table>
+            ${tablaDocs}
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:26px 0 8px 0;">
               <tr>
                 <td align="center" class="boton">
@@ -153,8 +198,11 @@ export function armarCorreo(d: DatosCorreo) {
     `Te compartimos tu estado de cuenta con ${d.empresa.nombre} al ${fecha}. Puedes consultarlo en línea, siempre actualizado, y también lo adjuntamos en PDF.`,
     ...(mensaje ? ["", mensaje, ...(d.remitente ? [`— ${d.remitente}`] : [])] : []),
     "",
-    ...filas.map(([k, v]) => `${k}: ${v}`),
+    ...filas.map(([k, v, , sub]) => `${sub ? "  " : ""}${k}: ${v}`),
     `Saldo neto: ${fmtUsd(r.neto)}`,
+    ...(docsVisibles.length ? ["", "Documentos con saldo:", ...docsVisibles.map((x) =>
+      `- ${x.numero}: total ${fmtUsd(x.total)}, abonado ${fmtUsd(x.abonado)}, saldo ${fmtUsd(x.saldo)} (${vence(x)})${x.que_falta ? ` · ${x.que_falta}` : ""}${x.comentario ? ` · ${x.comentario}` : ""}`),
+      ...(docs.length > docsVisibles.length ? [`Y ${docs.length - docsVisibles.length} documentos más en el PDF y en el enlace.`] : [])] : []),
     "",
     "Ver estado de cuenta:",
     d.url,

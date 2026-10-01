@@ -23,6 +23,8 @@ export interface CategoriaPortal {
   nombre: string;
   /** Último tramo del nombre ("MATERIAL MEDICO QUIRURGICO / GUANTES" → "GUANTES"). */
   etiqueta: string;
+  /** Padre en Odoo ("MATERIAL MEDICO QUIRURGICO"): encabezado del grupo en el menú. */
+  grupo?: string | null;
   n?: number;
   disponibles?: number;
 }

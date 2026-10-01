@@ -18,6 +18,7 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import { useMetricasCobranza, dsoAlto, tendencia, textoDso, IconoTendencia } from "@/components/cuentas/metricas";
 import {
   FiltrosLista, useFiltros, opcionesDe, opcionesTexto, opcionesPrueba, pasaPrueba, coincide, coincideTexto, contadorFiltrado,
   type OpcionPrueba,
@@ -26,9 +27,11 @@ import {
 // Cartera del vendedor (plan de portales §5, V3): clientes ordenados por prioridad de cobro (vencido ponderado por los días
 // de mora), antigüedad por tramos como filtro, y filtros por situación. Datos de cartera_vendedor() (misma definición de
 // deuda que el admin y que resumen_vendedor()).
+// 21b: DSO por cliente (deuda ÷ venta promedio diaria de 90 días) con tendencia contra el mes anterior, de
+// metricas_cobranza (solo sus clientes); deuda y saldo a favor (NC sin aplicar) por separado.
 
 type Filtro = "todos" | "visitar" | "vencido" | "por_vencer" | "sin_compras" | "al_dia";
-type Orden = "prioridad" | "vencido" | "mora" | "monto" | "nombre";
+type Orden = "prioridad" | "vencido" | "mora" | "monto" | "dso" | "nombre";
 
 const FILTROS: { valor: Filtro; etiqueta: string }[] = [
   { valor: "todos", etiqueta: "Todos" },
@@ -63,6 +66,9 @@ const VendedorCartera = () => {
   const navigate = useNavigate();
   const { clientes, cargando, error } = useCarteraVendedor();
   const { resumen } = useResumenVendedor();
+  const { datos: metricas } = useMetricasCobranza(90);
+  const metricaDe = useMemo(() => new Map((metricas?.clientes ?? []).map((m) => [m.cliente_id, m])), [metricas]);
+  const umbral = metricas?.alerta_dso ?? 60;
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get("q") || "");
   const [orden, setOrden] = useState<Orden>("prioridad");
@@ -106,10 +112,11 @@ const VendedorCartera = () => {
       vencido: (a, b) => b.vencido - a.vencido,
       mora: (a, b) => b.dias_mora - a.dias_mora || b.vencido - a.vencido,
       monto: (a, b) => b.por_cobrar - a.por_cobrar,
+      dso: (a, b) => (metricaDe.get(b.id)?.dso ?? (b.por_cobrar > 0.009 ? 99999 : -1)) - (metricaDe.get(a.id)?.dso ?? (a.por_cobrar > 0.009 ? 99999 : -1)),
       nombre: (a, b) => a.nombre_negocio.localeCompare(b.nombre_negocio),
     };
     return [...filas].sort(cmp[orden]);
-  }, [base, t, filtro, tramo, orden]);
+  }, [base, t, filtro, tramo, orden, metricaDe]);
   const pag = usePagination(lista, 50, f.firma);
 
   const situacion = (c: ClienteCartera) => c.vencido > 0.009
@@ -168,6 +175,7 @@ const VendedorCartera = () => {
               <SelectItem value="vencido">Mayor vencido</SelectItem>
               <SelectItem value="mora">Más días de mora</SelectItem>
               <SelectItem value="monto">Mayor saldo</SelectItem>
+              <SelectItem value="dso">Mayor DSO</SelectItem>
               <SelectItem value="nombre">Nombre</SelectItem>
             </SelectContent>
           </Select>
@@ -191,6 +199,9 @@ const VendedorCartera = () => {
                         {c.vencido > 0.009 && <span className="font-semibold tabular-nums text-destructive">{formatPrice(c.vencido)} vencido</span>}
                         {c.por_cobrar > 0.009 && <span className="tabular-nums text-muted-foreground">de {formatPrice(c.por_cobrar)}</span>}
                         {c.cobros_pendientes > 0 && <span className="text-amber-700 dark:text-amber-300">{c.cobros_pendientes} cobro(s) por verificar</span>}
+                        {(() => { const m = metricaDe.get(c.id); return m && m.deuda > 0.009 ? (
+                          <span className={cn("inline-flex items-center gap-0.5 tabular-nums", dsoAlto(m, umbral) ? "font-semibold text-destructive" : "text-muted-foreground")}>DSO {textoDso(m)}<IconoTendencia t={tendencia(m)} /></span>
+                        ) : null; })()}
                       </div>
                     </div>
                     {acciones(c)}
@@ -205,6 +216,8 @@ const VendedorCartera = () => {
                     <TableHead>Situación</TableHead>
                     <TableHead className="text-right">Vencido</TableHead>
                     <TableHead className="text-right">Por cobrar</TableHead>
+                    <TableHead className="text-right" title="Días de venta adeudados: deuda ÷ venta promedio diaria de 90 días">DSO</TableHead>
+                    <TableHead className="hidden text-right lg:table-cell">A favor</TableHead>
                     <TableHead className="hidden lg:table-cell">Próx. vencimiento</TableHead>
                     <TableHead className="hidden lg:table-cell">Última compra</TableHead>
                     <TableHead className="hidden xl:table-cell">Último cobro</TableHead>
@@ -221,8 +234,14 @@ const VendedorCartera = () => {
                         <TableCell className={cn("whitespace-nowrap text-right tabular-nums", c.vencido > 0.009 && "font-semibold text-destructive")}>{formatPrice(c.vencido)}</TableCell>
                         <TableCell className="whitespace-nowrap text-right tabular-nums">
                           {formatPrice(c.por_cobrar)}
-                          {c.a_favor < -0.009 && <span className="block text-[11px] text-emerald-700 dark:text-emerald-400">{formatPrice(Math.abs(c.a_favor))} a favor</span>}
+                          {c.a_favor < -0.009 && <span className="block text-[11px] text-emerald-700 dark:text-emerald-400 lg:hidden">{formatPrice(Math.abs(c.a_favor))} a favor</span>}
                         </TableCell>
+                        {(() => { const m = metricaDe.get(c.id); return (
+                          <TableCell className={cn("whitespace-nowrap text-right tabular-nums", m && dsoAlto(m, umbral) ? "font-semibold text-destructive" : "text-muted-foreground")} data-testid="cartera-dso">
+                            <span className="inline-flex items-center justify-end gap-1">{m ? textoDso(m) : "—"}{m && <IconoTendencia t={tendencia(m)} />}</span>
+                          </TableCell>
+                        ); })()}
+                        <TableCell className="hidden whitespace-nowrap text-right tabular-nums text-emerald-700 dark:text-emerald-400 lg:table-cell">{c.a_favor < -0.009 ? formatPrice(Math.abs(c.a_favor)) : ""}</TableCell>
                         <TableCell className="hidden whitespace-nowrap text-muted-foreground lg:table-cell">{c.proximo_vencimiento ? fechaCorta(c.proximo_vencimiento) : "—"}</TableCell>
                         <TableCell className="hidden whitespace-nowrap text-muted-foreground lg:table-cell">{fechaCorta(c.ultima_compra)}</TableCell>
                         <TableCell className="hidden whitespace-nowrap text-muted-foreground xl:table-cell">{fechaCorta(c.ultimo_cobro)}</TableCell>

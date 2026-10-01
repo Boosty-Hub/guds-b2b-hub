@@ -28,7 +28,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { HandCoins, Loader2 } from "lucide-react";
+import { HandCoins, ListChecks, Loader2, Mail, MailX } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { EncabezadoOrdenable, useOrdenTabla } from "@/components/datos/tabla";
+import { useMetricasCobranza, dsoAlto, tendencia, textoDso, IconoTendencia, SelectorVentana, type MetricaCliente, type VentanaDso } from "@/components/cuentas/metricas";
+import { EnvioMasivoDialog } from "@/components/estado-cuenta/EnvioMasivoDialog";
+import { RegistroEnvios } from "@/components/estado-cuenta/RegistroEnvios";
+import { usePermissions } from "@/contexts/PermissionsContext";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
@@ -54,7 +60,13 @@ interface ClienteCuenta {
   vendedor?: { nombre: string; apellido: string | null } | null;
 }
 // Claves de filtro de cada pestaña: se limpian al cambiar de pestaña ("empresa" vale para las dos)
-const CLAVES_PESTANA = ["situacion", "vendedor", "ultimo", "m_tipo", "m_fecha"];
+const CLAVES_PESTANA = ["situacion", "vendedor", "ultimo", "correo", "cobranza", "m_tipo", "m_fecha", "nc_antiguedad"];
+// 21b: columnas internas de cobranza (DSO con tendencia, mora ponderada, a favor por aplicar), indicador y filtro "sin
+// correo", selección para el envío masivo del estado de cuenta, registro de envíos y la pestaña "NC sin aplicar".
+interface NcSinAplicar {
+  factura_id: string; numero: string; cliente_id: string; cliente: string; vendedor: string; empresa: string | null;
+  emision: string | null; dias: number | null; total: number; saldo: number; moneda: string; aplicada: number;
+}
 interface PagoRow {
   id: string;
   numero: string;
@@ -89,6 +101,17 @@ const Cuentas = () => {
   const { formatPrice } = useCurrency();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { can } = usePermissions();
+  const puedeEnviar = can("cuentas", "editar");
+  const [ventana, setVentana] = useState<VentanaDso>(90);
+  const { datos: metricas, recargar: recargarMetricas } = useMetricasCobranza(ventana);
+  const metricaDe = useMemo(() => new Map((metricas?.clientes ?? []).map((m) => [m.cliente_id, m])), [metricas]);
+  const umbralDso = metricas?.alerta_dso ?? 60;
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
+  const [masivoAbierto, setMasivoAbierto] = useState(false);
+  const [registroAbierto, setRegistroAbierto] = useState(false);
+  const [senalRegistro, setSenalRegistro] = useState(0);
+  const [ncs, setNcs] = useState<NcSinAplicar[] | null>(null);
   const [clientes, setClientes] = useState<ClienteCuenta[]>([]);
   const [pagos, setPagos] = useState<PagoRow[]>([]);
   const [facturas, setFacturas] = useState<FacturaRow[]>([]);
@@ -163,8 +186,8 @@ const Cuentas = () => {
 
   // Estado de cuentas: clientes ordenados por deuda real desc
   const cuentasCliente = useMemo(() => clientes
-    .map((c) => ({ c, ...(deudaCliente.get(c.id) || { saldo: 0, docs: 0 }) }))
-    .sort((a, b) => b.saldo - a.saldo), [clientes, deudaCliente]);
+    .map((c) => ({ c, ...(deudaCliente.get(c.id) || { saldo: 0, docs: 0 }), m: metricaDe.get(c.id) as MetricaCliente | undefined }))
+    .sort((a, b) => b.saldo - a.saldo), [clientes, deudaCliente, metricaDe]);
 
   // Movimientos (libro de cuenta): cobros verificados (+), facturas de tipo factura (cargo −), notas de crédito (crédito +)
   const empresaCliente = useMemo(() => Object.fromEntries(clientes.map((c) => [c.id, c.empresa_id ?? null])), [clientes]);
@@ -187,10 +210,10 @@ const Cuentas = () => {
 
   // ---- Filtros (en la URL), según la pestaña ----
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") === "movimientos" ? "transactions" : "accounts";
+  const tab = params.get("tab") === "movimientos" ? "transactions" : params.get("tab") === "nc" ? "nc" : "accounts";
   const setTab = (t: string) => setParams((p) => {
     const n = new URLSearchParams(p);
-    if (t === "transactions") n.set("tab", "movimientos"); else n.delete("tab");
+    if (t === "transactions") n.set("tab", "movimientos"); else if (t === "nc") n.set("tab", "nc"); else n.delete("tab");
     for (const k of CLAVES_PESTANA) n.delete(k);
     return n;
   }, { replace: true });
@@ -209,6 +232,19 @@ const Cuentas = () => {
     { valor: "mas90", etiqueta: "Hace más de 90 días", prueba: (x) => { const d = diasUltimo(x.c.id); return d != null && d > 90; } },
     { valor: "nunca", etiqueta: "Sin cobros registrados", prueba: (x) => diasUltimo(x.c.id) == null },
   ];
+  // Sin correo: ni el cliente ni sus contactos activos tienen correo (dato de metricas_cobranza)
+  const sinCorreo = (x: CuentaFila) => x.m ? !x.m.tiene_correo : false;
+  const pruebasCorreo: OpcionPrueba<CuentaFila>[] = [
+    { valor: "sin", etiqueta: "Sin correo", prueba: sinCorreo },
+    { valor: "sin_deuda", etiqueta: "Sin correo y con deuda", prueba: (x) => sinCorreo(x) && x.saldo > 0.009 },
+    { valor: "con", etiqueta: "Con correo", prueba: (x) => !!x.m?.tiene_correo },
+  ];
+  const pruebasCobranza: OpcionPrueba<CuentaFila>[] = [
+    { valor: "dso_alto", etiqueta: `DSO alto (más de ${umbralDso} días o sin ventas con vencido)`, prueba: (x) => !!x.m && dsoAlto(x.m, umbralDso) },
+    { valor: "empeora", etiqueta: "Empeora contra el mes anterior", prueba: (x) => !!x.m && tendencia(x.m) === "empeora" },
+    { valor: "mejora", etiqueta: "Mejora contra el mes anterior", prueba: (x) => !!x.m && tendencia(x.m) === "mejora" },
+    { valor: "a_favor_nc", etiqueta: "Con NC sin aplicar", prueba: (x) => (x.m?.a_favor_nc ?? 0) > 0.009 },
+  ];
   const pruebasTipoMov: OpcionPrueba<Movimiento>[] = [
     { valor: "cobro", etiqueta: "Cobros", prueba: (m) => m.clase === "cobro" },
     { valor: "factura", etiqueta: "Facturas (cargos)", prueba: (m) => m.clase === "factura" },
@@ -220,7 +256,13 @@ const Cuentas = () => {
       { clave: "situacion", etiqueta: "Situación", todos: "Todas", principal: true, opciones: opcionesPrueba(cuentasCliente, pruebasSituacion) },
       { clave: "vendedor", etiqueta: "Vendedor", principal: true, opciones: opcionesDe(clientes, (c) => c.vendedor_asignado_id, (c) => nombreVendedor(c) ?? "—", "Sin vendedor") },
       { clave: "ultimo", etiqueta: "Último cobro", todos: "Cualquiera", principal: true, opciones: opcionesPrueba(cuentasCliente, pruebasUltimo) },
+      { clave: "cobranza", etiqueta: "Cobranza", todos: "Todas", opciones: opcionesPrueba(cuentasCliente, pruebasCobranza) },
+      { clave: "correo", etiqueta: "Correo", todos: "Todos", opciones: opcionesPrueba(cuentasCliente, pruebasCorreo) },
       empCuentas,
+    ],
+    nc: [
+      { clave: "nc_antiguedad", etiqueta: "Antigüedad", todos: "Todas", principal: true, opciones: [
+        { valor: "30", etiqueta: "Hasta 30 días" }, { valor: "90", etiqueta: "31 a 90 días" }, { valor: "mas90", etiqueta: "Más de 90 días" }] },
     ],
     transactions: [
       { clave: "m_tipo", etiqueta: "Tipo", todos: "Todos", principal: true, opciones: opcionesPrueba(movimientos, pruebasTipoMov) },
@@ -233,12 +275,41 @@ const Cuentas = () => {
   const cuentasFiltradas = cuentasCliente.filter((x) =>
     pasaPrueba(pruebasSituacion, f.v("situacion"), x) && coincide(x.c.vendedor_asignado_id, f.v("vendedor"))
     && pasaPrueba(pruebasUltimo, f.v("ultimo"), x) && (!empCuentas || coincide(x.c.empresa_id, f.v("empresa")))
+    && pasaPrueba(pruebasCorreo, f.v("correo"), x) && pasaPrueba(pruebasCobranza, f.v("cobranza"), x)
     && (x.c.nombre_negocio.toLowerCase().includes(searchAcc.toLowerCase()) || (x.c.codigo || "").toLowerCase().includes(searchAcc.toLowerCase())));
   const movimientosFiltrados = movimientos.filter((m) =>
     pasaPrueba(pruebasTipoMov, f.v("m_tipo"), m) && enRango(m.fecha, f.v("m_fecha")) && (!empMov || coincide(m.empresa_id, f.v("empresa")))
     && (m.cliente.toLowerCase().includes(searchTrx.toLowerCase()) || (m.referencia || "").toLowerCase().includes(searchTrx.toLowerCase())));
 
-  const pagination = usePagination(cuentasFiltradas, 50, f.firma);
+  const { ordenadas: cuentasOrdenadas, orden, alternar } = useOrdenTabla(cuentasFiltradas, {
+    cliente: (x) => x.c.nombre_negocio, saldo: (x) => x.saldo, vencido: (x) => x.m?.vencido ?? 0,
+    dso: (x) => (x.m && x.m.deuda > 0.009 ? x.m.dso ?? 99999 : null), mora: (x) => x.m?.mora ?? 0, favor: (x) => x.m?.a_favor_nc ?? 0,
+    docs: (x) => x.docs, limite: (x) => Number(x.c.limite_credito), ultimo: (x) => ultimoPagoByClient.get(x.c.id) ?? null,
+  });
+  const pagination = usePagination(cuentasOrdenadas, 50, f.firma);
+  const ncFiltradas = (ncs ?? []).filter((n) => {
+    const v = f.v("nc_antiguedad"), d = n.dias ?? 0;
+    return (!v || (v === "30" ? d <= 30 : v === "90" ? d > 30 && d <= 90 : d > 90))
+      && (!searchAcc || `${n.cliente} ${n.numero} ${n.vendedor}`.toLowerCase().includes(searchAcc.toLowerCase()));
+  });
+  const paginationNc = usePagination(ncFiltradas, 50, f.firma);
+  useEffect(() => {
+    if (tab !== "nc" || ncs) return;
+    supabase.rpc("nc_sin_aplicar").then(({ data, error }) => {
+      if (error) { toast({ title: "No se cargaron las notas de crédito", description: error.message, variant: "destructive" }); setNcs([]); return; }
+      setNcs(((data as NcSinAplicar[]) ?? []).map((n) => ({ ...n, total: Number(n.total), saldo: Number(n.saldo), aplicada: Number(n.aplicada) })));
+    });
+  }, [tab, ncs, toast]);
+
+  // Selección para el envío masivo (sobre lo filtrado; se limpia al cambiar los filtros)
+  useEffect(() => { setSeleccion(new Set()); }, [f.firma]);
+  const todosSel = cuentasFiltradas.length > 0 && cuentasFiltradas.every((x) => seleccion.has(x.c.id));
+  const alternarTodos = () => setSeleccion(todosSel ? new Set() : new Set(cuentasFiltradas.map((x) => x.c.id)));
+  const alternarSel = (id: string) => setSeleccion((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const seleccionados = useMemo(() => cuentasCliente.filter((x) => seleccion.has(x.c.id)).map((x) => ({ id: x.c.id, nombre: x.c.nombre_negocio })), [cuentasCliente, seleccion]);
+  const totalAFavorNc = (metricas?.clientes ?? []).reduce((s, m) => s + m.a_favor_nc, 0);
+  const nSinCorreoDeuda = cuentasCliente.filter((x) => sinCorreo(x) && x.saldo > 0.009).length;
+  const nDsoAlto = cuentasCliente.filter((x) => x.m && dsoAlto(x.m, umbralDso)).length;
   const pagination2 = usePagination(movimientosFiltrados, 50, f.firma);
 
   // Dialog: deudores + banco/método seleccionado
@@ -313,6 +384,7 @@ const Cuentas = () => {
     <TabsList>
       <TabsTrigger value="accounts">Estado de Cuentas</TabsTrigger>
       <TabsTrigger value="transactions">Movimientos</TabsTrigger>
+      <TabsTrigger value="nc" data-testid="tab-nc">NC sin aplicar</TabsTrigger>
     </TabsList>
   );
 
@@ -322,6 +394,12 @@ const Cuentas = () => {
         { label: "Total por Cobrar", valor: formatPrice(totalPorCobrar), tono: "negativo" },
         { label: "Cobrado este Mes", valor: formatPrice(cobradoMes), tono: "positivo" },
         { label: "Clientes con Deuda", valor: clientesConDeuda, tono: "alerta" },
+        { label: "A favor por aplicar", valor: formatPrice(totalAFavorNc), detalle: "NC sin cruzar", tono: totalAFavorNc > 0.009 ? "positivo" : "tenue",
+          onClick: () => setTab("nc"), activo: tab === "nc" },
+        { label: `DSO alto (>${umbralDso} d)`, valor: metricas ? nDsoAlto : "…", tono: nDsoAlto ? "alerta" : "tenue",
+          onClick: () => { setTab("accounts"); setTimeout(() => f.setVarios({ cobranza: "dso_alto" }), 0); }, activo: f.v("cobranza") === "dso_alto" },
+        { label: "Con deuda y sin correo", valor: metricas ? nSinCorreoDeuda : "…", tono: nSinCorreoDeuda ? "alerta" : "tenue",
+          onClick: () => { setTab("accounts"); setTimeout(() => f.setVarios({ correo: "sin_deuda" }), 0); }, activo: f.v("correo") === "sin_deuda" },
         { label: "Recibos registrados", valor: pagos.filter((p) => p.estado === "verificado").length },
       ]} />
 
@@ -336,10 +414,30 @@ const Cuentas = () => {
             filtros={<FiltrosLista filtros={f} resultados={cuentasFiltradas.length} />}
             contador={loading ? undefined : contadorFiltrado(cuentasFiltradas.length, cuentasCliente.length, f.activos || !!searchAcc)}
             acciones={
-              <Button size="sm" className="gap-1.5" onClick={abrirCobro}>
-                <HandCoins className="h-3.5 w-3.5" /> Registrar Cobro
-              </Button>
+              <>
+                <SelectorVentana valor={ventana} onCambio={setVentana} className="hidden sm:flex" />
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setRegistroAbierto(true)} data-testid="registro-envios-abrir">
+                  <ListChecks className="h-3.5 w-3.5" /> Registro de envíos
+                </Button>
+                {puedeEnviar && seleccion.size > 0 && (
+                  <Button size="sm" variant="secondary" className="gap-1.5" onClick={() => setMasivoAbierto(true)} data-testid="masivo-abrir">
+                    <Mail className="h-3.5 w-3.5" /> Enviar estado de cuenta ({seleccion.size})
+                  </Button>
+                )}
+                <Button size="sm" className="gap-1.5" onClick={abrirCobro}>
+                  <HandCoins className="h-3.5 w-3.5" /> Registrar Cobro
+                </Button>
+              </>
             }
+          />
+        ) : tab === "nc" ? (
+          <BarraLista
+            pestanas={pestanas}
+            busqueda={searchAcc}
+            onBusqueda={setSearchAcc}
+            placeholder="Buscar cliente, NC o vendedor..."
+            filtros={<FiltrosLista filtros={f} resultados={ncFiltradas.length} />}
+            contador={ncs === null ? undefined : contadorFiltrado(ncFiltradas.length, ncs.length, f.activos || !!searchAcc)}
           />
         ) : (
           <BarraLista
@@ -360,33 +458,60 @@ const Cuentas = () => {
             ) : cuentasFiltradas.length === 0 ? (
               <div className="py-10 text-center text-muted-foreground">No hay clientes</div>
             ) : (
-              <Table>
+              <Table data-testid="cuentas-tabla">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead className="text-right">Saldo Deudor</TableHead>
-                    <TableHead className="text-center">Documentos</TableHead>
-                    <TableHead className="text-right">Límite Crédito</TableHead>
-                    <TableHead>Último Pago</TableHead>
+                    {puedeEnviar && (
+                      <TableHead className="w-8 px-2">
+                        <Checkbox checked={todosSel} onCheckedChange={alternarTodos} aria-label="Elegir todos los clientes filtrados" data-testid="sel-todos" />
+                      </TableHead>
+                    )}
+                    <EncabezadoOrdenable clave="cliente" orden={orden} onOrdenar={alternar}>Cliente</EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="saldo" orden={orden} onOrdenar={alternar} alinear="derecha">Saldo Deudor</EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="vencido" orden={orden} onOrdenar={alternar} alinear="derecha" className="hidden lg:table-cell">Vencido</EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="dso" orden={orden} onOrdenar={alternar} alinear="derecha">
+                      <span title={`Días de venta adeudados: deuda ÷ venta promedio diaria de ${ventana} días`}>DSO</span>
+                    </EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="mora" orden={orden} onOrdenar={alternar} alinear="derecha" className="hidden xl:table-cell">
+                      <span title="Días de mora ponderados por monto">Mora pond.</span>
+                    </EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="favor" orden={orden} onOrdenar={alternar} alinear="derecha" className="hidden xl:table-cell">A favor (NC)</EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="docs" orden={orden} onOrdenar={alternar} alinear="centro" className="hidden md:table-cell">Docs.</EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="limite" orden={orden} onOrdenar={alternar} alinear="derecha" className="hidden 2xl:table-cell">Límite Crédito</EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="ultimo" orden={orden} onOrdenar={alternar}>Último Pago</EncabezadoOrdenable>
                     <TableHead>Estado</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {pagination.pageItems.map(({ c, saldo, docs }) => {
+                  {pagination.pageItems.map(({ c, saldo, docs, m }) => {
                     const est = estadoCuenta(c, saldo);
+                    const t = m ? tendencia(m) : null;
+                    const alto = m ? dsoAlto(m, umbralDso) : false;
                     return (
-                      <TableRow key={c.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/cuentas/${c.id}`)}>
+                      <TableRow key={c.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/cuentas/${c.id}`)} data-testid="cuenta-fila">
+                        {puedeEnviar && (
+                          <TableCell className="w-8 px-2" onClick={(e) => e.stopPropagation()}>
+                            <Checkbox checked={seleccion.has(c.id)} onCheckedChange={() => alternarSel(c.id)} aria-label={`Elegir ${c.nombre_negocio}`} />
+                          </TableCell>
+                        )}
                         <TableCell>
                           <div className="flex min-w-0 items-center">
                             <span className="max-w-[260px] truncate font-medium" title={c.nombre_negocio}>{c.nombre_negocio}</span>
                             <span className="ml-1.5 whitespace-nowrap text-xs text-muted-foreground">{c.codigo || "—"}</span>
+                            {m && !m.tiene_correo && <span className="ml-1.5 shrink-0" title="Sin correo (ni del cliente ni de sus contactos)" data-testid="sin-correo"><MailX className="h-3.5 w-3.5 text-warning" aria-label="Sin correo" /></span>}
                           </div>
                         </TableCell>
                         <TableCell className={`whitespace-nowrap text-right font-semibold ${saldo > 0 ? "text-destructive" : ""}`}>
                           {formatPrice(saldo)}
                         </TableCell>
-                        <TableCell className="text-center text-muted-foreground">{docs || "—"}</TableCell>
-                        <TableCell className="whitespace-nowrap text-right text-muted-foreground">{formatPrice(Number(c.limite_credito))}</TableCell>
+                        <TableCell className="hidden whitespace-nowrap text-right text-muted-foreground lg:table-cell">{m && m.vencido > 0.009 ? formatPrice(m.vencido) : "—"}</TableCell>
+                        <TableCell className={`whitespace-nowrap text-right tabular-nums ${alto ? "font-semibold text-destructive" : "text-muted-foreground"}`} data-testid="dso">
+                          <span className="inline-flex items-center justify-end gap-1">{m ? textoDso(m) : "—"}<IconoTendencia t={t} /></span>
+                        </TableCell>
+                        <TableCell className="hidden whitespace-nowrap text-right tabular-nums text-muted-foreground xl:table-cell">{m && m.deuda > 0.009 ? `${m.mora} d` : "—"}</TableCell>
+                        <TableCell className="hidden whitespace-nowrap text-right tabular-nums text-success xl:table-cell">{m && m.a_favor_nc > 0.009 ? formatPrice(m.a_favor_nc) : ""}</TableCell>
+                        <TableCell className="hidden text-center text-muted-foreground md:table-cell">{docs || "—"}</TableCell>
+                        <TableCell className="hidden whitespace-nowrap text-right text-muted-foreground 2xl:table-cell">{formatPrice(Number(c.limite_credito))}</TableCell>
                         <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(ultimoPagoByClient.get(c.id) || null)}</TableCell>
                         <TableCell className="whitespace-nowrap"><Badge variant={est.variant}>{est.label}</Badge></TableCell>
                       </TableRow>
@@ -438,7 +563,51 @@ const Cuentas = () => {
             {!loading && <DataTablePagination pagination={pagination2} />}
           </div>
         </TabsContent>
+
+        {/* Notas de crédito sin aplicar (a favor por cruzar en Odoo), con antigüedad */}
+        <TabsContent value="nc">
+          <div className="rounded-lg border border-border bg-card" data-testid="nc-sin-aplicar">
+            <p className="border-b border-border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
+              Saldo a favor de los clientes en notas de crédito que aún no se cruzan con facturas. Se aplican en Odoo; al sincronizar, salen de esta lista.
+            </p>
+            {ncs === null ? (
+              <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+            ) : ncFiltradas.length === 0 ? (
+              <div className="py-10 text-center text-muted-foreground">No hay notas de crédito sin aplicar</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Cliente</TableHead><TableHead>Nota de crédito</TableHead><TableHead>Emisión</TableHead>
+                    <TableHead className="text-right">Antigüedad</TableHead><TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Ya aplicado</TableHead><TableHead className="text-right">A favor</TableHead>
+                    <TableHead className="hidden lg:table-cell">Vendedor</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginationNc.pageItems.map((n) => (
+                    <TableRow key={n.factura_id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/cuentas/${n.cliente_id}`)}>
+                      <TableCell className="max-w-[260px] truncate font-medium" title={n.cliente}>{n.cliente}</TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{n.numero}{n.moneda === "VES" && <span className="ml-1 text-muted-foreground">(Bs)</span>}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(n.emision)}</TableCell>
+                      <TableCell className={`whitespace-nowrap text-right tabular-nums ${(n.dias ?? 0) > 90 ? "text-destructive" : "text-muted-foreground"}`}>{n.dias ?? "—"} d</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">{formatPrice(n.total)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums text-muted-foreground">{n.aplicada > 0.009 ? formatPrice(n.aplicada) : "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums text-success">{formatPrice(n.saldo)}</TableCell>
+                      <TableCell className="hidden max-w-[180px] truncate text-muted-foreground lg:table-cell">{n.vendedor}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            {ncs !== null && <DataTablePagination pagination={paginationNc} />}
+          </div>
+        </TabsContent>
       </Tabs>
+
+      <EnvioMasivoDialog open={masivoAbierto} onOpenChange={setMasivoAbierto} clientes={seleccionados}
+        onTerminado={() => { setSenalRegistro((n) => n + 1); recargarMetricas(); }} />
+      <RegistroEnvios open={registroAbierto} onOpenChange={setRegistroAbierto} senal={senalRegistro} />
 
       {/* Registrar Cobro */}
       <Dialog open={payOpen} onOpenChange={setPayOpen}>

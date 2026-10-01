@@ -1,8 +1,8 @@
 // Dirección y teléfonos de un cliente editados en GUDS → Odoo (res.partner). Migración 19w (decisión del dueño, 28-sep:
 // "en cliente se puede editar direcciones y teléfono y se actualiza en Odoo").
 //
-// - cliente_contacto: teléfono, celular y dirección (calle, complemento, ciudad, estado) del contacto del cliente
-//   (clientes.odoo_id). Lo encola actualizar_contacto_cliente().
+// - cliente_contacto: teléfono, celular, correo (21b, decisión del 30-sep) y dirección (calle, complemento, ciudad, estado)
+//   del contacto del cliente (clientes.odoo_id). Lo encola actualizar_contacto_cliente().
 // - cliente_direccion: edita una dirección de entrega existente (hija del cliente en Odoo) o crea una nueva
 //   (type 'delivery', la que trae el importador). Lo encola guardar_direccion_cliente().
 //
@@ -18,9 +18,9 @@ import { txt, fechaCaracas } from './util.js';
 import { dejarNota, cambiosTexto } from './notas.js';
 
 const CAMPOS_PARTNER = ['name', 'type', 'parent_id', 'company_id', 'street', 'street2', 'city', 'state_id', 'country_id',
-  'phone', 'mobile', 'active'];
+  'phone', 'mobile', 'email', 'active'];
 const CAMPOS_DIRECCION = ['street', 'street2', 'city', 'state_id', 'country_id'];
-const ETIQUETA = { phone: 'Teléfono', mobile: 'Celular', street: 'Calle', street2: 'Complemento', city: 'Ciudad', state_id: 'Estado', country_id: 'País' };
+const ETIQUETA = { phone: 'Teléfono', mobile: 'Celular', email: 'Correo', street: 'Calle', street2: 'Complemento', city: 'Ciudad', state_id: 'Estado', country_id: 'País' };
 const conEtiquetas = (cambios) => cambios.map((c) => ({ ...c, etiqueta: ETIQUETA[c.campo] ?? c.campo }));
 
 const lit = (v) => (v === null || v === undefined ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
@@ -69,6 +69,7 @@ async function valsDesde(odoo, campos, partner, { telefono = 'phone' } = {}) {
   const vals = {};
   if ('telefono' in campos) vals[telefono] = campos.telefono || false;
   if ('celular' in campos) vals.mobile = campos.celular || false;
+  if ('email' in campos) vals.email = campos.email || false;
   let estado = null;
   if ('calle' in campos) {
     if (!campos.calle || !campos.ciudad || !campos.estado) throw new Error('Dirección incompleta: calle, ciudad y estado son obligatorios');
@@ -98,6 +99,7 @@ function noAplicados(despues, vals) {
 const resumenPartner = (p) => p && ({
   id: p.id, nombre: p.name, calle: valorOdoo(p.street), complemento: valorOdoo(p.street2), ciudad: valorOdoo(p.city),
   estado: m2oNombre(p.state_id), pais: m2oNombre(p.country_id), telefono: valorOdoo(p.phone), celular: valorOdoo(p.mobile),
+  email: valorOdoo(p.email),
 });
 
 // ── Contacto del cliente ───────────────────────────────────────────────────
@@ -121,12 +123,13 @@ async function escribirContacto({ odoo, sql, fila, aplicar, log, quien }) {
   }
   const plan = { partner: c.odoo_id, empresa_odoo: cid, vals, cambios: diferencias(antes, vals, estado), contactos_hijos: contactosHijos, antes: resumenPartner(antes) };
   const nota = { modelo: 'res.partner', id: c.odoo_id,
-    texto: `(GUDS) Teléfonos / dirección actualizados desde GUDS por ${quien} el ${fechaCaracas()}: ${cambiosTexto(conEtiquetas(plan.cambios)) || 'sin diferencias con Odoo'}.` };
+    texto: `(GUDS) ${'email' in vals && Object.keys(vals).length === 1 ? 'Correo actualizado' : 'Datos de contacto actualizados'} desde GUDS por ${quien} el ${fechaCaracas()}: ${cambiosTexto(conEtiquetas(plan.cambios)) || 'sin diferencias con Odoo'}.` };
   if (!aplicar) return { modo: 'simulacion', ...plan, nota: { ...nota, simulada: true } };
 
   await odoo.escribir('res.partner', [c.odoo_id], vals, cid);
   const despues = await leerPartner(odoo, c.odoo_id, cid);
   await sql(`update clientes set telefono = ${lit(txt(despues.phone))}, celular = ${lit(txt(despues.mobile))},
+      email = ${lit(txt(despues.email, 255))},
       direccion = ${lit(direccionGuds(despues))}, calle = ${lit(txt(despues.street))}, complemento = ${lit(txt(despues.street2))},
       ciudad = ${lit(txt(despues.city, 100))}, estado = ${lit(m2oNombre(despues.state_id))}, updated_at = now()
     where id = ${lit(c.id)}`);

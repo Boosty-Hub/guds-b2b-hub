@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Receipt, UserPlus, Boxes, FileMinus2, ListChecks, Package, UserX, CalendarX, CalendarClock, Truck, Landmark,
-  ClipboardCheck,
+  ClipboardCheck, Gauge, CreditCard,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -30,6 +30,7 @@ export function usePendingActions() {
     const [
       pagosRes, registrosRes, consignacionRes, retencionesRes,
       extractoLineasRes, stockBajoRes, sinVendedorRes, vencidosRes, porVencerRes, despachosRes, porIdentificarRes, porAprobarRes,
+      cobranzaRes,
     ] = await Promise.all([
       supabase.from("pagos").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
       supabase.from("registros_clientes").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
@@ -37,13 +38,16 @@ export function usePendingActions() {
       supabase.from("retenciones").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
       supabase.from("extracto_lineas").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
       supabase.from("productos").select("id", { count: "exact", head: true }).eq("activo", true).eq("controla_stock", true).lt("stock_actual", 10),
-      supabase.from("clientes").select("id", { count: "exact", head: true }).eq("activo", true).is("vendedor_asignado_id", null),
+      supabase.from("clientes").select("id", { count: "exact", head: true }).eq("activo", true).eq("es_empleado", false).is("vendedor_asignado_id", null),
       supabase.from("lotes").select("id", { count: "exact", head: true }).gt("cantidad", 0).lt("vencimiento", fecha(hoy)),
       supabase.from("lotes").select("id", { count: "exact", head: true }).gt("cantidad", 0).gte("vencimiento", fecha(hoy)).lte("vencimiento", fecha(en30)),
       supabase.from("transferencias").select("id", { count: "exact", head: true }).eq("tipo", "entrega").eq("estado", "lista"),
       supabase.from("movimientos_bancarios").select("id", { count: "exact", head: true }).eq("origen", "por_identificar"),
       supabase.from("ordenes").select("id", { count: "exact", head: true }).eq("aprobacion", "pendiente"),
+      // Alertas de cobranza (21b): DSO sobre el umbral y deuda sobre el límite de crédito (0 si no hay permiso de cuentas)
+      supabase.rpc("alertas_cobranza"),
     ]);
+    const cobranza = (cobranzaRes.data as { umbral: number; dso_alto: number; sobre_limite: number } | null) ?? { umbral: 60, dso_alto: 0, sobre_limite: 0 };
 
     const lista: PendingActionItem[] = [
       { clave: "por-aprobar", label: "Pedidos por aprobar", count: porAprobarRes.count || 0, link: "/admin/ordenes?aprobacion=pendiente", icono: ClipboardCheck },
@@ -52,6 +56,8 @@ export function usePendingActions() {
       { clave: "consignacion", label: "Consignación por revisar", count: consignacionRes.count || 0, link: "/admin/consignacion", icono: Boxes },
       { clave: "retenciones", label: "Retenciones por revisar", count: retencionesRes.count || 0, link: "/admin/retenciones", icono: FileMinus2 },
       { clave: "conciliacion", label: "Líneas de extracto sin conciliar", count: extractoLineasRes.count || 0, link: "/admin/conciliacion", icono: ListChecks },
+      { clave: "dso-alto", label: `Clientes con DSO de más de ${cobranza.umbral} días`, count: cobranza.dso_alto || 0, link: "/admin/cuentas?cobranza=dso_alto", icono: Gauge },
+      { clave: "sobre-limite", label: "Clientes sobre su límite de crédito", count: cobranza.sobre_limite || 0, link: "/admin/cuentas?situacion=excedido", icono: CreditCard },
       { clave: "stock", label: "Productos con stock bajo", count: stockBajoRes.count || 0, link: "/admin/inventario", icono: Package },
       { clave: "sin-vendedor", label: "Clientes sin vendedor asignado", count: sinVendedorRes.count || 0, link: "/admin/vendedores", icono: UserX },
       { clave: "lotes-vencidos", label: "Lotes vencidos con existencia", count: vencidosRes.count || 0, link: "/admin/inventario?tab=lotes&lotes=vencidos", icono: CalendarX },

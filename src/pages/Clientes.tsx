@@ -60,6 +60,9 @@ interface ClienteConLista extends Cliente {
   vendedor?: { nombre: string; apellido: string | null } | null;
   condicion_pago?: string | null;
   empresa_id?: string | null;
+  es_empresa?: boolean | null;
+  /** Empleado (compras de personal, fase 21a): no cuenta como cartera de vendedor ni como "sin vendedor". */
+  es_empleado?: boolean | null;
 }
 
 /** Deuda del cliente según sus facturas publicadas (misma regla que Cuentas por Cobrar): saldo, vencido y a favor. */
@@ -297,6 +300,11 @@ const Clientes = () => {
   ];
   const pruebasActivo = pruebasSiNo("Activos", "Inactivos", (c) => c.activo);
   const pruebasPortal = pruebasSiNo("Con acceso al portal", "Sin acceso", (c) => conPortal.has(c.id));
+  const pruebasTipo: OpcionPrueba<ClienteConLista>[] = [
+    { valor: "empresa", etiqueta: "Empresa", prueba: (c) => !c.es_empleado && c.es_empresa !== false },
+    { valor: "persona", etiqueta: "Persona natural", prueba: (c) => !c.es_empleado && c.es_empresa === false },
+    { valor: "empleado", etiqueta: "Empleado (compras de personal)", prueba: (c) => !!c.es_empleado },
+  ];
   const pruebasOrigen: OpcionPrueba<ClienteConLista>[] = [
     { valor: "odoo", etiqueta: "Odoo", prueba: (c) => !!c.odoo_id }, { valor: "guds", etiqueta: "Creado en GUDS", prueba: (c) => !c.odoo_id },
   ];
@@ -309,6 +317,7 @@ const Clientes = () => {
     { clave: "condicion", etiqueta: "Condición de pago", todos: "Todas", opciones: opcionesDe(clientes, (c) => c.condicion_pago, (_c, v) => textoCondicion(v), "Sin condición") },
     { clave: "credito", etiqueta: "Crédito", todos: "Todos", opciones: opcionesPrueba(clientes, pruebasCredito) },
     { clave: "lista", etiqueta: "Lista de precios", todos: "Todas", opciones: opcionesDe(clientes, (c) => c.lista_precios_id, (c) => c.lista_precios?.nombre ?? "—", "Sin lista") },
+    { clave: "tipo", etiqueta: "Tipo", todos: "Todos los tipos", opciones: opcionesPrueba(clientes, pruebasTipo) },
     { clave: "activo", etiqueta: "Situación", todos: "Activos e inactivos", opciones: opcionesPrueba(clientes, pruebasActivo) },
     { clave: "portal", etiqueta: "Portal", todos: "Con y sin acceso", opciones: opcionesPrueba(clientes, pruebasPortal) },
     { clave: "origen", etiqueta: "Origen", todos: "Odoo y GUDS", opciones: opcionesPrueba(clientes, pruebasOrigen) },
@@ -319,7 +328,7 @@ const Clientes = () => {
     && coincide(c.vendedor_asignado_id, f.v("vendedor")) && pasaPrueba(pruebasDeuda, f.v("deuda"), c)
     && coincide(c.condicion_pago, f.v("condicion")) && pasaPrueba(pruebasCredito, f.v("credito"), c)
     && coincide(c.lista_precios_id, f.v("lista")) && pasaPrueba(pruebasActivo, f.v("activo"), c)
-    && pasaPrueba(pruebasPortal, f.v("portal"), c) && pasaPrueba(pruebasOrigen, f.v("origen"), c)
+    && pasaPrueba(pruebasPortal, f.v("portal"), c) && pasaPrueba(pruebasOrigen, f.v("origen"), c) && pasaPrueba(pruebasTipo, f.v("tipo"), c)
     && (!filtroEmpresa || coincide(c.empresa_id, f.v("empresa")));
   // Base de los indicadores: los filtros sin la búsqueda (sin filtros = todos los clientes, como antes)
   const base = useMemo(() => (f.activos ? clientes.filter(pasaFiltros) : clientes),
@@ -431,6 +440,7 @@ const Clientes = () => {
                     <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
                       <span className="max-w-[260px] truncate font-medium" title={cliente.nombre_negocio}>{cliente.nombre_negocio}</span>
                       {cliente.odoo_id && <OdooBadge />}
+                      {cliente.es_empleado && <Badge variant="outline" className="px-1.5 py-0 text-[10px]" title="Compras de personal: no cuenta como cartera de vendedor">Empleado</Badge>}
                       <span className="ml-1.5 text-xs text-muted-foreground">{cliente.codigo}</span>
                     </div>
                   </TableCell>

@@ -20,6 +20,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useEmpresa } from "@/contexts/EmpresaContext";
+import { mostrarEstado } from "@/lib/estados";
+import { CruceDocumentosVendedor } from "@/components/estado-cuenta/CruceDocumentosVendedor";
 
 // Ficha del cliente para el vendedor (plan de portales §5, V3): datos y contacto (llamar, WhatsApp), dirección, crédito,
 // deuda con antigüedad por tramos (misma lógica que Cuentas por cobrar del admin), facturas pendientes, últimos pedidos,
@@ -204,7 +206,7 @@ const VendedorClienteFicha = () => {
             <Panel className="mb-0" titulo={<><MapPin className="h-3.5 w-3.5" />Dirección</>}
               acciones={enlaceMapa ? <a href={enlaceMapa} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-400">Ver en el mapa</a> : undefined}>
               <div className="space-y-2 text-[13px]">
-                <p>{direccion || <span className="text-muted-foreground">Sin dirección</span>}{c.ciudad ? <span className="text-muted-foreground"> · {[c.ciudad, c.estado].filter(Boolean).join(", ")}</span> : null}</p>
+                <p>{direccion || <span className="text-muted-foreground">Sin dirección</span>}{c.ciudad ? <span className="text-muted-foreground"> · {[c.ciudad, mostrarEstado(c.estado)].filter(Boolean).join(", ")}</span> : null}</p>
                 {c.direccion_entrega && c.direccion_entrega !== c.direccion && <p><span className="text-xs text-muted-foreground">Entrega: </span>{c.direccion_entrega}</p>}
                 {ficha.direcciones.length > 0 && (
                   <ul className="space-y-1 border-t border-border pt-2 text-xs">
@@ -276,6 +278,8 @@ const VendedorClienteFicha = () => {
                     </ul>
                   )}
                 </Panel>
+                {/* 21b: cruce por factura (base, IVA, abonos, qué falta y comentarios) */}
+                {(facturasAbiertas.length > 0 || notasCredito.length > 0) && <CruceDocumentosVendedor clienteId={id} />}
               </TabsContent>
 
               <TabsContent value="pedidos" className="mt-0">

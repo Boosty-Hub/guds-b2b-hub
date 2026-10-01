@@ -54,7 +54,7 @@ export interface EstadoCuenta {
   empresa: { id: string; nombre: string; nombre_corto: string | null; rif: string | null } | null;
   resumen: ResumenCuenta;
   credito: CreditoCuenta | null;
-  periodo: { desde: string | null; hasta: string | null };
+  periodo: { desde: string | null; hasta: string | null; modo?: "abierta" | null };
   saldo_inicial: number;
   saldo_final: number;
   movimientos: Movimiento[];
@@ -147,11 +147,17 @@ export const cuentaEnDeuda = (d: DocumentoCliente) => d.estado === "posted" && N
 
 // ── Estado de cuenta ──
 
-export async function pedirEstadoCuenta(periodo: { desde: string | null; hasta: string | null }, conMovimientos = true) {
+/** Período del estado de cuenta. `desdeAbierta`: sin `desde`, los movimientos empiezan en la factura abierta más antigua
+ * (21b); `filtro`: además de los documentos con saldo, los emitidos ('todas') o pagados ('pagadas') en el período. */
+export interface PeriodoEstadoCuenta { desde: string | null; hasta: string | null; desdeAbierta?: boolean; filtro?: "abiertas" | "todas" | "pagadas" }
+
+export async function pedirEstadoCuenta(periodo: PeriodoEstadoCuenta, conMovimientos = true) {
   const { data, error } = await supabase.rpc("estado_cuenta_portal", {
     p_desde: periodo.desde,
     p_hasta: periodo.hasta,
     p_movimientos: conMovimientos,
+    p_filtro: periodo.filtro ?? "abiertas",
+    p_desde_abierta: !!periodo.desdeAbierta,
   });
   if (error) throw error;
   return data as EstadoCuenta;
@@ -161,7 +167,7 @@ export async function pedirEstadoCuenta(periodo: { desde: string | null; hasta: 
  * Estado de cuenta del cliente para un período. Conserva los datos anteriores mientras recarga (sin parpadeo) y descarta
  * respuestas viejas si el período cambia rápido.
  */
-export function useEstadoCuenta(periodo: { desde: string | null; hasta: string | null }, conMovimientos = true) {
+export function useEstadoCuenta(periodo: PeriodoEstadoCuenta, conMovimientos = true) {
   const [datos, setDatos] = useState<EstadoCuenta | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -181,7 +187,7 @@ export function useEstadoCuenta(periodo: { desde: string | null; hasta: string |
     } finally {
       if (mio === turno.current) setCargando(false);
     }
-  }, [periodo.desde, periodo.hasta, conMovimientos]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [periodo.desde, periodo.hasta, periodo.desdeAbierta, periodo.filtro, conMovimientos]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { cargar(); }, [cargar]);
 

@@ -23,7 +23,7 @@ export async function leerCompras(odoo, cid) {
     ['order_id', 'product_id', 'name', 'product_qty', 'qty_received', 'qty_invoiced', 'price_unit', 'price_subtotal', 'write_date']);
   d.facturasProv = await L('account.move',
     [['move_type', 'in', ['in_invoice', 'in_refund']], ['state', 'in', ['posted', 'cancel']], ['company_id', '=', cid]],
-    ['name', 'ref', 'move_type', 'state', 'invoice_date', 'invoice_date_due', 'commercial_partner_id', 'currency_id',
+    ['name', 'ref', 'move_type', 'state', 'invoice_date', 'invoice_date_due', 'invoice_payment_term_id', 'commercial_partner_id', 'currency_id',
       'invoice_currency_rate', 'amount_untaxed', 'amount_tax', 'amount_total', 'amount_total_signed', 'amount_residual_signed',
       'payment_state', 'nro_control', 'debit_origin_id', 'reversed_entry_id', 'purchase_id', 'invoice_cancel_reason_id',
       'descripcion_cancel', 'eu_cancel_motive_id', 'eu_cancel_motive_desc', 'write_date']);
@@ -82,6 +82,7 @@ export async function escribirCompras({ c, d, E, odoo, cid, sql, escribir, ts, a
     tipo: f.move_type === 'in_refund' ? 'nota_credito' : 'factura', es_nota_debito: !!m2oId(f.debit_origin_id),
     origen_odoo_id: m2oId(f.debit_origin_id) ?? m2oId(f.reversed_entry_id), proveedor_odoo_id: provDe(m2oId(f.commercial_partner_id)),
     orden_odoo_id: m2oId(f.purchase_id), fecha_emision: f.invoice_date || null, fecha_vencimiento: f.invoice_date_due || null,
+    condicion_pago: txt(m2oNombre(f.invoice_payment_term_id)) || null,
     moneda: m2oId(f.currency_id) === 2 ? 'VES' : 'USD', tasa_cambio: f.invoice_currency_rate || null,
     subtotal: round2(f.amount_untaxed), impuesto: round2(f.amount_tax), total: round2(f.amount_total),
     total_usd: round2(-(f.amount_total_signed || 0)), saldo_usd: round2(-(f.amount_residual_signed || 0)),
@@ -216,29 +217,29 @@ export async function escribirCompras({ c, d, E, odoo, cid, sql, escribir, ts, a
 
   await upsert(facturas, 500, (j) => `
     insert into facturas_proveedor (odoo_id, empresa_id, numero, referencia, tipo, es_nota_debito, proveedor_id, orden_compra_id,
-      fecha_emision, fecha_vencimiento, moneda, tasa_cambio, subtotal, impuesto, total, total_usd, saldo_usd, estado_pago, estado,
+      fecha_emision, fecha_vencimiento, condicion_pago, moneda, tasa_cambio, subtotal, impuesto, total, total_usd, saldo_usd, estado_pago, estado,
       nro_control, motivo_anulacion, odoo_sync_at)
     select x.odoo_id, x.empresa_id, x.numero, x.referencia, x.tipo, x.es_nota_debito, ${prov('proveedor_odoo_id')},
-      (select o.id from ordenes_compra o where o.odoo_id = x.orden_odoo_id), x.fecha_emision, x.fecha_vencimiento, x.moneda, x.tasa_cambio,
+      (select o.id from ordenes_compra o where o.odoo_id = x.orden_odoo_id), x.fecha_emision, x.fecha_vencimiento, x.condicion_pago, x.moneda, x.tasa_cambio,
       x.subtotal, x.impuesto, x.total, x.total_usd, x.saldo_usd, x.estado_pago, x.estado, x.nro_control, x.motivo_anulacion, '${ts}'
     from jsonb_to_recordset(${j}) as x(odoo_id int, empresa_id uuid, numero text, referencia text, tipo text, es_nota_debito boolean,
-      proveedor_odoo_id int, orden_odoo_id int, fecha_emision date, fecha_vencimiento date, moneda text, tasa_cambio numeric,
+      proveedor_odoo_id int, orden_odoo_id int, fecha_emision date, fecha_vencimiento date, condicion_pago text, moneda text, tasa_cambio numeric,
       subtotal numeric, impuesto numeric, total numeric, total_usd numeric, saldo_usd numeric, estado_pago text, estado text,
       nro_control text, motivo_anulacion text)
     on conflict (odoo_id) do update set empresa_id = excluded.empresa_id, numero = excluded.numero, referencia = excluded.referencia,
       tipo = excluded.tipo, es_nota_debito = excluded.es_nota_debito, proveedor_id = excluded.proveedor_id,
       orden_compra_id = excluded.orden_compra_id, fecha_emision = excluded.fecha_emision, fecha_vencimiento = excluded.fecha_vencimiento,
-      moneda = excluded.moneda, tasa_cambio = excluded.tasa_cambio, subtotal = excluded.subtotal, impuesto = excluded.impuesto,
+      condicion_pago = excluded.condicion_pago, moneda = excluded.moneda, tasa_cambio = excluded.tasa_cambio, subtotal = excluded.subtotal, impuesto = excluded.impuesto,
       total = excluded.total, total_usd = excluded.total_usd, saldo_usd = excluded.saldo_usd, estado_pago = excluded.estado_pago,
       estado = excluded.estado, nro_control = excluded.nro_control, motivo_anulacion = excluded.motivo_anulacion,
       odoo_sync_at = excluded.odoo_sync_at
     where (facturas_proveedor.numero, facturas_proveedor.referencia, facturas_proveedor.tipo, facturas_proveedor.es_nota_debito,
       facturas_proveedor.proveedor_id, facturas_proveedor.orden_compra_id, facturas_proveedor.fecha_emision,
-      facturas_proveedor.fecha_vencimiento, facturas_proveedor.moneda, facturas_proveedor.tasa_cambio, facturas_proveedor.subtotal,
+      facturas_proveedor.fecha_vencimiento, facturas_proveedor.condicion_pago, facturas_proveedor.moneda, facturas_proveedor.tasa_cambio, facturas_proveedor.subtotal,
       facturas_proveedor.impuesto, facturas_proveedor.total, facturas_proveedor.total_usd, facturas_proveedor.saldo_usd,
       facturas_proveedor.estado_pago, facturas_proveedor.estado, facturas_proveedor.nro_control, facturas_proveedor.motivo_anulacion)
     is distinct from (excluded.numero, excluded.referencia, excluded.tipo, excluded.es_nota_debito, excluded.proveedor_id,
-      excluded.orden_compra_id, excluded.fecha_emision, excluded.fecha_vencimiento, excluded.moneda, excluded.tasa_cambio,
+      excluded.orden_compra_id, excluded.fecha_emision, excluded.fecha_vencimiento, excluded.condicion_pago, excluded.moneda, excluded.tasa_cambio,
       excluded.subtotal, excluded.impuesto, excluded.total, excluded.total_usd, excluded.saldo_usd, excluded.estado_pago,
       excluded.estado, excluded.nro_control, excluded.motivo_anulacion)`);
   const conOrigen = facturas.filter((f) => f.origen_odoo_id).map((f) => ({ odoo_id: f.odoo_id, origen: f.origen_odoo_id }));
@@ -343,5 +344,14 @@ export async function escribirCompras({ c, d, E, odoo, cid, sql, escribir, ts, a
   await limpiar('pagos_proveedor', pagos.map((p) => p.odoo_id));
   await limpiar('facturas_proveedor', facturas.map((f) => f.odoo_id));
   await limpiar('ordenes_compra', ordenes.map((o) => o.odoo_id));
+
+  // Planes de pago (21c): los pagos que acaban de llegar de Odoo cierran los ítems de los planes aprobados
+  try {
+    const [r] = await sql(`select public.conciliar_planes_pago('${E}') as r`);
+    const x = r?.r ?? r;
+    if (x && (x.items_revisados || x.planes_cerrados)) resumen.planes_pago = x;
+  } catch (e) {
+    log?.(`planes de pago: no se pudieron conciliar (${e.message})`);
+  }
   return resumen;
 }

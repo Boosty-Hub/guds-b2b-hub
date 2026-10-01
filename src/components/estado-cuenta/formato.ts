@@ -81,3 +81,27 @@ export const colorEmpresa = (e: EmpresaEstadoCuenta | null | undefined) =>
 
 /** URL pública del estado de cuenta para un token. */
 export const urlEstadoCuenta = (token: string) => `${window.location.origin}/estado-cuenta/${token}`;
+
+/** Bs 1.234,56 (montos en bolívares a la tasa del documento o del cobro). */
+export const fmtBs = (n: number | string | null | undefined) => {
+  const v = Number(n);
+  const x = Number.isFinite(v) ? v : 0;
+  const signo = x < 0 && Math.abs(x) >= 0.005 ? "-" : "";
+  return `${signo}Bs ${Math.abs(x).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+/** Concepto de un abono aplicado a un documento (21b). */
+export const conceptoAbono = (a: { tipo: string; clase?: string | null; metodo?: string | null; documento_tipo?: string | null }) => {
+  switch (a.tipo) {
+    case "pago": return "Cobro";
+    case "nota_credito": return "Nota de crédito";
+    case "aplicada": return a.documento_tipo === "nota_debito" ? "Aplicada a la nota de débito" : "Aplicada a la factura";
+    case "retencion": return a.clase === "iva" ? "Retención de IVA" : a.clase === "municipal" ? "Retención municipal" : "Retención";
+    case "reintegro": return "Reintegro";
+    default: return "Ajuste";
+  }
+};
+
+/** Columna del estado de cuenta en la que suma un abono. */
+export const columnaAbono = (tipo: string): "pagos" | "nc" | "retenciones" | "otros" =>
+  tipo === "pago" ? "pagos" : tipo === "nota_credito" || tipo === "aplicada" ? "nc" : tipo === "retencion" ? "retenciones" : "otros";

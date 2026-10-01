@@ -206,8 +206,18 @@ const ClienteDetalle = () => {
           {odoo && <OdooBadge />}
           <span className="font-mono text-xs text-muted-foreground">{cliente.codigo}{cliente.rif ? ` · ${cliente.rif}` : ""}</span>
           <Badge variant={cliente.activo ? "default" : "secondary"}>{cliente.activo ? "Activo" : "Inactivo"}</Badge>
-          {cliente.tipo_negocio && <Badge variant="outline">{cliente.tipo_negocio}</Badge>}
-          {cliente.es_empresa != null && <Badge variant="outline">{cliente.es_empresa ? "Empresa" : "Persona natural"}</Badge>}
+          {/* Tipo de persona una sola vez: tipo_negocio de Odoo repite "Empresa"/"Persona Natural" de es_empresa */}
+          {(() => {
+            const tipoPersona = cliente.es_empresa != null ? (cliente.es_empresa ? "Empresa" : "Persona natural") : null;
+            const otro = cliente.tipo_negocio && cliente.tipo_negocio.trim().toLowerCase() !== tipoPersona?.toLowerCase() ? cliente.tipo_negocio : null;
+            return <>
+              {tipoPersona && <Badge variant="outline">{tipoPersona}</Badge>}
+              {otro && <Badge variant="outline">{otro}</Badge>}
+            </>;
+          })()}
+          {(cliente as { es_empleado?: boolean }).es_empleado && (
+            <Badge variant="outline" title="Compras de personal: no cuenta como cartera de vendedor ni como cliente sin vendedor">Empleado</Badge>
+          )}
           {cliente.contribuyente_especial && <Badge variant="outline">Contribuyente especial</Badge>}
         </div>
         <div className="flex flex-wrap gap-1.5">

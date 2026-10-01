@@ -11,9 +11,14 @@
 //     aquí con datos de la base, no con lo que mande el navegador.
 //   · Registro: registrar_envio_estado_cuenta / cerrar_envio_estado_cuenta con la llave de servicio (el usuario no
 //     puede escribir el historial). Límite: 5 envíos por minuto por usuario y 20 por hora por cliente.
+//   · Envío masivo (21b): el navegador recorre los clientes del lote (crear_lote_estado_cuenta) y llama a esta función una
+//     vez por cliente con lote_id; el registro valida que el cliente sea del lote y aplica el límite de lotes (40/min).
+//   · Entrega y rebotes (21b): Resend llama a esta misma URL con su webhook (cabeceras svix-id / svix-timestamp /
+//     svix-signature, sin sesión). Se verifica la firma con RESEND_WEBHOOK_SECRET (whsec_…) y se anota la entrega del
+//     envío (entregado, rebotado, queja, retrasado). Sin ese secreto, los webhooks se rechazan (503).
 //   · Secretos: RESEND_API_KEY. Opcionales: PORTAL_URL (https://portal.guds-supply.com), ESTADO_CUENTA_REMITENTE
-//     (no-responder@portal.guds-supply.com) y ESTADO_CUENTA_DESTINOS_PERMITIDOS (expresión regular: si existe, solo se
-//     envía a correos que la cumplan; para pruebas, p. ej. @resend\.dev$).
+//     (no-responder@portal.guds-supply.com), RESEND_WEBHOOK_SECRET y ESTADO_CUENTA_DESTINOS_PERMITIDOS (expresión regular:
+//     si existe, solo se envía a correos que la cumplan; para pruebas, p. ej. @resend\.dev$).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { armarCorreo, asuntoPorDefecto, type DatosCorreo } from "./correo.ts";
 
@@ -41,6 +46,24 @@ const nombreArchivo = (cliente: string, fecha: string) => {
   return `estado-de-cuenta-${limpio}-${fecha.slice(0, 10)}.pdf`;
 };
 
+const aBytes = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+const aB64 = (buf: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+/** Firma de un webhook de Resend (Svix): HMAC-SHA256 de "id.timestamp.cuerpo" con el secreto whsec_ (base64). */
+async function firmaValida(secreto: string, id: string, ts: string, cuerpo: string, firmas: string) {
+  const t = Number(ts);
+  if (!id || !Number.isFinite(t) || Math.abs(Date.now() / 1000 - t) > 5 * 60) return false;
+  const clave = await crypto.subtle.importKey("raw", aBytes(secreto.replace(/^whsec_/, "")), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const esperada = aB64(await crypto.subtle.sign("HMAC", clave, new TextEncoder().encode(`${id}.${ts}.${cuerpo}`)));
+  return firmas.split(" ").some((f) => {
+    const [v, sig] = f.split(",");
+    if (v !== "v1" || !sig || sig.length !== esperada.length) return false;
+    let dif = 0;
+    for (let i = 0; i < sig.length; i++) dif |= sig.charCodeAt(i) ^ esperada.charCodeAt(i);
+    return dif === 0;
+  });
+}
+
 /** Valida el PDF del navegador: devuelve el base64 limpio y su tamaño, o un error. */
 function validarPdf(b64: unknown): { ok: true; base64: string; bytes: number } | { ok: false; error: string } {
   if (typeof b64 !== "string" || !b64) return { ok: false, error: "Falta el PDF del estado de cuenta" };
@@ -58,6 +81,27 @@ function validarPdf(b64: unknown): { ok: true; base64: string; bytes: number } |
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return responder(405, { error: "Método no permitido" });
+
+  // ── Webhook de Resend (entrega y rebotes) ──
+  if (req.headers.get("svix-id") && !req.headers.get("Authorization")) {
+    const secreto = Deno.env.get("RESEND_WEBHOOK_SECRET");
+    if (!secreto) return responder(503, { error: "Webhook no configurado" });
+    const cuerpo = await req.text();
+    const ok = await firmaValida(secreto, req.headers.get("svix-id") ?? "", req.headers.get("svix-timestamp") ?? "", cuerpo,
+      req.headers.get("svix-signature") ?? "").catch(() => false);
+    if (!ok) return responder(401, { error: "Firma inválida" });
+    // deno-lint-ignore no-explicit-any
+    let ev: any;
+    try { ev = JSON.parse(cuerpo); } catch { return responder(400, { error: "Evento inválido" }); }
+    const secretaW = llave("SUPABASE_SECRET_KEYS") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const srv = createClient(Deno.env.get("SUPABASE_URL")!, secretaW, { auth: { persistSession: false, autoRefreshToken: false } });
+    const detalle = ev?.data?.bounce?.message ?? ev?.data?.bounce?.subType ?? ev?.data?.reason ?? null;
+    const { data: n, error: e } = await srv.rpc("registrar_entrega_envio_estado_cuenta", {
+      p_resend_id: String(ev?.data?.email_id ?? ""), p_evento: String(ev?.type ?? ""), p_detalle: detalle ? String(detalle) : null,
+    });
+    if (e) return responder(500, { error: "No se pudo registrar el evento" });
+    return responder(200, { ok: true, actualizados: n ?? 0 });
+  }
 
   const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
   if (!jwt) return responder(401, { error: "Inicia sesión para enviar el estado de cuenta" });
@@ -96,8 +140,11 @@ Deno.serve(async (req) => {
   const mensaje = typeof body?.mensaje === "string" ? body.mensaje.trim().slice(0, 2000) : "";
   const asunto = (typeof body?.asunto === "string" && body.asunto.trim() ? body.asunto.trim() : asuntoPorDefecto(d)).slice(0, 200);
   const datos: DatosCorreo = {
-    hoy: d.hoy, cliente: d.cliente, empresa: d.empresa, resumen: d.resumen, url: enlace, mensaje, remitente, responder: !!replyTo,
+    hoy: d.hoy, cliente: d.cliente, empresa: d.empresa, resumen: d.resumen, documentos: d.documentos ?? [], url: enlace, mensaje,
+    remitente, responder: !!replyTo,
   };
+  const loteId = typeof body?.lote_id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.lote_id)
+    ? body.lote_id : null;
 
   if (modo === "vista_previa") {
     const { html, texto } = armarCorreo(datos);
@@ -139,9 +186,10 @@ Deno.serve(async (req) => {
     p_mensaje: mensaje || null,
     p_adjunto_nombre: archivo,
     p_adjunto_bytes: pdf.bytes,
+    p_lote_id: loteId,
   });
   if (errReg || !envioId) {
-    const limite = /Demasiados envíos|muchos envíos/i.test(errReg?.message ?? "");
+    const limite = /Demasiados envíos|muchos envíos|ya se envió/i.test(errReg?.message ?? "");
     return responder(limite ? 429 : 400, { error: errReg?.message ?? "No se pudo registrar el envío" });
   }
 

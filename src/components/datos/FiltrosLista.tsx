@@ -9,6 +9,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { useEmpresa } from "@/contexts/EmpresaContext";
 import { cn } from "@/lib/utils";
+import { mostrarEstado, pareceEstadoOdoo } from "@/lib/estados";
 
 /*
  * Filtros de una lista, guardados en la URL (?ciudad=Maracaibo&fecha=2026-09-01..2026-09-30): se comparten y
@@ -109,7 +110,9 @@ export function opcionesTexto<T>(filas: T[], valor: (f: T) => string | null | un
     g.n++; g.variantes.set(original, (g.variantes.get(original) ?? 0) + 1);
     m.set(k, g);
   }
-  const ops = [...m.entries()].map(([k, g]) => ({ valor: k, etiqueta: [...g.variantes.entries()].sort((a, b) => b[1] - a[1])[0][0], n: g.n }))
+  // Un estado de Odoo se muestra limpio ("Sucre. (VE)" → "Sucre"); el valor del filtro (la clave) no cambia
+  const etiqueta = (t: string) => (pareceEstadoOdoo(t) ? mostrarEstado(t) : t);
+  const ops = [...m.entries()].map(([k, g]) => ({ valor: k, etiqueta: etiqueta([...g.variantes.entries()].sort((a, b) => b[1] - a[1])[0][0]), n: g.n }))
     .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, "es", { numeric: true, sensitivity: "base" }));
   if (sin && vacios) ops.push({ valor: SIN_VALOR, etiqueta: sin, n: vacios });
   return ops;

@@ -156,9 +156,10 @@ const Ordenes = () => {
     setAsignarVend(o);
     setVendElegido((o.cliente as { vendedor_asignado_id?: string | null } | undefined)?.vendedor_asignado_id || "");
     if (vendedores.length === 0) {
-      const { data } = await supabase.from("usuarios").select("id, nombre, apellido, usuario_empresas(empresa_id)").eq("role", "vendedor").eq("activo", true).order("nombre");
-      setVendedores(((data as { id: string; nombre: string; apellido: string | null; usuario_empresas: { empresa_id: string }[] }[] | null) ?? [])
-        .map((u) => ({ id: u.id, nombre: `${u.nombre} ${u.apellido || ""}`.trim(), empresas: u.usuario_empresas.map((e) => e.empresa_id) })));
+      // Vendedores de la empresa (por su cartera de Odoo; sin usuarios de prueba) — vendedores_empresa, fase 21a
+      const { data } = await supabase.rpc("vendedores_empresa");
+      setVendedores(((data as { id: string; nombre: string; apellido: string | null; activo: boolean; empresas: string[] | null }[] | null) ?? [])
+        .filter((u) => u.activo).map((u) => ({ id: u.id, nombre: `${u.nombre} ${u.apellido || ""}`.trim(), empresas: u.empresas ?? [] })));
     }
   };
   const confirmarVendedor = async () => {

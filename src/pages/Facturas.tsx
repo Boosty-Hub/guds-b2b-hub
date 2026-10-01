@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, FileText } from "lucide-react";
+import { Loader2, FileText, Lock, MessageSquarePlus } from "lucide-react";
+import { ComentariosFacturaDialog } from "@/components/estado-cuenta/ComentariosFacturaDialog";
+import { usePermissions } from "@/contexts/PermissionsContext";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { usePagination } from "@/hooks/use-pagination";
@@ -33,6 +35,9 @@ const ESTADO_COBRO: Record<string, { label: string; variant: "default" | "second
   anulado: { label: "Anulada", variant: "destructive" },
 };
 
+// 21b: comentario vigente por factura (solo GUDS; visible para el cliente o interno), editable desde aquí y desde Cuentas
+interface ComentarioVigente { factura_id: string; texto: string; visible_cliente: boolean; creado_at: string }
+
 const anulada = (f: FacturaRow) => f.estado === "cancel" || f.estado_cobro === "anulado";
 
 /** Días de atraso según el vencimiento (o la emisión si no tiene), como Cuentas por Cobrar. ≤ 0 = por vencer. */
@@ -47,6 +52,17 @@ const Facturas = () => {
   const [facturas, setFacturas] = useState<FacturaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const { can } = usePermissions();
+  const [comentarios, setComentarios] = useState<Map<string, ComentarioVigente[]>>(new Map());
+  const [comentando, setComentando] = useState<FacturaRow | null>(null);
+  const cargarComentarios = async () => {
+    const { data } = await supabase.from("factura_comentarios").select("factura_id, texto, visible_cliente, creado_at")
+      .is("retirado_at", null).order("creado_at", { ascending: false }).limit(10000);
+    const m = new Map<string, ComentarioVigente[]>();
+    for (const c of (data as ComentarioVigente[]) ?? []) m.set(c.factura_id, [...(m.get(c.factura_id) ?? []), c]);
+    setComentarios(m);
+  };
+  useEffect(() => { cargarComentarios(); }, []);
 
   useEffect(() => {
     (async () => {
@@ -86,6 +102,12 @@ const Facturas = () => {
     { valor: "factura", etiqueta: "Facturas", prueba: (f) => !f.es_nota_debito },
     { valor: "nd", etiqueta: "Notas de débito", prueba: (f) => !!f.es_nota_debito },
   ];
+  const pruebasComentario: OpcionPrueba<FacturaRow>[] = [
+    { valor: "si", etiqueta: "Con comentario", prueba: (f) => comentarios.has(f.id) },
+    { valor: "visible", etiqueta: "Con comentario visible para el cliente", prueba: (f) => !!comentarios.get(f.id)?.some((c) => c.visible_cliente) },
+    { valor: "interno", etiqueta: "Con comentario interno", prueba: (f) => !!comentarios.get(f.id)?.some((c) => !c.visible_cliente) },
+    { valor: "no", etiqueta: "Sin comentario", prueba: (f) => !comentarios.has(f.id) },
+  ];
   const pruebasInicial: OpcionPrueba<FacturaRow>[] = [
     { valor: "si", etiqueta: "Solo saldos iniciales", prueba: (f) => !!f.es_saldo_inicial },
     { valor: "no", etiqueta: "Sin saldos iniciales", prueba: (f) => !f.es_saldo_inicial },
@@ -100,6 +122,7 @@ const Facturas = () => {
     { clave: "doc", etiqueta: "Documento", todos: "Facturas y notas de débito", opciones: opcionesPrueba(facturas, pruebasDoc) },
     { clave: "inicial", etiqueta: "Saldos iniciales", todos: "Con y sin saldos iniciales", opciones: opcionesPrueba(facturas, pruebasInicial) },
     { clave: "moneda", etiqueta: "Moneda", todos: "Todas", opciones: opcionesDe(facturas, (x) => x.moneda) },
+    { clave: "comentario", etiqueta: "Comentario", todos: "Con y sin comentario", opciones: opcionesPrueba(facturas, pruebasComentario) },
     filtroEmpresa,
   ]);
   // Todos los filtros salvo el estado (base de los indicadores) y la búsqueda
@@ -107,11 +130,12 @@ const Facturas = () => {
     pasaPrueba(pruebasTramo, f.v("vence"), x) && enRango(x.fecha_emision, f.v("fecha"))
     && coincideTexto(x.vendedor_odoo, f.v("vendedor")) && coincide(x.cliente_id, f.v("cliente"))
     && pasaPrueba(pruebasDoc, f.v("doc"), x) && pasaPrueba(pruebasInicial, f.v("inicial"), x)
-    && coincide(x.moneda, f.v("moneda")) && (!filtroEmpresa || coincide(x.empresa_id, f.v("empresa")));
+    && coincide(x.moneda, f.v("moneda")) && (!filtroEmpresa || coincide(x.empresa_id, f.v("empresa")))
+    && pasaPrueba(pruebasComentario, f.v("comentario"), x);
   // Sin filtros (estado "vigentes" por defecto), los indicadores son los de siempre: sobre todas las facturas
   const base = useMemo(() => facturas.filter(pasaSinEstado),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [facturas, f.firma, hoy]);
+    [facturas, f.firma, hoy, comentarios]);
 
   const filtradas = useMemo(() => {
     const q = search.toLowerCase();
@@ -134,12 +158,14 @@ const Facturas = () => {
     { titulo: "Vendedor", valor: (x) => x.vendedor_odoo }, { titulo: "Nota de débito", valor: (x) => (x.es_nota_debito ? "Sí" : "") },
     { titulo: "Saldo inicial", valor: (x) => (x.es_saldo_inicial ? "Sí" : "") },
     { titulo: "Motivo de anulación", valor: (x) => x.motivo_anulacion },
+    { titulo: "Comentario", valor: (x) => comentarios.get(x.id)?.[0]?.texto },
+    { titulo: "Comentario visible para el cliente", valor: (x) => (comentarios.has(x.id) ? (comentarios.get(x.id)?.[0]?.visible_cliente ? "Sí" : "No") : "") },
   ]);
   const vigentes = base.filter((x) => x.estado !== "cancel");
   const totalSaldo = filtradas.filter((x) => x.estado !== "cancel").reduce((s, x) => s + Number(x.saldo_usd || 0), 0);
   const fmtFecha = (d: string | null) => (d ? new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString("es-VE", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 
-  const cols = useColumnas("facturas", [{ etiqueta: "Nº", fija: true }, { etiqueta: "Cliente" }, { etiqueta: "Emisión" }, { etiqueta: "Vence" }, { etiqueta: "Moneda" }, { etiqueta: "Total" }, { etiqueta: "Saldo" }, { etiqueta: "Estado" }]);
+  const cols = useColumnas("facturas", [{ etiqueta: "Nº", fija: true }, { etiqueta: "Cliente" }, { etiqueta: "Emisión" }, { etiqueta: "Vence" }, { etiqueta: "Moneda" }, { etiqueta: "Total" }, { etiqueta: "Saldo" }, { etiqueta: "Estado" }, { etiqueta: "Comentario" }]);
   return (
     <MainLayout title="Facturas">
       {cols.estilo}
@@ -176,6 +202,7 @@ const Facturas = () => {
                 <EncabezadoOrdenable clave="vence" orden={orden} onOrdenar={alternar}>Vence</EncabezadoOrdenable>
                 <EncabezadoOrdenable clave="moneda" orden={orden} onOrdenar={alternar}>Moneda</EncabezadoOrdenable><EncabezadoOrdenable clave="total" orden={orden} onOrdenar={alternar} alinear="derecha">Total</EncabezadoOrdenable>
                 <EncabezadoOrdenable clave="saldo" orden={orden} onOrdenar={alternar} alinear="derecha">Saldo</EncabezadoOrdenable><TableHead>Estado</TableHead>
+                <TableHead>Comentario</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -199,6 +226,18 @@ const Facturas = () => {
                         ? <Badge variant="destructive" title={x.motivo_anulacion || undefined}>Anulada</Badge>
                         : <Badge variant={ESTADO_COBRO[x.estado_cobro]?.variant ?? "secondary"}>{ESTADO_COBRO[x.estado_cobro]?.label ?? x.estado_cobro}</Badge>}
                     </TableCell>
+                    <TableCell className="max-w-[240px]" onClick={(e) => e.stopPropagation()}>
+                      {(() => {
+                        const c = comentarios.get(x.id)?.[0];
+                        return (
+                          <div className="flex min-w-0 items-center gap-1">
+                            {c && <span className="min-w-0 truncate text-xs italic" title={c.texto} data-testid="factura-comentario">{!c.visible_cliente && <Lock className="mr-1 inline h-3 w-3 text-muted-foreground" aria-label="Interno" />}{c.texto}</span>}
+                            <button type="button" onClick={() => setComentando(x)} className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                              aria-label={`Comentarios de ${x.numero}`} title="Comentarios" data-testid="factura-comentar"><MessageSquarePlus className="h-3.5 w-3.5" /></button>
+                          </div>
+                        );
+                      })()}
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -207,6 +246,8 @@ const Facturas = () => {
         )}
         {!loading && <DataTablePagination pagination={pagination} />}
       </div>
+      <ComentariosFacturaDialog facturaId={comentando?.id ?? null} numero={comentando?.numero} open={!!comentando}
+        onOpenChange={(o) => { if (!o) setComentando(null); }} puedeEditar={can("cuentas", "editar")} onCambio={cargarComentarios} />
     </MainLayout>
   );
 };
