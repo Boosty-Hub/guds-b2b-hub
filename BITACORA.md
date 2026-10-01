@@ -30,8 +30,9 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
   cotización a Odoo lleva `price_unit` por línea. Se quitó el "% descuento" de la lista, que el cálculo nunca usó.
 - **Verificación:** Playwright en Quirutec 12/12 (crear, 41 filas = SQL, Enter, guardar, masivo, importar CSV, asignar,
   precio efectivo, RLS, sync, 390 px sin desborde) y limpieza; suite multiempresa con bloque 21e.
-- **Pendiente:** 5.4/5.5 escribir listas y asignaciones en Odoo (necesita autorización); primera carga con las listas
-  del equipo.
+- **Pendiente (decidido 1-oct):** crear las listas en Odoo (5.4/5.5) queda para cuando el equipo mande la primera lista
+  real: se carga en GUDS, se revisa y entonces se escribe en Odoo. Hasta entonces el precio viaja por línea en el pedido.
+- **Publicado** en `main` el 1-oct (commits 5f230d8, 6dfaaa9, b08f2fc y este).
 - También hoy: métricas de cobranza de la cartera en la ficha del vendedor (21b).
 
 ---
