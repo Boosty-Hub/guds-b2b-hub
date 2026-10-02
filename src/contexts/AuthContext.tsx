@@ -126,6 +126,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (event === 'SIGNED_OUT') {
         setUser(null);
       }
+      // Enlace de recuperación que cayó en otra página (p. ej. Auth redirigió a la raíz): la sesión ya quedó guardada,
+      // se lleva a crear la contraseña nueva.
+      if (event === 'PASSWORD_RECOVERY' && !window.location.pathname.startsWith('/restablecer-clave')) {
+        window.location.replace('/restablecer-clave');
+      }
       // No hacemos nada en SIGNED_IN aquí porque la función login ya maneja eso
       // Esto evita queries duplicadas y posibles bloqueos
     });
@@ -265,6 +270,35 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const updateUser = useCallback((patch: Partial<User>) => {
     setUser((prev) => (prev ? { ...prev, ...patch } : prev));
   }, []);
+
+  // Un admin puede obligar a cambiar la contraseña (Configuración → Usuarios) con la sesión abierta: llega por realtime
+  // y, de respaldo, se revisa al volver a la pestaña. También cierra la sesión si desactivan la cuenta.
+  const usuarioId = user?.id;
+  useEffect(() => {
+    if (!usuarioId) return;
+    const aplicar = (fila: { debe_cambiar_clave?: boolean | null; activo?: boolean | null } | null) => {
+      if (!fila) return;
+      if (fila.activo === false) { supabase.auth.signOut(); setUser(null); return; }
+      if (typeof fila.debe_cambiar_clave === "boolean") updateUser({ debe_cambiar_clave: fila.debe_cambiar_clave });
+    };
+    const revisar = async () => {
+      if (document.visibilityState !== "visible") return;
+      const { data } = await supabase.from("usuarios").select("debe_cambiar_clave, activo").eq("id", usuarioId).maybeSingle();
+      aplicar(data);
+    };
+    const canal = supabase
+      .channel(`perfil-${usuarioId}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "usuarios", filter: `id=eq.${usuarioId}` },
+        (p) => aplicar(p.new as { debe_cambiar_clave?: boolean; activo?: boolean }))
+      .subscribe();
+    document.addEventListener("visibilitychange", revisar);
+    window.addEventListener("focus", revisar);
+    return () => {
+      supabase.removeChannel(canal);
+      document.removeEventListener("visibilitychange", revisar);
+      window.removeEventListener("focus", revisar);
+    };
+  }, [usuarioId, updateUser]);
 
   const addRegistro = async (registro: Omit<RegistroCliente, "id" | "estado" | "fechaRegistro">): Promise<boolean> => {
     const { error } = await supabase

@@ -7,8 +7,13 @@ import { KeyRound, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { sesionCerrada, traducirErrorClave } from "@/lib/claves";
+import { errorClave } from "@/components/contactos/tipos";
 
-/** Si el usuario entró con una contraseña temporal (creada o restablecida por GUDS), debe crear la suya antes de seguir. */
+/**
+ * Debe crear su contraseña antes de seguir: entró con una temporal (creada o restablecida por GUDS) o un admin le pidió
+ * cambiarla desde Configuración → Usuarios (le aparece al momento si tiene la sesión abierta, o al iniciar sesión).
+ */
 export function CambioClaveObligatorio() {
   const { user, updateUser, logout } = useAuth();
   const { toast } = useToast();
@@ -21,12 +26,20 @@ export function CambioClaveObligatorio() {
 
   const guardar = async () => {
     setError(null);
-    if (clave.length < 8) { setError("La contraseña debe tener al menos 8 caracteres."); return; }
-    if (!/[A-Za-z]/.test(clave) || !/\d/.test(clave)) { setError("Usa letras y números."); return; }
-    if (clave !== repetir) { setError("Las contraseñas no coinciden."); return; }
+    const invalida = errorClave(clave, repetir, user.email);
+    if (invalida) { setError(invalida); return; }
     setGuardando(true);
     const { error: e1 } = await supabase.auth.updateUser({ password: clave });
-    if (e1) { setGuardando(false); setError(e1.message); return; }
+    if (e1) {
+      setGuardando(false);
+      if (sesionCerrada(e1)) {
+        toast({ title: "Tu sesión se cerró", description: traducirErrorClave(e1), variant: "destructive" });
+        logout();
+        return;
+      }
+      setError(traducirErrorClave(e1));
+      return;
+    }
     const { error: e2 } = await supabase.rpc("marcar_clave_cambiada");
     setGuardando(false);
     if (e2) { setError(e2.message); return; }
@@ -38,8 +51,8 @@ export function CambioClaveObligatorio() {
     <Dialog open>
       <DialogContent className="sm:max-w-md [&>button]:hidden" onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5 text-primary" /> Crea tu contraseña</DialogTitle>
-          <DialogDescription>Entraste con una contraseña temporal. Crea una propia para continuar.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5 text-primary" /> Cambia tu contraseña</DialogTitle>
+          <DialogDescription>Por seguridad debes crear una contraseña nueva para continuar. Si entraste con una contraseña temporal, crea aquí la tuya.</DialogDescription>
         </DialogHeader>
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); guardar(); }}>
           <div><Label htmlFor="clave-nueva">Nueva contraseña</Label><Input id="clave-nueva" type="password" autoComplete="new-password" value={clave} onChange={(e) => setClave(e.target.value)} autoFocus /></div>

@@ -10,6 +10,27 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-02 · Contraseñas desde Usuarios + cambio obligatorio + verificación de "olvidé mi contraseña" (21f)
+
+- **Pedido del usuario:** cambiar la contraseña de los usuarios desde Configuración → Usuarios y un ícono para obligar
+  a cambiarla (aviso al momento si tiene la sesión abierta; si no, al iniciar sesión). Verificar olvidé/recuperación.
+- **Base (`…fase21f_claves_usuarios.sql`):** RPC `cambiar_clave_usuario` (permiso `usuarios/editar`; temporal generada o
+  elegida, "pedir cambio al entrar"; cierra las sesiones del usuario) y `forzar_cambio_clave` (marca o cancela
+  `debe_cambiar_clave` sin cerrar la sesión). Ninguna aplica a la propia cuenta. `usuarios` entra a la publicación de
+  realtime (RLS: cada quien ve su fila). **Flanco cerrado:** un usuario podía quitarse la marca con un PATCH a su fila;
+  ahora solo `marcar_clave_cambiada` lo hace (guardia en `usuarios_guard_role`).
+- **Frontend:** íconos 🔑 (diálogo reutilizado de Contactos, modo `sistema`) y 🛡 (obligar/cancelar) por fila, insignia
+  "Cambio de clave"; `AuthContext` escucha su fila por realtime + al volver a la pestaña (también cierra sesión si la
+  desactivan). Errores de Auth en español (`lib/claves.ts`). Un enlace de recuperación que cae fuera de
+  `/restablecer-clave` (Auth redirige a la raíz si la URL no está permitida) ahora lleva al formulario.
+- **Verificado (Playwright, usuario desechable, ya borrado):** cambio por admin, popup en vivo sin recargar, Escape no lo
+  cierra, misma clave rechazada, popup al entrar y tras recargar, cancelar, temporal → propia, sesiones cerradas,
+  `/recover` 200 por SMTP, enlace → formulario → login con la nueva, enlace reusado = "venció o ya se usó", y en
+  producción el enlace apunta a `portal.guds-supply.com/restablecer-clave`.
+- Nota: el `localhost:8080` lo ocupaba otro proyecto (Cusica); la prueba corrió en 8090.
+
+---
+
 ## 2026-10-01 · Listas de precios de GUDS producto por producto (fase 5 / 21e, sin escritura en Odoo)
 
 - **Pedido del usuario:** listas personalizadas con un precio distinto por producto, escrito a mano: la lista completa de

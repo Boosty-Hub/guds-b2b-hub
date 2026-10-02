@@ -127,6 +127,8 @@ const AvisosEmergentes = () => {
 const CambioClaveSiHaceFalta = () => {
   const { user } = useAuth();
   if (!user?.debe_cambiar_clave) return null;
+  // En la página del enlace de recuperación la contraseña ya se está cambiando: no se encima el diálogo.
+  if (window.location.pathname.startsWith("/restablecer-clave")) return null;
   return (
     <Suspense fallback={null}>
       <CambioClaveObligatorio />

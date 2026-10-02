@@ -18,13 +18,15 @@ export interface Credenciales { titulo: string; email: string; password: string 
  * contraseña temporal generada por GUDS (debe cambiarla al entrar) o una elegida por el admin, con confirmación, reglas
  * mínimas y la casilla "Pedir cambio al primer ingreso" marcada por defecto. La contraseña no se guarda en ningún lado.
  */
-export function AccesoPortalDialog({ open, onOpenChange, contacto, usuarioId, onHecho }: {
+export function AccesoPortalDialog({ open, onOpenChange, contacto, usuarioId, onHecho, sistema = false }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   contacto: { id: string; nombre: string; email: string | null };
   /** Con usuario: cambiar la contraseña de ese acceso. Sin él: dar acceso (o reutilizar su usuario anterior). */
   usuarioId?: string | null;
   onHecho: (c: Credenciales) => void;
+  /** Usuario de cualquier rol desde Configuración → Usuarios (cambiar_clave_usuario) en vez de un acceso del portal. */
+  sistema?: boolean;
 }) {
   const { toast } = useToast();
   const [modo, setModo] = useState<"generar" | "establecer">("generar");
@@ -48,7 +50,9 @@ export function AccesoPortalDialog({ open, onOpenChange, contacto, usuarioId, on
     if (error) return;
     setEnviando(true);
     const password = modo === "establecer" ? clave : null;
-    const r = restablecer
+    const r = sistema && usuarioId
+      ? await supabase.rpc("cambiar_clave_usuario", { p_usuario_id: usuarioId, p_password: password, p_pedir_cambio: pedirCambio })
+      : restablecer
       ? await supabase.rpc("restablecer_clave_cliente", { p_usuario_id: usuarioId, p_password: password, p_pedir_cambio: pedirCambio })
       : await supabase.rpc("crear_acceso_contacto", { p_contacto_id: contacto.id, p_password: password, p_pedir_cambio: pedirCambio });
     setEnviando(false);
@@ -67,9 +71,10 @@ export function AccesoPortalDialog({ open, onOpenChange, contacto, usuarioId, on
     <Dialog open={open} onOpenChange={(v) => { if (!enviando) onOpenChange(v); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{restablecer ? "Cambiar contraseña del portal" : "Dar acceso al portal"}</DialogTitle>
+          <DialogTitle>{sistema ? "Cambiar contraseña" : restablecer ? "Cambiar contraseña del portal" : "Dar acceso al portal"}</DialogTitle>
           <DialogDescription>
-            {contacto.nombre} entra al portal de clientes con su correo <span className="font-medium text-foreground">{contacto.email}</span>.
+            {contacto.nombre} entra {sistema ? "a GUDS" : "al portal de clientes"} con su correo <span className="font-medium text-foreground">{contacto.email}</span>.
+            {restablecer && " Sus sesiones abiertas se cierran al cambiarla."}
           </DialogDescription>
         </DialogHeader>
         <RadioGroup value={modo} onValueChange={(v) => { setModo(v as "generar" | "establecer"); setIntento(false); }} className="gap-2">

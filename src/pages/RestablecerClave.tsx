@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
+import { traducirErrorClave } from "@/lib/claves";
+import { errorClave } from "@/components/contactos/tipos";
 
 /** Destino del enlace "Restablecer contraseña" del correo: Supabase abre una sesión de recuperación y aquí se crea la clave nueva. */
 const RestablecerClave = () => {
@@ -31,12 +33,11 @@ const RestablecerClave = () => {
 
   const guardar = async () => {
     setError(null);
-    if (clave.length < 8) { setError("La contraseña debe tener al menos 8 caracteres."); return; }
-    if (!/[A-Za-z]/.test(clave) || !/\d/.test(clave)) { setError("Usa letras y números."); return; }
-    if (clave !== repetir) { setError("Las contraseñas no coinciden."); return; }
+    const invalida = errorClave(clave, repetir, null);
+    if (invalida) { setError(invalida); return; }
     setGuardando(true);
     const { error: e1 } = await supabase.auth.updateUser({ password: clave });
-    if (e1) { setGuardando(false); setError(e1.message); return; }
+    if (e1) { setGuardando(false); setError(traducirErrorClave(e1)); return; }
     await supabase.rpc("marcar_clave_cambiada");
     await supabase.auth.signOut();
     setGuardando(false);

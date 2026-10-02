@@ -49,7 +49,9 @@ import {
   Eye,
   EyeOff,
   Loader2,
-  Save
+  Save,
+  KeyRound,
+  ShieldAlert
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase, Rol, Modulo, Permiso, type Empresa } from "@/lib/supabase";
@@ -60,6 +62,8 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
+import { AccesoPortalDialog, CredencialesDialog, type Credenciales } from "@/components/contactos/AccesoPortalDialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface UsuarioConRol {
   id: string;
@@ -71,6 +75,8 @@ interface UsuarioConRol {
   rol_id: string | null;
   cliente_id: string | null;
   activo: boolean;
+  auth_id: string | null;
+  debe_cambiar_clave: boolean | null;
   created_at: string;
   rol?: Rol;
   cliente?: {
@@ -131,6 +137,12 @@ const ConfigUsuarios = () => {
   // Popup descriptivo cuando falla el borrado de un usuario (FK u otro error)
   const [errorEliminarUsuario, setErrorEliminarUsuario] = useState<string | null>(null);
   const { toast } = useToast();
+  const { user: yo } = useAuth();
+  // Contraseñas: cambiarla (cambiar_clave_usuario) u obligar a cambiarla (forzar_cambio_clave)
+  const [usuarioClave, setUsuarioClave] = useState<UsuarioConRol | null>(null);
+  const [credencialesClave, setCredencialesClave] = useState<Credenciales | null>(null);
+  const [usuarioForzar, setUsuarioForzar] = useState<UsuarioConRol | null>(null);
+  const [forzando, setForzando] = useState(false);
 
   // Form states
   const [userForm, setUserForm] = useState({
@@ -373,6 +385,26 @@ const ConfigUsuarios = () => {
       title: usuario.activo ? "Usuario Desactivado" : "Usuario Activado",
       description: `${usuario.nombre} ha sido ${usuario.activo ? "desactivado" : "activado"}`,
     });
+    fetchData();
+  };
+
+  const handleForzarCambio = async () => {
+    if (!usuarioForzar) return;
+    const forzar = !usuarioForzar.debe_cambiar_clave;
+    setForzando(true);
+    const { error } = await supabase.rpc("forzar_cambio_clave", { p_usuario_id: usuarioForzar.id, p_forzar: forzar });
+    setForzando(false);
+    if (error) {
+      toast({ title: "No se pudo actualizar", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({
+      title: forzar ? "Cambio de contraseña solicitado" : "Solicitud cancelada",
+      description: forzar
+        ? `${usuarioForzar.nombre} verá el aviso para cambiarla ahora mismo si tiene la sesión abierta, o al iniciar sesión.`
+        : `${usuarioForzar.nombre} ya no tiene que cambiar su contraseña.`,
+    });
+    setUsuarioForzar(null);
     fetchData();
   };
 
@@ -699,16 +731,38 @@ const ConfigUsuarios = () => {
                         </div>
                       </TableCell>
                       <TableCell className="text-center">
-                        <Switch
-                          checked={usuario.activo}
-                          onCheckedChange={() => handleToggleUserStatus(usuario)}
-                        />
+                        <div className="flex items-center justify-center gap-1.5">
+                          <Switch
+                            checked={usuario.activo}
+                            onCheckedChange={() => handleToggleUserStatus(usuario)}
+                          />
+                          {usuario.debe_cambiar_clave && (
+                            <Badge variant="outline" className="whitespace-nowrap border-amber-500 px-1.5 text-[10px] text-amber-600" title="Debe crear una contraseña nueva al entrar">
+                              Cambio de clave
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right">
                         <div className="flex justify-end gap-1">
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" onClick={() => openEditUser(usuario)}>
                             <Edit className="h-3.5 w-3.5" />
                           </Button>
+                          {usuario.auth_id && usuario.auth_id !== yo?.auth_id && (
+                            <>
+                              <Button variant="ghost" size="icon" className="h-7 w-7" title="Cambiar contraseña" aria-label={`Cambiar contraseña de ${usuario.nombre}`}
+                                onClick={() => setUsuarioClave(usuario)}>
+                                <KeyRound className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="icon"
+                                className={`h-7 w-7 ${usuario.debe_cambiar_clave ? "bg-amber-500/10 text-amber-600 hover:text-amber-700" : ""}`}
+                                title={usuario.debe_cambiar_clave ? "Cancelar el cambio de contraseña obligatorio" : "Obligar a cambiar la contraseña"}
+                                aria-label={usuario.debe_cambiar_clave ? `Cancelar cambio de contraseña de ${usuario.nombre}` : `Obligar a ${usuario.nombre} a cambiar su contraseña`}
+                                onClick={() => setUsuarioForzar(usuario)}>
+                                <ShieldAlert className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
@@ -1119,6 +1173,40 @@ const ConfigUsuarios = () => {
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteRol} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Contraseñas de un usuario: cambiarla u obligar a cambiarla */}
+      {usuarioClave && (
+        <AccesoPortalDialog
+          sistema
+          open={!!usuarioClave}
+          onOpenChange={(v) => { if (!v) setUsuarioClave(null); }}
+          contacto={{ id: usuarioClave.id, nombre: `${usuarioClave.nombre} ${usuarioClave.apellido ?? ""}`.trim(), email: usuarioClave.email }}
+          usuarioId={usuarioClave.id}
+          onHecho={(c) => { setCredencialesClave(c); setUsuarioClave(null); fetchData(); }}
+        />
+      )}
+      <CredencialesDialog credenciales={credencialesClave} onClose={() => setCredencialesClave(null)} destino="sistema de GUDS" quien="el usuario" />
+      <AlertDialog open={!!usuarioForzar} onOpenChange={(o) => { if (!o && !forzando) setUsuarioForzar(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {usuarioForzar?.debe_cambiar_clave ? "¿Cancelar el cambio de contraseña?" : "¿Obligar a cambiar la contraseña?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {usuarioForzar?.debe_cambiar_clave
+                ? `${usuarioForzar?.nombre} ya no tendrá que crear una contraseña nueva.`
+                : `${usuarioForzar?.nombre} (${usuarioForzar?.email}) tendrá que crear una contraseña nueva para seguir usando GUDS. Si tiene la sesión abierta le aparece el aviso al momento; si no, al iniciar sesión. Su contraseña actual sigue sirviendo para entrar.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={forzando}>Volver</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); handleForzarCambio(); }} disabled={forzando}>
+              {forzando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {usuarioForzar?.debe_cambiar_clave ? "Sí, cancelar" : "Obligar a cambiarla"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
