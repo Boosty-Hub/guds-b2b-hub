@@ -27,7 +27,7 @@ for (const e of empresas) {
   const cid = e.odoo_company_id;
   const leer = (m, dom, f) => odoo.leerTodo(m, [...dom, ['company_id', '=', cid]], f, { empresa: cid });
   const g = (await sql(`select
-      (select count(*) from ordenes where empresa_id = '${e.id}' and odoo_id is not null)::int ordenes,
+      (select count(*) from ordenes where empresa_id = '${e.id}' and odoo_id is not null and estado_odoo is distinct from 'eliminada')::int ordenes,  -- borradas en Odoo: GUDS las conserva canceladas (20u)
       (select coalesce(sum(total), 0) from ordenes where empresa_id = '${e.id}' and odoo_id is not null and estado <> 'cancelado') total_ordenes,
       (select count(*) from facturas where empresa_id = '${e.id}' and odoo_id is not null and tipo = 'factura')::int facturas,
       (select count(*) from facturas where empresa_id = '${e.id}' and odoo_id is not null and tipo = 'nota_credito')::int notas_credito,
