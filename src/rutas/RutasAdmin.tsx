@@ -38,6 +38,8 @@ const Pagos = pagina(["pagos"], () => import("../pages/Pagos"));
 const CuentasPorCobrar = pagina(["cuentas-por-cobrar"], () => import("../pages/CuentasPorCobrar"));
 const Facturas = pagina(["facturas"], () => import("../pages/Facturas"));
 const FacturaDetalle = pagina(["facturas/:facturaId"], () => import("../pages/FacturaDetalle"));
+const NotasEntrega = pagina(["notas-entrega"], () => import("../pages/NotasEntrega"));
+const NotaEntregaDetalle = pagina(["notas-entrega/:notaId"], () => import("../pages/NotaEntregaDetalle"));
 const NotasCredito = pagina(["notas-credito"], () => import("../pages/NotasCredito"));
 const Retenciones = pagina(["retenciones"], () => import("../pages/Retenciones"));
 const Bancos = pagina(["bancos"], () => import("../pages/Bancos"));
@@ -110,6 +112,8 @@ export default function RutasAdmin() {
       <Route path="cuentas-por-cobrar" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><CuentasPorCobrar /></ProtectedRoute>} />
       <Route path="facturas" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Facturas /></ProtectedRoute>} />
       <Route path="facturas/:facturaId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><FacturaDetalle /></ProtectedRoute>} />
+      <Route path="notas-entrega" element={<ProtectedRoute allowedRoles={["admin"]} modulo="notas_entrega"><NotasEntrega /></ProtectedRoute>} />
+      <Route path="notas-entrega/:notaId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="notas_entrega"><NotaEntregaDetalle /></ProtectedRoute>} />
       <Route path="notas-credito" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><NotasCredito /></ProtectedRoute>} />
       <Route path="retenciones" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Retenciones /></ProtectedRoute>} />
       <Route path="bancos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="bancos"><Bancos /></ProtectedRoute>} />

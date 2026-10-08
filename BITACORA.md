@@ -10,6 +10,42 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-08 (noche) · Antigüedad de la deuda, incobrables, anticipos de Odoo y notas de entrega (22g · R3 + NE1)
+
+- **Pedido del usuario:** "sigue" con el plan de reportes de finanzas (R3: T5, T6, Antigüedad y NE1).
+- **Reportes → Cobranza → Antigüedad** (`?cobranza=antiguedad`, también en Ctrl+K; exige Reportes y Cuentas, D10):
+  - Es el "Análisis de vencimiento" de finanzas: partidas abiertas a una **fecha de corte** (hoy o un cierre de mes), con días **desde el vencimiento** (por defecto, D2) o desde la emisión.
+  - Indicadores: deuda, a favor (NC y anticipos), deuda neta, vencida, más de 90 días, incobrable y notas de entrega.
+  - Matriz por año de emisión, vendedor, vendedor del cliente, tipo de cliente, categoría, cliente, tipo de partida, activa/incobrable o empresa; columnas por tramos o por años; % del total y % vencido. Un clic en una fila filtra el detalle.
+  - Top 10 clientes, tipo de partida (cartera abierta, retención por recibir, IVA o IGTF pendiente, NC, anticipos, notas de entrega) y detalle paginado.
+  - Excel con las secciones del libro de finanzas: Resumen · Por año · Año × vendedor · Tramos · Top 10 · Tipo de cliente · Categoría · Tipo de partida · Cliente × año · 61–90 y +90 · Incobrables · Notas de entrega · Detalle · Parámetros.
+  - Corte, base, filtro y agrupación quedan en la URL; al volver al Resumen se limpian.
+- **Una sola fuente** `partidas_cobranza(corte, empresas, ne)` (migración `20261008_fase22g_antiguedad.sql`): mismo saldo al corte y mismo "qué falta" que el estado de cuenta (probado documento por documento, hoy y al 30-jun). `reporte_antiguedad` la entrega en JSON (≈ 200 ms con 1.900 partidas).
+- **T6 · Anticipos de Odoo sin aplicar:**
+  - La sincronización trae de Odoo lo que queda sin aplicar de cada cobro (`pagos.saldo_odoo_usd`) y con qué se concilió (`pagos.odoo_conciliaciones`), para el saldo a cualquier corte. Cuadra al centavo con Odoo: GUDS USD 55.929 (92 cobros) y Quirutec USD 195.758 (164).
+  - Antes GUDS no los veía (solo contaba los anticipos registrados en GUDS, que son 0). Ahora salen en `v_anticipos`: el **estado de cuenta los resta** en "A favor" y en el neto, y Cuentas por Cobrar → Anticipos los lista con "Se aplica en Odoo" (`aplicar_anticipo` los rechaza).
+  - Orden de despliegue: primero las columnas (nulas) y después la sincronización; corrida `ok`.
+- **T5 · Gestión de cobranza** (detalle de la cuenta):
+  - Deuda activa o incobrable por cliente, con responsable, nota y desde cuándo, más excepciones por documento e historial.
+  - Cambiar exige Cuentas → Editar y una empresa activa (en «Ambas» solo se consulta). No baja el saldo.
+  - Carga del Excel de finanzas (`scripts/importar-vencimiento-finanzas.mjs`): 139 documentos incobrables (USD 59.381), todos encontrados en GUDS → 21 clientes completos + 19 documentos sueltos (clientes mixtos o con compras después del corte).
+- **NE1 · Notas de entrega no fiscales:**
+  - Tablas `notas_entrega` (+ líneas y movimientos) y módulo `notas_entrega` (Administrador; Contador sin eliminar).
+  - Finanzas → **Notas de entrega**: lista con indicadores, filtros y Excel; detalle de solo consulta.
+  - Cargadas las 29 históricas de Quirutec (serie HIST): USD 44.004,91 = 25.182,15 activas + 18.822,76 incobrables. Las 3 con abonos restados en fórmula van con total + abonos sin fecha.
+  - Clientes: 5 con ficha en GUDS; el resto queda con su nombre, sin crear clientes, porque crearlos los crearía en Odoo.
+  - En el detalle de la cuenta: pestaña "No fiscal" y "Deuda interna con notas de entrega". El estado de cuenta del cliente no cambia. En la Antigüedad entran con un interruptor (encendido por defecto).
+- **Cuadre con el Excel "Análisis de vencimiento" al 30-abr-2026:**
+  - Facturas y ND: 1.034 de 1.069 con el saldo idéntico al centavo.
+  - Deuda de documentos: GUDS USD 299.350 frente a 301.104 (−0,6 %); Quirutec 580.368 frente a 580.927 (−0,1 %). La diferencia son NC que Odoo ya aplicó a su factura y Profit dejaba abiertas.
+  - Incobrables: idénticos (GUDS 38.346,94; Quirutec 21.033,92).
+  - El Excel suma documentos del 1 al 6 de mayo y cuenta los días desde la emisión.
+  - Anticipos: los de saldo inicial de GUDS Supply están en Odoo con fecha 4–5 de mayo (la de la migración), así que a un corte anterior no aparecen.
+- **Verificación:**
+  - tsc, lint y build limpios.
+  - Suites: 22g 38/38 y las anteriores sin regresiones (ver informe).
+  - Playwright: 66/66 en GUDS, Quirutec y «Ambas» × 1440/390, incluidos Excel, filtros, URL, notas de entrega, detalle de la cuenta, CxC → Anticipos y un usuario sin Cuentas.
+
 ## 2026-10-08 (noche) · Lo cobrado: libro de cobros con Odoo + Profit y la fecha real de cada cobro (22f · R2)
 
 - **Pedido del usuario:** "continua" / "sigue" con el plan de reportes de finanzas (R2 del plan).

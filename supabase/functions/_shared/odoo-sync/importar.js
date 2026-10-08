@@ -204,6 +204,11 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       // Conciliaciones: qué documento saldó qué factura
       d.parciales = await odoo.leerTodo('account.partial.reconcile', [['company_id', '=', cid]],
         ['debit_move_id', 'credit_move_id', 'amount', 'max_date', 'write_date'], { empresa: cid });
+      // 22g (T6): lo que queda sin aplicar de cada cobro de cliente (su línea por cobrar) y con qué se concilió
+      d.lineasCobro = await odoo.leerTodo('account.move.line',
+        [['company_id', '=', cid], ['payment_id.payment_type', '=', 'inbound'], ['payment_id.partner_type', '=', 'customer'],
+          ['account_id.account_type', '=', 'asset_receivable'], ['parent_state', '=', 'posted']],
+        ['payment_id', 'amount_residual', 'matched_debit_ids', 'matched_credit_ids'], { empresa: cid });
       const idsLineas = [...new Set(d.parciales.flatMap((p) => [m2oId(p.debit_move_id), m2oId(p.credit_move_id)]).filter(Boolean))];
       d.movimientoDeLinea = new Map();
       for (const lote of lotes(idsLineas, 3000)) {
@@ -512,6 +517,19 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
 
       // Cobros
       const diarioTipo = new Map(d.diarios.map((j) => [j.id, j.type]));
+      // 22g (T6): saldo sin aplicar en Odoo (USD) y conciliaciones [fecha, monto] de cada cobro, para el saldo a un corte
+      const parcialPorId = new Map(d.parciales.map((x) => [x.id, x]));
+      const saldoCobro = new Map();
+      for (const l of d.lineasCobro) {
+        const pid = m2oId(l.payment_id);
+        const s = saldoCobro.get(pid) ?? { saldo: 0, conc: [] };
+        s.saldo -= Number(l.amount_residual || 0);
+        for (const id of [...(l.matched_debit_ids || []), ...(l.matched_credit_ids || [])]) {
+          const pr = parcialPorId.get(id);
+          if (pr) s.conc.push([pr.max_date || null, round2(pr.amount)]);
+        }
+        saldoCobro.set(pid, s);
+      }
       const pagos = [];
       for (const p of d.pagos) {
         const cli = clienteDe(m2oId(p.partner_id));
@@ -523,6 +541,9 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           moneda: m2oId(p.currency_id) === 2 ? 'BS' : 'USD', estado: estadoCobro(p.state), estado_odoo: p.state,
           referencia: txt(p.memo, 100), fecha: p.date, es_igtf: !!p.is_igtf_payment,
           igtf_origen_odoo_id: m2oId(p.pago_igtf_origen), lote_pago: txt(m2oNombre(p.batch_payment_id)),
+          saldo_odoo_usd: saldoCobro.has(p.id) ? round2(saldoCobro.get(p.id).saldo) : null,
+          odoo_conciliaciones: saldoCobro.has(p.id)
+            ? saldoCobro.get(p.id).conc.sort((a, b) => String(a[0]).localeCompare(String(b[0])) || a[1] - b[1]) : null,
         });
       }
       marcas.push(marca('pagos', E, d.pagos));
@@ -1027,22 +1048,25 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       for (const lote of lotes(pagos, 800)) {
         await escribir(`
           insert into pagos (odoo_id, empresa_id, numero, cliente_id, banco_id, metodo, monto, monto_moneda, moneda, estado, estado_odoo,
-            referencia, es_igtf, lote_pago, fecha_verificacion, fecha_pago, created_at, odoo_sync_at)
+            referencia, es_igtf, lote_pago, fecha_verificacion, fecha_pago, created_at, odoo_sync_at, saldo_odoo_usd, odoo_conciliaciones)
           select x.odoo_id, x.empresa_id, x.numero, (select c.id from clientes c where c.odoo_id = x.cliente_odoo_id),
             (select b.id from bancos b where b.odoo_id = x.banco_odoo_id), x.metodo::pago_metodo, x.monto, x.monto_moneda, x.moneda,
-            x.estado::pago_estado, x.estado_odoo, x.referencia, x.es_igtf, x.lote_pago, x.fecha::timestamptz, x.fecha, x.fecha::timestamptz, '${ts}'
+            x.estado::pago_estado, x.estado_odoo, x.referencia, x.es_igtf, x.lote_pago, x.fecha::timestamptz, x.fecha, x.fecha::timestamptz, '${ts}',
+            x.saldo_odoo_usd, x.odoo_conciliaciones
           from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, empresa_id uuid, numero text, cliente_odoo_id int, banco_odoo_id int,
             metodo text, monto numeric, monto_moneda numeric, moneda text, estado text, estado_odoo text, referencia text, es_igtf boolean,
-            lote_pago text, fecha date)
+            lote_pago text, fecha date, saldo_odoo_usd numeric, odoo_conciliaciones jsonb)
           on conflict (odoo_id) do update set empresa_id = excluded.empresa_id, numero = excluded.numero, cliente_id = excluded.cliente_id,
             banco_id = excluded.banco_id, monto = excluded.monto, monto_moneda = excluded.monto_moneda, moneda = excluded.moneda,
             estado = excluded.estado, estado_odoo = excluded.estado_odoo, referencia = excluded.referencia, es_igtf = excluded.es_igtf,
-            lote_pago = excluded.lote_pago, fecha_verificacion = excluded.fecha_verificacion, fecha_pago = excluded.fecha_pago, odoo_sync_at = excluded.odoo_sync_at, updated_at = now()
+            lote_pago = excluded.lote_pago, fecha_verificacion = excluded.fecha_verificacion, fecha_pago = excluded.fecha_pago, odoo_sync_at = excluded.odoo_sync_at,
+            saldo_odoo_usd = excluded.saldo_odoo_usd, odoo_conciliaciones = excluded.odoo_conciliaciones, updated_at = now()
           where (pagos.empresa_id, pagos.numero, pagos.cliente_id, pagos.banco_id, pagos.monto, pagos.monto_moneda, pagos.moneda, pagos.estado,
-            pagos.estado_odoo, pagos.referencia, pagos.es_igtf, pagos.lote_pago, pagos.fecha_verificacion, pagos.fecha_pago)
+            pagos.estado_odoo, pagos.referencia, pagos.es_igtf, pagos.lote_pago, pagos.fecha_verificacion, pagos.fecha_pago, pagos.saldo_odoo_usd,
+            pagos.odoo_conciliaciones)
           is distinct from (excluded.empresa_id, excluded.numero, excluded.cliente_id, excluded.banco_id, excluded.monto, excluded.monto_moneda,
             excluded.moneda, excluded.estado, excluded.estado_odoo, excluded.referencia, excluded.es_igtf, excluded.lote_pago, excluded.fecha_verificacion,
-            excluded.fecha_pago)`);
+            excluded.fecha_pago, excluded.saldo_odoo_usd, excluded.odoo_conciliaciones)`);
       }
       // IGTF: cada pago de IGTF apunta al cobro que lo originó (cuando ambos existen)
       const igtf = pagos.filter((x) => x.igtf_origen_odoo_id).map((x) => ({ odoo_id: x.odoo_id, origen: x.igtf_origen_odoo_id }));

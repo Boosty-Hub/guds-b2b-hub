@@ -28,6 +28,7 @@ import {
   Undo2,
   Contact,
   Trash2,
+  ClipboardList,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -84,6 +85,8 @@ export const navSections: NavSection[] = [
       { icon: CreditCard, label: "Cuentas", path: "/admin/cuentas", modulo: "cuentas" },
       { icon: HandCoins, label: "Cuentas por Cobrar", path: "/admin/cuentas-por-cobrar", modulo: "cuentas" },
       { icon: FileText, label: "Facturas", path: "/admin/facturas", modulo: "cuentas" },
+      // 22g (NE1): notas de entrega no fiscales (deuda interna que no está en Odoo)
+      { icon: ClipboardList, label: "Notas de entrega", path: "/admin/notas-entrega", modulo: "notas_entrega" },
       { icon: FileMinus, label: "Notas de Crédito", path: "/admin/notas-credito", modulo: "cuentas" },
       { icon: Receipt, label: "Retenciones", path: "/admin/retenciones", modulo: "cuentas" },
       { icon: Landmark, label: "Bancos", path: "/admin/bancos", modulo: "bancos" },
@@ -114,6 +117,7 @@ export const navSections: NavSection[] = [
 export type AccesoBuscador = { label: string; path: string; seccion: string; modulos: string[] };
 export const accesosBuscador: AccesoBuscador[] = [
   { label: "Lo cobrado", path: "/admin/reportes?tab=cobranza&cobranza=cobrado", seccion: "Reportes · Cobranza", modulos: ["reportes"] },
+  { label: "Antigüedad de la deuda", path: "/admin/reportes?tab=cobranza&cobranza=antiguedad", seccion: "Reportes · Cobranza", modulos: ["reportes", "cuentas"] },
   { label: "Cobranza (resumen)", path: "/admin/reportes?tab=cobranza", seccion: "Reportes", modulos: ["reportes"] },
   { label: "Calidad y cuadre", path: "/admin/reportes?tab=calidad", seccion: "Reportes", modulos: ["reportes", "cuentas"] },
 ];

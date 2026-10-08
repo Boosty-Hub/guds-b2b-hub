@@ -19,6 +19,7 @@ import { AnalisisVentas } from "@/components/reportes/AnalisisVentas";
 import { MetasVendedores } from "@/components/reportes/MetasVendedores";
 import { CalidadDatos, useCalidadOculta } from "@/components/reportes/CalidadDatos";
 import { LoCobrado } from "@/components/reportes/cobrado/LoCobrado";
+import { Antiguedad } from "@/components/reportes/antiguedad/Antiguedad";
 import { InsigniaProfit, colorFuente, periodoComparacion, Variacion, fechaCorta, TEXTO_COMPARACION } from "@/components/reportes/comun";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -56,6 +57,11 @@ type Fuente = "ambas" | "odoo" | "profit";
 const FUENTES: Record<Fuente, string> = { ambas: "Odoo + Profit", odoo: "Solo Odoo", profit: "Solo Profit" };
 const HISTORIAL_DESDE = "2020-12-01";
 const textoFuente = (f: FuenteFila) => (f === "ambas" ? "Odoo + Profit" : f === "profit" ? "Profit" : "Odoo");
+
+// Sub-vistas de Reportes → Cobranza (?cobranza=). La Antigüedad guarda en la URL su corte y sus filtros.
+type SubCobranza = "resumen" | "cobrado" | "antiguedad";
+const SUB_COBRANZA: [SubCobranza, string][] = [["resumen", "Resumen"], ["cobrado", "Lo cobrado"], ["antiguedad", "Antigüedad"]];
+const PARAMS_ANTIGUEDAD = ["corte", "base", "ne", "clasif", "agrupar", "columnas"];
 
 type Periodo = "mes" | "mes_anterior" | "trimestre" | "anio" | "12m" | "24m" | "todo" | "personalizado" | `a${number}`;
 const ANIO_ACTUAL = new Date().getFullYear();
@@ -164,8 +170,8 @@ const Reportes = () => {
   // Personalizado: desde/hasta también en la URL (22f), para que el enlace y la recarga conserven el período
   const [desdeP, setDesdeP] = useState(esIso(params.get("desde")) ? params.get("desde")! : iso(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
   const [hastaP, setHastaP] = useState(esIso(params.get("hasta")) ? params.get("hasta")! : iso(new Date()));
-  // Reportes → Cobranza: Resumen o Lo cobrado (22f, ?cobranza=cobrado)
-  const subCobranza: "resumen" | "cobrado" = params.get("cobranza") === "cobrado" ? "cobrado" : "resumen";
+  // Reportes → Cobranza: Resumen, Lo cobrado (22f, ?cobranza=cobrado) o Antigüedad (22g, ?cobranza=antiguedad)
+  const subCobranza: SubCobranza = SUB_COBRANZA.find(([k]) => k === params.get("cobranza"))?.[0] ?? "resumen";
   const [desde, hasta] = rango(periodo, desdeP, hastaP);
   const [cargando, setCargando] = useState(true);
   const [ventas, setVentas] = useState<Record<string, FilaVenta[]>>({});
@@ -191,10 +197,15 @@ const Reportes = () => {
     setTab(t);
     if (t === "ventas") params.delete("tab"); else params.set("tab", t);
     if (t !== "inventario") ["situacion", "categoria", "rotacion"].forEach((k) => params.delete(k));
-    if (t !== "cobranza") params.delete("cobranza");
+    if (t !== "cobranza") { params.delete("cobranza"); PARAMS_ANTIGUEDAD.forEach((k) => params.delete(k)); }
     setParams(params, { replace: true });
   };
-  const cambiarSubCobranza = (v: "resumen" | "cobrado") => enUrl("cobranza", v, "resumen");
+  // Al salir de la Antigüedad se quitan su corte y sus filtros de la URL
+  const cambiarSubCobranza = (v: SubCobranza) => {
+    if (v === "resumen") params.delete("cobranza"); else params.set("cobranza", v);
+    if (v !== "antiguedad") PARAMS_ANTIGUEDAD.forEach((k) => params.delete(k));
+    setParams(params, { replace: true });
+  };
   // Si la URL cambia estando en la página (p. ej. un acceso de Ctrl+K), la pestaña la sigue
   const tabUrl = params.get("tab") || "ventas";
   useEffect(() => { if (tabUrl !== tab) setTab(tabUrl); }, [tabUrl]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -217,7 +228,7 @@ const Reportes = () => {
     if (tab === "profit") { setCargando(false); return; }   // la pestaña del histórico carga lo suyo
     if (tab === "calidad" && !veDeuda) { setCargando(false); return; }   // sin permiso de Cuentas no se carga (22e)
     if (tab === "analisis" || tab === "metas" || tab === "calidad") return;   // también (e informan si están cargando)
-    if (tab === "cobranza" && subCobranza === "cobrado") { setCargando(false); return; }   // Lo cobrado carga lo suyo (22f)
+    if (tab === "cobranza" && subCobranza !== "resumen") { setCargando(false); return; }   // Lo cobrado y la Antigüedad cargan lo suyo (22f, 22g)
     let cancelado = false;
     (async () => {
       setCargando(true);
@@ -430,10 +441,10 @@ const Reportes = () => {
               </Select>
               <FiltrosLista filtros={fInv} resultados={invFiltrado.length} />
             </>
-          ) : tab === "profit" || tab === "calidad" ? null : selectorPeriodo}
+          ) : tab === "profit" || tab === "calidad" || (tab === "cobranza" && subCobranza === "antiguedad") ? null : selectorPeriodo}
           acciones={cargando ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             : <span className="text-[11px] text-muted-foreground">{tab === "calidad" ? "Bandeja de trabajo · Odoo manda"
-              : tab === "cobranza" ? <>USD a la tasa BCV del día · Odoo + Profit</>
+              : tab === "cobranza" ? (subCobranza === "antiguedad" ? <>Saldos al corte · Odoo + notas de entrega</> : <>USD a la tasa BCV del día · Odoo + Profit</>)
               : <>USD · neto de IVA · fuente {tab === "ventas" || tab === "analisis" ? FUENTES[fuente].replace("Solo ", "") : tab === "profit" ? "Profit (solo lectura)" : "Odoo"}</>}</span>} />
 
         <TabsContent value="ventas" className="mt-0">
@@ -582,12 +593,18 @@ const Reportes = () => {
 
         <TabsContent value="cobranza" className="mt-0">
           <div className="mb-2 inline-flex rounded-md border border-border bg-muted p-0.5 text-[13px]" role="tablist" aria-label="Vista de cobranza">
-            {([["resumen", "Resumen"], ["cobrado", "Lo cobrado"]] as const).map(([k, t]) => (
+            {SUB_COBRANZA.map(([k, t]) => (
               <button key={k} type="button" role="tab" aria-selected={subCobranza === k} onClick={() => cambiarSubCobranza(k)} data-testid={`cobranza-vista-${k}`}
                 className={cn("rounded-sm px-2.5 py-1 font-medium", subCobranza === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>{t}</button>
             ))}
           </div>
-          {subCobranza === "cobrado" ? (
+          {subCobranza === "antiguedad" ? (veDeuda ? (
+            <Antiguedad ambas={soloLectura} recarga={seleccion} empresas={empresaActiva?.nombre_corto ?? empresas.map((e) => e.nombre_corto).join(" y ")} />
+          ) : (
+            <p className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground" data-testid="antiguedad-sin-cuentas">
+              La antigüedad muestra la deuda de cada cliente: necesitas también el permiso de Cuentas.
+            </p>
+          )) : subCobranza === "cobrado" ? (
             <LoCobrado desde={desde} hasta={hasta} veDeuda={veDeuda} ambas={soloLectura} recarga={seleccion}
               empresas={empresaActiva?.nombre_corto ?? empresas.map((e) => e.nombre_corto).join(" y ")} />
           ) : (<>

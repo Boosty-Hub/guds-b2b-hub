@@ -14,6 +14,7 @@ import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { fmtBs, fmtTasa, fmtUsd } from "@/components/estado-cuenta/formato";
 import { fechaDMA } from "@/lib/fechas";
 import { cn } from "@/lib/utils";
+import { Segmentado } from "@/components/datos/Segmentado";
 import {
   ESTADO_COBRO, FUENTE_COBRO, TEXTO_TASA, etiquetaMes, mesesDe, num, pivotar, totalesPorMes,
   type CeldaCobro, type Cobro, type FilaMatriz,
@@ -32,21 +33,6 @@ const VISTAS: { clave: Vista; texto: string; cuentas?: boolean }[] = [
   { clave: "cliente", texto: "Cliente", cuentas: true }, { clave: "vendedor", texto: "Vendedor" },
 ];
 type FiltroDetalle = "vigentes" | "no_cuentan" | "todos";
-
-function Segmentado<T extends string>({ valor, opciones, onCambio, etiqueta }: {
-  valor: T; opciones: { clave: T; texto: string }[]; onCambio: (v: T) => void; etiqueta: string;
-}) {
-  return (
-    <div className="inline-flex rounded-md border border-border bg-muted p-0.5 text-[12px]" role="tablist" aria-label={etiqueta}>
-      {opciones.map((o) => (
-        <button key={o.clave} type="button" role="tab" aria-selected={valor === o.clave} onClick={() => onCambio(o.clave)}
-          className={cn("rounded-sm px-2 py-0.5 font-medium", valor === o.clave ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-          {o.texto}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 // Montos en Bs muy largos (cientos de millones) en el indicador: en millones, con el monto completo al pasar el ratón
 const bsCorto = (v: number) => (Math.abs(v) >= 1e8 ? `Bs ${(v / 1e6).toLocaleString("es-VE", { maximumFractionDigits: Math.abs(v) >= 1e9 ? 0 : 1 })} millones` : fmtBs(v));

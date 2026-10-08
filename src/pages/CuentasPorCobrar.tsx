@@ -62,7 +62,8 @@ interface PagoPendiente { id: string; numero: string; cliente_id: string; monto:
 // (22a: la pestaña "Cuentas manuales" se quitó; esas cuentas viejas del 14-ago están archivadas en la Papelera)
 const PESTANAS_CXC = ["cobrar", "cobros", "anticipos", "verificar"] as const;
 const CLAVES_PESTANA = ["tramo", "vendedor", "ciudad", "favor", "r_fecha", "r_banco", "r_moneda", "r_origen", "a_fecha", "v_fecha", "v_metodo", "v_origen"];
-interface Anticipo { pago_id: string; numero: string; cliente_id: string; monto_usd: number; aplicado: number; disponible: number; created_at: string; }
+// v_anticipos (22g): cobros de GUDS sin aplicar y, desde 22g, cobros de Odoo con saldo sin aplicar en Odoo (se aplican en Odoo)
+interface Anticipo { pago_id: string; numero: string; cliente_id: string; monto_usd: number; aplicado: number; disponible: number; created_at: string; empresa_id: string | null; odoo_id: number | null; fecha: string | null; }
 
 const CuentasPorCobrar = () => {
   const { formatPrice, exchangeRate } = useCurrency();
@@ -179,7 +180,7 @@ const CuentasPorCobrar = () => {
     { valor: "odoo", etiqueta: "Odoo", prueba: (c) => !!c.odoo_id },
     { valor: "guds", etiqueta: "Registrado en GUDS", prueba: (c) => !c.odoo_id },
   ];
-  const anticiposEmp = useMemo(() => anticipos.map((a) => ({ ...a, empresa_id: infoCli[a.cliente_id]?.empresa_id ?? null })), [anticipos, infoCli]);
+  const anticiposEmp = useMemo(() => anticipos.map((a) => ({ ...a, empresa_id: a.empresa_id ?? infoCli[a.cliente_id]?.empresa_id ?? null })), [anticipos, infoCli]);
   const empDeud = useFiltroEmpresa(deudores), empCobros = useFiltroEmpresa(cobros);
   const empAnt = useFiltroEmpresa(anticiposEmp), empPend = useFiltroEmpresa(pendientes);
   const defsPorTab: Record<string, (DefFiltro | null)[]> = {
@@ -220,7 +221,7 @@ const CuentasPorCobrar = () => {
   const cobrosFiltrados = cobros.filter((c) => enRango(c.fecha_pago, f.v("r_fecha")) && coincide(c.banco_id, f.v("r_banco"))
     && coincide(c.moneda, f.v("r_moneda")) && pasaPrueba(pruebasOrigenCobro, f.v("r_origen"), c)
     && (!empCobros || enEmpresa(c.empresa_id)) && tiene(c.numero, c.cliente?.nombre_negocio));
-  const anticiposFiltrados = anticiposEmp.filter((a) => enRango(a.created_at, f.v("a_fecha")) && (!empAnt || enEmpresa(a.empresa_id))
+  const anticiposFiltrados = anticiposEmp.filter((a) => enRango(a.fecha ?? a.created_at, f.v("a_fecha")) && (!empAnt || enEmpresa(a.empresa_id))
     && tiene(a.numero, clientes[a.cliente_id]));
   const pendientesFiltrados = pendientes.filter((p) => enRango(p.created_at, f.v("v_fecha")) && coincide(p.metodo, f.v("v_metodo"))
     && pasaPrueba(pruebasOrigenPend, f.v("v_origen"), p) && (!empPend || enEmpresa(p.empresa_id))
@@ -570,11 +571,12 @@ const CuentasPorCobrar = () => {
                         <TableRow key={a.pago_id}>
                           <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{a.numero}</TableCell>
                           <TableCell className="font-medium"><span className="block max-w-[260px] truncate" title={clientes[a.cliente_id] || undefined}>{clientes[a.cliente_id] || "—"}</span></TableCell>
-                          <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(a.created_at).toLocaleDateString("es-VE")}</TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">{fechaDMA(a.fecha ?? a.created_at)}</TableCell>
                           <TableCell className="whitespace-nowrap text-right">{formatPrice(a.monto_usd)}</TableCell>
                           <TableCell className="whitespace-nowrap text-right font-semibold text-success">{formatPrice(a.disponible)}</TableCell>
                           <TableCell className="text-right">
-                            <Button size="sm" variant="outline" className="h-7 whitespace-nowrap px-2 text-xs" onClick={() => abrirAplicarAnticipo(a)}>Aplicar a facturas</Button>
+                            {a.odoo_id ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs text-muted-foreground" title="Cobro de Odoo: se aplica a las facturas en Odoo">Se aplica en Odoo <OdooBadge /></span>
+                              : <Button size="sm" variant="outline" className="h-7 whitespace-nowrap px-2 text-xs" onClick={() => abrirAplicarAnticipo(a)}>Aplicar a facturas</Button>}
                           </TableCell>
                         </TableRow>
                       ))}

@@ -12,6 +12,7 @@ import { ArrowLeft, Loader2, Building2, HandCoins, Mail, Send, Wallet, AlertCirc
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { usePermissions } from "@/contexts/PermissionsContext";
+import { useEmpresa } from "@/contexts/EmpresaContext";
 import { OdooBadge } from "@/components/OdooBadge";
 import { BotonPdfEstadoCuenta } from "@/components/estado-cuenta/BotonPdfEstadoCuenta";
 import { EnlacePublicoPanel } from "@/components/estado-cuenta/EnlacePublicoPanel";
@@ -27,6 +28,8 @@ import { BotonExcel } from "@/components/datos/BotonExcel";
 import { SelectorCorte } from "@/components/datos/SelectorCorte";
 import { useCorteUrl } from "@/hooks/useCorteUrl";
 import { AnularCobroBoton } from "@/components/cobros/AnularCobroBoton";
+import { GestionCobranzaPanel } from "@/components/cobranza/GestionCobranzaPanel";
+import { ESTADO_NOTA, abierta, type NotaEntrega } from "@/components/notas-entrega/tipos";
 
 // Detalle de la cuenta de un cliente en el admin (/admin/cuentas/:clienteId).
 // 22c: UN solo estado de cuenta, con el formato del Excel de finanzas (componente EstadoCuenta: el mismo del enlace
@@ -35,6 +38,8 @@ import { AnularCobroBoton } from "@/components/cobros/AnularCobroBoton";
 // descarga el PDF y el Excel, se comparte el enlace público revocable (siempre al corte de hoy) y se envía por correo.
 // Las pestañas Facturas y ND, Notas de crédito, Pagos (con «Anular» de la fase 22a), Reintegros y Retenciones quedan como
 // listas de consulta interna. Tarjeta interna de cobranza (DSO, mora ponderada, tendencia, días de pago).
+// 22g: gestión de cobranza (activa / incobrable, con excepciones por documento) y pestaña "No fiscal" con las notas de
+// entrega del cliente (deuda interna = estado de cuenta + notas de entrega; el estado de cuenta del cliente no cambia).
 
 interface ClienteLite { id: string; nombre_negocio: string; codigo: string | null; rif: string | null; limite_credito: number; }
 interface FacturaRow {
@@ -94,6 +99,10 @@ const CuentaDetalle = () => {
   const { formatPrice } = useCurrency();
   const { can } = usePermissions();
   const puedeEditar = can("cuentas", "editar");
+  const veNotasEntrega = can("notas_entrega", "ver");
+  // En «Ambas empresas» solo se consulta (la base también lo exige)
+  const { soloLectura } = useEmpresa();
+  const [notasNe, setNotasNe] = useState<NotaEntrega[]>([]);
   const [cliente, setCliente] = useState<ClienteLite | null>(null);
   const [facturas, setFacturas] = useState<FacturaRow[]>([]);
   const [pagos, setPagos] = useState<PagoRow[]>([]);
@@ -165,6 +174,15 @@ const CuentaDetalle = () => {
     return () => { activo = false; };
   }, [clienteId, corte, cortePasado, ecIntento]);
 
+  // Notas de entrega no fiscales del cliente (22g · NE1)
+  useEffect(() => {
+    if (!veNotasEntrega) return;
+    let activo = true;
+    supabase.from("v_notas_entrega").select("*").eq("cliente_id", clienteId).order("fecha_emision", { ascending: false })
+      .then(({ data }) => { if (activo) setNotasNe((data as NotaEntrega[]) ?? []); });
+    return () => { activo = false; };
+  }, [clienteId, veNotasEntrega]);
+
   const cargarEnvios = useCallback(async () => {
     const { data, error } = await supabase.rpc("envios_estado_cuenta", { p_cliente_id: clienteId });
     setEnvios(error ? [] : ((data as EnvioRow[]) ?? []));
@@ -220,6 +238,8 @@ const CuentaDetalle = () => {
   // Mismo número que la lista de Cuentas: facturas y notas de débito con saldo menos notas de crédito a favor (al corte)
   const saldoDeudor = r ? r.saldo - r.nc_a_favor : facturas.reduce((s, f) => s + Number(f.saldo_usd || 0), 0);
   const tabActivos = [reintegros.length > 0, retenciones.length > 0];
+  // Deuda interna = saldo deudor del estado de cuenta + notas de entrega con saldo (no fiscal)
+  const saldoNe = notasNe.filter(abierta).reduce((s, n) => s + Number(n.saldo_usd), 0);
 
   return (
     <MainLayout title={cliente.nombre_negocio}>
@@ -239,6 +259,11 @@ const CuentaDetalle = () => {
           <div className="sm:text-right">
             <p className={`text-lg font-semibold tabular-nums ${saldoDeudor > 0.009 ? "text-destructive" : ""}`} data-testid="cd-saldo">{fmtUsd(saldoDeudor)}</p>
             <p className="text-sm text-muted-foreground">Saldo deudor{cortePasado ? ` al ${fechaNumerica(corte)}` : ""}</p>
+            {saldoNe > 0.009 && (
+              <p className="text-xs text-muted-foreground" data-testid="cd-deuda-interna" title="Saldo deudor + notas de entrega no fiscales con saldo (hoy)">
+                Deuda interna con notas de entrega: <span className="font-semibold text-foreground">{fmtUsd(saldoDeudor + saldoNe)}</span>
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <BotonPdfEstadoCuenta datos={ec} enlace={enlaceUrl} etiqueta="PDF" className="gap-2" />
@@ -270,6 +295,7 @@ const CuentaDetalle = () => {
             <TabsTrigger value="pagos" className="h-6 text-xs" data-testid="tab-pagos">Pagos ({pagos.length})</TabsTrigger>
             {tabActivos[0] && <TabsTrigger value="reintegros" className="h-6 text-xs">Reintegros ({reintegros.length})</TabsTrigger>}
             {tabActivos[1] && <TabsTrigger value="retenciones" className="h-6 text-xs">Retenciones ({retenciones.length})</TabsTrigger>}
+            {notasNe.length > 0 && <TabsTrigger value="no-fiscal" className="h-6 text-xs" data-testid="tab-no-fiscal">No fiscal ({notasNe.length})</TabsTrigger>}
           </TabsList>
         </div>
 
@@ -480,12 +506,44 @@ const CuentaDetalle = () => {
             </div>
           </TabsContent>
         )}
+        {notasNe.length > 0 && (
+          <TabsContent value="no-fiscal" className="mt-2">
+            <div className="rounded-lg border border-border bg-card" data-testid="cd-no-fiscal">
+              <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+                Notas de entrega no fiscales: deuda interna que no está en Odoo ni en el estado de cuenta del cliente.
+                Saldo: <span className="font-semibold text-foreground">{fmtUsd(saldoNe)}</span>
+              </p>
+              <Table>
+                <TableHeader><TableRow>
+                  <TableHead>Nota</TableHead><TableHead className="hidden sm:table-cell">Emisión</TableHead>
+                  <TableHead className="hidden text-right md:table-cell">Total</TableHead><TableHead className="text-right">Saldo</TableHead><TableHead className="hidden sm:table-cell">Estado</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {notasNe.map((n) => (
+                    <TableRow key={n.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/notas-entrega/${n.id}`)}>
+                      <TableCell className="whitespace-nowrap py-1.5 font-mono text-xs text-primary">{n.documento}</TableCell>
+                      <TableCell className="hidden whitespace-nowrap py-1.5 sm:table-cell">{fmtFecha(n.fecha_emision)}</TableCell>
+                      <TableCell className="hidden whitespace-nowrap py-1.5 text-right tabular-nums md:table-cell">{fmtUsd(n.total_usd)}</TableCell>
+                      <TableCell className="whitespace-nowrap py-1.5 text-right font-semibold tabular-nums">{fmtUsd(n.saldo_usd)}</TableCell>
+                      <TableCell className="hidden py-1.5 sm:table-cell">
+                        <span className="flex gap-1"><Badge variant={ESTADO_NOTA[n.estado].variant}>{ESTADO_NOTA[n.estado].texto}</Badge>
+                          {n.clasificacion === "incobrable" && <Badge variant="destructive">Incobrable</Badge>}</span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Cobranza interna, enlace público y envíos por correo */}
       <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
         <div className="min-w-0"><TarjetaMetricas clienteId={cliente.id} formatPrice={formatPrice} /></div>
         <div className="space-y-3 min-w-0">
+          <GestionCobranzaPanel clienteId={cliente.id} puedeEditar={puedeEditar && !soloLectura}
+            documentos={(ec?.abiertos ?? []).map((x) => ({ factura_id: x.factura_id ?? null, numero: x.numero, tipo: x.tipo, saldo: Number(x.saldo) }))} />
           <EnlacePublicoPanel clienteId={cliente.id} puedeEditar={puedeEditar} onEnlace={alEnlace} recargarSenal={senal} />
           <div className="rounded-lg border border-border bg-card" data-testid="ec-envios">
             <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-3 py-1.5">

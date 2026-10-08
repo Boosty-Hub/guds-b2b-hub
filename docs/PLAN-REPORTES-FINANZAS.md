@@ -161,6 +161,25 @@ Secciones por empresa:
    excepción por documento.
 6. Mostrar "último estado de cuenta enviado" en lugar de la columna "Observación".
 
+**✅ Hecho (22g, 8-oct).** Reportes → Cobranza → **Antigüedad** (`?cobranza=antiguedad`, también en Ctrl+K; exige reportes y
+cuentas):
+
+- **Una sola fuente** `partidas_cobranza(corte, empresas, ne)`: facturas, ND, NC a favor, anticipos de Odoo y de GUDS y notas
+  de entrega abiertas al corte, con el mismo saldo y el mismo "qué falta" del estado de cuenta (probado documento por documento).
+  `reporte_antiguedad(corte, ne)` la entrega en JSON y la página agrupa; ≈ 200 ms.
+- Corte (hoy o cierre de mes), días desde el vencimiento (por defecto) o la emisión, activa/incobrable, interruptor de N/E;
+  matriz por año, vendedor (del documento o del cliente), tipo, categoría, cliente, tipo de partida, clasificación o empresa, en
+  tramos o años, con % del total y % vencido; top 10; detalle; Excel con las secciones del libro de finanzas. Todo en la URL.
+- **T6:** la sincronización trae el saldo sin aplicar de cada cobro de Odoo y sus conciliaciones (`pagos.saldo_odoo_usd`,
+  `pagos.odoo_conciliaciones`), así se sabe el saldo a cualquier corte. Hoy: GUDS USD 55.929 (92 cobros) y Quirutec USD 195.758 (164),
+  que antes no se veían. `v_anticipos` los incluye: el estado de cuenta los resta y CxC → Anticipos los lista ("se aplica en Odoo").
+- **T5:** gestión de cobranza en el detalle de la cuenta (activa/incobrable, responsable, nota, desde cuándo, excepciones por
+  documento, historial). Carga del Excel: 139 documentos incobrables (USD 59.381) → 21 clientes + 19 documentos sueltos.
+- "Observación" → último estado de cuenta enviado por correo, en el top 10 y en el detalle del Excel.
+- **Cuadre con el Excel al 30-abr:** 1.034 de 1.069 facturas y ND con el saldo idéntico; deuda de documentos GUDS −0,6 % y
+  Quirutec −0,1 % (NC que Odoo ya aplicó a su factura); incobrables idénticos. El Excel incluye documentos del 1 al 6 de mayo y
+  cuenta desde la emisión.
+
 ## 3. FORMATO DE LO COBRADO — Libro de cobros
 
 **Qué trae.**
@@ -419,7 +438,7 @@ Por eso `clientes.tipo_cliente`, `canal` y `segmento` están vacíos en GUDS: la
 
 | Fase | Contenido |
 |---|---|
-| NE1 | Tablas, carga de las 29, lista y detalle de solo lectura, bloque "no fiscal" en la antigüedad y en la deuda interna (lo que necesita R3) |
+| NE1 | Tablas, carga de las 29, lista y detalle de solo lectura, bloque "no fiscal" en la antigüedad y en la deuda interna (lo que necesita R3) — ✅ 22g: Finanzas → Notas de entrega; 29 HIST (USD 44.004,91), 5 clientes con ficha; pestaña "No fiscal" en la cuenta |
 | NE2 | Emitir, PDF, abonos y anular |
 | NE3 | Conversión con sugerencias, enlace con pedidos de Odoo, alertas y cartera del vendedor |
 
@@ -442,7 +461,7 @@ Por eso `clientes.tipo_cliente`, `canal` y `segmento` están vacíos en GUDS: la
 | R0 | `fecha_pago` y fecha única de cobros; `lib/fechas` + `SelectorPeriodo` / `SelectorCorte`; `lib/excel` + `BotonExcel`; T2; armazón de sub-vistas en Reportes → Cobranza y accesos en Ctrl+K; limpieza de los hallazgos de abajo | — |
 | R1 | Estado de cuenta con el formato del equipo, Excel y corte | R0 |
 | R2 | Lo cobrado + carga de cobros de Profit ene–abr | R0 |
-| R3 | T5, T6, Antigüedad y NE1 (+ T1 si ya se decidió D5) | R0, NE1 |
+| R3 | T5, T6, Antigüedad y NE1 (+ T1 si ya se decidió D5) — ✅ 22g | R0, NE1 |
 | R4 | Ventas vs deuda y días de recuperación nuevos, con su explicación | R3 |
 | NE2–NE3 | Emitir, abonos y conversión de N/E | respuestas de finanzas |
 
@@ -450,6 +469,12 @@ Cada fase se cierra con el cuadre contra el Excel del equipo (es la "respuesta c
 Playwright a 1440 y 390 px en GUDS, Quirutec y «Ambas».
 
 ## Hallazgos para revisar
+
+> 8-oct (noche, 22g): **Antigüedad** hecha (ver §2). Dos hallazgos para finanzas: (1) Odoo tiene **USD 251.687 en cobros sin
+> aplicar** (GUDS 55.929, Quirutec 195.758; 256 cobros, varios de "Saldo Iniciales Anticipo") que GUDS no mostraba; ahora restan
+> en el estado de cuenta y se ven en la antigüedad, pero hay que aplicarlos en Odoo. (2) Los anticipos de saldo inicial de
+> GUDS Supply se migraron a Odoo con fecha 4–5 de mayo, no con la de Profit: a un corte anterior no aparecen y su antigüedad
+> sale corta. Corregir la fecha es en Odoo.
 
 > 8-oct (noche, 22f): **Lo cobrado** hecho (ver §3). Aviso de operación: la sincronización escribe con los disparadores
 > apagados (`session_replication_role = replica`), así que una columna obligatoria nueva en una tabla espejo se despliega
