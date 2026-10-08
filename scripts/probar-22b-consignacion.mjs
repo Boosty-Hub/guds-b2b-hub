@@ -156,6 +156,34 @@ await caso('Las cantidades se declaran en unidades enteras',
   'unidades enteras',
   bloque({ pasos: `perform public.declarar_venta_consignacion('${alm.id}', ${items([{ producto_id: pA.id, cantidad: 1.5 }])}, null);`, cuerpo: `select 'no'` }));
 
+// ── 22e: sin precio no se declara ni se aprueba; almacén sin cliente ──
+// Producto de la empresa, en Odoo, sin precio para el cliente: dentro del bloque se le da existencia en el almacén (se deshace)
+const [pZ] = await sql(`select p.id, p.nombre from productos p where p.empresa_id = '${guds.id}' and p.odoo_id is not null
+  and coalesce(public.precio_efectivo(p.id, null, '${alm.cliente_id}'), 0) <= 0 order by p.nombre limit 1`);
+if (pZ) {
+  const conZ = `insert into inventario_almacen (almacen_id, producto_id, cantidad, reservado, empresa_id)
+    values ('${alm.id}', '${pZ.id}', 10, 0, '${guds.id}') on conflict (almacen_id, producto_id) do update set cantidad = 10, reservado = 0;`;
+  await caso('22e: consignacion_disponible trae el precio para el cliente (0 si no tiene)',
+    (r) => Number(r.a) > 0 && Number(r.z) === 0,
+    bloque({ antes: conZ, pasos: `perform set_config('prueba.disp', (${fila(`select
+        (select precio from public.consignacion_disponible('${alm.id}') where producto_id = '${pA.id}') a,
+        (select precio from public.consignacion_disponible('${alm.id}') where producto_id = '${pZ.id}') z`)}), true);`,
+      cuerpo: `select current_setting('prueba.disp')` }));
+  await caso('22e: no se declara un producto sin precio (la respuesta lo nombra)',
+    (r, e) => /Sin precio para este cliente/.test(e || '') && (e || '').includes(pZ.nombre.slice(0, 20)) && !(e || '').includes(pA.nombre.slice(0, 20)),
+    bloque({ antes: conZ, pasos: DECLARAR([{ producto_id: pA.id, cantidad: 1 }, { producto_id: pZ.id, cantidad: 1 }]), cuerpo: `select 'no'` }));
+} else {
+  casos.push({ ok: '✗', caso: '22e: hay un producto sin precio para probar el bloqueo', resultado: 'no se encontró' });
+}
+await caso('22e: no se aprueba una declaración con una línea sin precio',
+  (r, e) => /No se puede aprobar: hay productos sin precio/.test(e || '') && (e || '').includes(pB.nombre.slice(0, 20)),
+  bloque({ pasos: DECLARAR(dos) + `execute 'reset role';
+      update declaracion_consignacion_items set precio_unitario = 0, subtotal = 0 where declaracion_id = ${DECL} and producto_id = '${pB.id}';
+      execute 'set local role authenticated';` + APROBAR, cuerpo: `select 'no'` }));
+await caso('22e: no se declara en un almacén sin cliente asignado',
+  'no tiene un cliente asignado',
+  bloque({ antes: `update almacenes set cliente_id = null where id = '${alm.id}';`, pasos: DECLARAR(dos), cuerpo: `select 'no'` }));
+
 await caso('Pausa de seguridad (hasta desplegar sync-odoo): aprobar responde con el aviso y no crea pedido',
   'en pausa',
   bloque({ pausa: true, antes: `update configuracion set valor = 'pausado' where clave = 'odoo_envio_consignacion';`,

@@ -4,8 +4,8 @@ import { ChevronDown, ChevronRight, Lock, MessageSquare, MessageSquarePlus, Spar
 import { cn } from "@/lib/utils";
 import { TRAMOS, condicionPagoTexto } from "@/hooks/useFinanzasPortal";
 import {
-  ESTATUS, anioMes, conceptoAbono, corteDe, estatusDe, fechaLarga, fechaNumerica, fmtBs, fmtTasa, fmtUsd, formatoRif, textoActualizado,
-  tipoYNumero, totalesDocumentos,
+  ESTATUS, ORIGEN_TASA, anioMes, conceptoAbono, corteDe, estatusDe, fechaLarga, fechaNumerica, fmtBs, fmtTasa, fmtUsd, formatoRif,
+  leyendaTasas, origenTasaTexto, textoActualizado, tipoYNumero, totalesDocumentos,
 } from "./formato";
 import type { AbonoDocumento, DocumentoAbierto, EstadoCuentaCompleto, EstatusDocumento } from "./tipos";
 
@@ -210,7 +210,8 @@ export function EstadoCuenta({
                           <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-muted-foreground">{fechaNumerica(d.emision)}</td>
                           <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-muted-foreground">{fechaNumerica(d.vence ?? d.emision)}</td>
                           <td className={cn("whitespace-nowrap px-2 py-1.5 text-right tabular-nums", claseDias(d))} data-testid="ec-dias">{d.dias}</td>
-                          <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-muted-foreground" data-testid="ec-tasa">{fmtTasa(d.tasa_emision)}</td>
+                          <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-muted-foreground" data-testid="ec-tasa" data-origen={d.tasa_origen ?? undefined}
+                            title={origenTasaTexto(d) ? `Tasa: ${origenTasaTexto(d)}` : undefined}>{fmtTasa(d.tasa_emision)}<MarcaTasa d={d} alinear /></td>
                           <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{hay(d.base) ? fmtUsd(n(d.base)) : "—"}</td>
                           <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{hay(d.iva) ? fmtUsd(n(d.iva)) : "—"}</td>
                           <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{fmtUsd(d.total)}</td>
@@ -270,7 +271,7 @@ export function EstadoCuenta({
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                       <PillEstatus d={d} />
                       <span className="tabular-nums">Base {fmtUsd(n(d.base))} · IVA {fmtUsd(n(d.iva))}</span>
-                      <span className="tabular-nums">Tasa {fmtTasa(d.tasa_emision)}</span>
+                      <span className="tabular-nums">Tasa {fmtTasa(d.tasa_emision)}<MarcaTasa d={d} /></span>
                     </div>
                     <button type="button" onClick={() => alternar(k)} aria-expanded={abierto} className="mt-1.5 flex items-center gap-1 text-xs font-medium text-primary">
                       {abierto ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -295,7 +296,8 @@ export function EstadoCuenta({
         <p>
           Montos en dólares (US$); las notas de crédito a favor van en negativo y los documentos en bolívares se expresan en US$ a la tasa
           de cada documento. Días transcurridos = corte − vencimiento (negativo = por vencer). Tasa de emisión: en bolívares, la del documento;
-          en dólares, la BCV del día de emisión. Toca un documento para ver sus abonos y comentarios.
+          en dólares, la BCV del día de emisión; en una nota de crédito, la de la factura que afecta.
+          {leyendaTasas(docs) && <span data-testid="ec-leyenda-tasas"> {leyendaTasas(docs)}.</span>} Toca un documento para ver sus abonos y comentarios.
         </p>
         <p>
           «Qué falta» es una sugerencia automática (tolerancia {fmtUsd(datos.tolerancia ?? 0.05)}); los comentarios los escribe nuestro equipo.
@@ -335,6 +337,17 @@ function Antiguedad({ resumen }: { resumen: EstadoCuentaCompleto["resumen"] }) {
 }
 
 /** Lo que se despliega bajo un documento: qué falta, comentarios, lo abonado por tipo y cada abono. */
+/** Marca junto a la tasa cuando no es la regla general: F (factura que afecta la NC) o P (tomada de Profit). En la tabla
+ *  (alinear) ocupa siempre el mismo ancho para que las tasas queden alineadas. */
+function MarcaTasa({ d, alinear }: { d: DocumentoAbierto; alinear?: boolean }) {
+  const m = d.tasa_origen ? ORIGEN_TASA[d.tasa_origen]?.marca : "";
+  if (!m && !alinear) return null;
+  return (
+    <sup className={cn("ml-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-300", alinear && "inline-block w-1.5 text-left")}
+      aria-label={m ? `Tasa: ${origenTasaTexto(d) ?? ""}` : undefined} aria-hidden={m ? undefined : true}>{m}</sup>
+  );
+}
+
 function Detalle({ d, modo, onComentar, movil }: { d: DocumentoAbierto; modo: ModoEstadoCuenta; onComentar?: (d: DocumentoAbierto) => void; movil?: boolean }) {
   const admin = modo === "admin";
   const comentarios = (d.comentarios ?? []).filter((c) => admin || c.visible !== false);
@@ -358,6 +371,9 @@ function Detalle({ d, modo, onComentar, movil }: { d: DocumentoAbierto; modo: Mo
         )}
         {d.moneda === "VES" && d.total_bs != null && (
           <span className="text-muted-foreground">En Bs: total {fmtBs(d.total_bs)}{d.saldo_bs != null ? ` · deuda ${fmtBs(d.saldo_bs)}` : ""}</span>
+        )}
+        {d.tasa_emision != null && origenTasaTexto(d) && (
+          <span className="text-muted-foreground" data-testid="ec-tasa-origen">Tasa de emisión {fmtTasa(d.tasa_emision)}: {origenTasaTexto(d)}</span>
         )}
       </div>
 

@@ -40,6 +40,9 @@ export type TipoDocumentoAbierto = "factura" | "nota_debito" | "nota_credito";
 /** Estatus del formato de finanzas (22c): Pendiente por cobrar · Pendiente comprobante de retención · NC a favor · Saldo a favor. */
 export type EstatusDocumento = "pendiente" | "retencion" | "nc_favor" | "a_favor";
 
+/** De dónde sale la tasa de emisión de un documento (22e). */
+export type OrigenTasa = "factura" | "documento" | "bcv" | "profit";
+
 /** Un abono aplicado a un documento (fase 21b): cobro, nota de crédito, retención, reintegro u otro ajuste. */
 export interface AbonoDocumento {
   fecha: string | null;
@@ -73,9 +76,13 @@ export interface DocumentoAbierto {
   nro_control?: string | null;
   /** Estatus del formato de finanzas (22c). */
   estatus?: EstatusDocumento;
-  /** Tasa de emisión (Bs por USD): en Bs, la del documento; en USD, la BCV del día de emisión (o la última anterior). */
+  /** Tasa de emisión (Bs por USD): en Bs, la del documento; en USD, la BCV del día de emisión (o la última anterior);
+   *  en una NC, la de la factura que afecta (22e). */
   tasa_emision?: number | null;
-  tasa_origen?: "documento" | "bcv" | null;
+  /** De dónde sale la tasa (22e): factura que afecta la NC · documento en Bs · BCV del día · Profit (día sin tasa en Odoo). */
+  tasa_origen?: OrigenTasa | null;
+  /** Número de la factura cuya tasa lleva la NC (tasa_origen = 'factura'). */
+  tasa_factura?: string | null;
   emision: string | null;
   vence: string | null;
   total: number;

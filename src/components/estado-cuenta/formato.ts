@@ -1,4 +1,4 @@
-import type { DocumentoAbierto, EmpresaEstadoCuenta, EstadoCuentaCompleto, EstatusDocumento, TipoDocumentoAbierto } from "./tipos";
+import type { DocumentoAbierto, EmpresaEstadoCuenta, EstadoCuentaCompleto, EstatusDocumento, OrigenTasa, TipoDocumentoAbierto } from "./tipos";
 
 // Formatos del estado de cuenta compartidos por la página pública, el admin y el PDF: siempre en USD, con el signo antes
 // del símbolo (-$1,234.69, la convención de la plataforma) y fechas en español de Venezuela.
@@ -134,6 +134,25 @@ export const anioMes = (d: Pick<DocumentoAbierto, "vence" | "emision">): { anio:
 /** Tasa (Bs por USD) con 4 decimales: 549.3716. */
 export const fmtTasa = (n: number | null | undefined) =>
   n == null || !Number.isFinite(Number(n)) ? "—" : Number(n).toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+
+/** De dónde sale la tasa de emisión (22e): marca junto al número (solo las que no son la regla general) y su explicación. */
+export const ORIGEN_TASA: Record<OrigenTasa, { marca: string; texto: string }> = {
+  bcv: { marca: "", texto: "BCV del día de emisión" },
+  documento: { marca: "", texto: "la del documento en bolívares" },
+  factura: { marca: "F", texto: "la de la factura que afecta la nota de crédito" },
+  profit: { marca: "P", texto: "tomada de Profit: ese día no hay tasa BCV en Odoo" },
+};
+export const origenTasaTexto = (d: Pick<DocumentoAbierto, "tasa_origen" | "tasa_factura">): string | null =>
+  !d.tasa_origen ? null
+    : d.tasa_origen === "factura" && d.tasa_factura ? `la de la factura ${d.tasa_factura} (que afecta la nota de crédito)`
+    : ORIGEN_TASA[d.tasa_origen]?.texto ?? null;
+/** Leyenda de las marcas que aparecen en estos documentos ("F = …; P = …"), o null si no hay ninguna. */
+export const leyendaTasas = (docs: Pick<DocumentoAbierto, "tasa_origen">[]): string | null => {
+  const hay = new Set(docs.map((d) => d.tasa_origen).filter(Boolean));
+  const partes = (Object.entries(ORIGEN_TASA) as [OrigenTasa, { marca: string; texto: string }][])
+    .filter(([k, v]) => v.marca && hay.has(k)).map(([, v]) => `${v.marca} = ${v.texto}`);
+  return partes.length ? partes.join("; ") : null;
+};
 
 /** RIF con guiones: J-410154438 → J-41015443-8 (si no tiene la forma esperada, tal cual). */
 export const formatoRif = (rif: string | null | undefined) => {

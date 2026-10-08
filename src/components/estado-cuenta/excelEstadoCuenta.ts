@@ -1,9 +1,11 @@
 import { nombreArchivoExcel, type LibroExcel } from "@/lib/excel";
 import { TRAMOS } from "@/hooks/useFinanzasPortal";
 import {
-  ESTATUS, anioMes, conceptoAbono, corteDe, estatusDe, fechaNumerica, formatoRif, textoActualizado, tipoYNumero,
+  ESTATUS, anioMes, conceptoAbono, corteDe, estatusDe, fechaNumerica, formatoRif, origenTasaTexto, textoActualizado, tipoYNumero,
 } from "./formato";
 import type { AbonoDocumento, DocumentoAbierto, EstadoCuentaCompleto } from "./tipos";
+
+const origenTasa = (d: DocumentoAbierto) => { const t = origenTasaTexto(d); return t ? t[0].toUpperCase() + t.slice(1) : ""; };
 
 // Excel del estado de cuenta (fase 22c) con el formato del equipo de finanzas ("FORMATO EDC"): mismo encabezado (empresa,
 // RIF, cliente y "Estado de cuenta actualizado al …"), mismas columnas y fila de totales; más el detalle de los abonos y
@@ -48,13 +50,15 @@ export function libroEstadoCuenta(datos: EstadoCuentaCompleto): LibroExcel {
           { titulo: "Total US$", valor: (d: DocumentoAbierto) => d.total, tipo: "usd", ancho: 14 },
           { titulo: "Deuda US$", valor: (d: DocumentoAbierto) => d.saldo, tipo: "usd", ancho: 14 },
           { titulo: "Estatus", valor: (d: DocumentoAbierto) => ESTATUS[estatusDe(d)].texto, tipo: "texto", ancho: 30 },
+          // 22e: de dónde sale la tasa (después de las columnas del formato del equipo, para no moverlas)
+          { titulo: "Origen de la tasa", valor: (d: DocumentoAbierto) => origenTasa(d), tipo: "texto", ancho: 34 },
           { titulo: "Qué falta (sugerencia)", valor: (d: DocumentoAbierto) => d.que_falta?.texto ?? "", tipo: "texto", ancho: 36 },
           { titulo: "Comentario", valor: comentarioVisible, tipo: "texto", ancho: 40, ajustar: true },
         ],
         notas: [
           "Montos en dólares (US$). Las notas de crédito a favor van en negativo. Los documentos en bolívares se expresan en US$ a la tasa de cada documento.",
           "Días transcurridos = fecha de corte − fecha de vencimiento (negativo = por vencer).",
-          "Tasa de emisión: en los documentos en bolívares, la del documento; en los documentos en dólares, la tasa BCV del día de emisión (o la última publicada antes).",
+          "Tasa de emisión: en los documentos en bolívares, la del documento; en los documentos en dólares, la tasa BCV del día de emisión (o la última publicada antes); en las notas de crédito, la de la factura que afectan. La columna «Origen de la tasa» dice de dónde sale cada una (las tomadas de Profit son de días sin tasa BCV en Odoo).",
           "«Qué falta» es una sugerencia automática según la base, el IVA y lo abonado; los comentarios los escribe nuestro equipo.",
         ],
       },

@@ -149,7 +149,8 @@ function GraficoVentas({ datos, formato }: { datos: { mes: string; odoo: number;
 const Reportes = () => {
   const { formatPrice } = useCurrency();
   const { soloLectura, seleccion } = useEmpresa();
-  // 22a4: los reportes con deuda por cliente exigen reportes Y cuentas (la base también lo exige)
+  // 22a4/22e: los reportes con deuda o cobros por cliente (DSO, "Top clientes que pagaron", Calidad y cuadre) exigen reportes Y
+  // cuentas (la base también lo exige)
   const { can } = usePermissions();
   const veDeuda = can("cuentas", "ver");
   const { toast } = useToast();
@@ -193,6 +194,7 @@ const Reportes = () => {
   // Carga según la pestaña (cada consulta agrega en el servidor)
   useEffect(() => {
     if (tab === "profit") { setCargando(false); return; }   // la pestaña del histórico carga lo suyo
+    if (tab === "calidad" && !veDeuda) { setCargando(false); return; }   // sin permiso de Cuentas no se carga (22e)
     if (tab === "analisis" || tab === "metas" || tab === "calidad") return;   // también (e informan si están cargando)
     let cancelado = false;
     (async () => {
@@ -239,7 +241,7 @@ const Reportes = () => {
           setMeses((out.mes ?? []) as FilaVenta[]); setReversos((out.reversos ?? []) as FilaReverso[]);
           if (fallas.length) toast({ title: `No se pudieron cargar ${fallas.length} de ${total} partes del reporte`, description: fallas[0], variant: "destructive" });
         } else if (tab === "cobranza") {
-          const grupos = ["empresa", "banco", "vendedor", "cliente", "metodo"];
+          const grupos = ["empresa", "banco", "vendedor", ...(veDeuda ? ["cliente"] : []), "metodo"];
           const [res, prev, m] = await Promise.all([
             Promise.all(grupos.map((g) => rpc<FilaCobro>("reporte_cobranza", { p_desde: desde, p_hasta: hasta, p_agrupar: g }))),
             rpc<FilaCobro>("reporte_cobranza", { p_desde: pd, p_hasta: ph, p_agrupar: "empresa" }),
@@ -261,7 +263,7 @@ const Reportes = () => {
     })();
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, desde, hasta, diasRot, soloLectura, seleccion, fuente]);
+  }, [tab, desde, hasta, diasRot, soloLectura, seleccion, fuente, veDeuda]);
 
   // ── Ventas ──
   const totalVentas = useMemo(() => {
@@ -366,7 +368,7 @@ const Reportes = () => {
       <TabsTrigger value="cobranza">Cobranza</TabsTrigger>
       <TabsTrigger value="inventario"><span className="sm:hidden">Inventario</span><span className="hidden sm:inline">Inventario y rotación</span></TabsTrigger>
       <TabsTrigger value="profit"><span className="sm:hidden">Profit</span><span className="hidden sm:inline">Histórico Profit</span></TabsTrigger>
-      {calidadOculta && tab !== "calidad"
+      {!veDeuda ? null : calidadOculta && tab !== "calidad"
         ? <TabsTrigger value="calidad" title="Calidad y cuadre (sección oculta)" aria-label="Calidad y cuadre (sección oculta)" className="px-2 text-muted-foreground/70"><ClipboardCheck className="h-3.5 w-3.5" /></TabsTrigger>
         : <TabsTrigger value="calidad"><span className="sm:hidden">Calidad</span><span className="hidden sm:inline">Calidad y cuadre</span></TabsTrigger>}
     </TabsList>
@@ -586,12 +588,14 @@ const Reportes = () => {
               { clave: "cobros", titulo: "Cobros", valor: (f) => num(f.cobros), derecha: true },
               { clave: "monto", titulo: "Cobrado", valor: (f) => num(f.monto_usd), render: (f) => formatPrice(num(f.monto_usd)), derecha: true },
             ]} />
-            <TablaReporte titulo="Top clientes que pagaron" filas={cobros.cliente ?? []} exportar="cobranza-por-cliente" metrica={(f) => num(f.monto_usd)} columnas={[
-              { clave: "etiqueta", titulo: "Cliente", valor: (f) => f.etiqueta },
-              { clave: "detalle", titulo: "RIF · ciudad", valor: (f) => f.detalle, secundaria: true },
-              { clave: "cobros", titulo: "Cobros", valor: (f) => num(f.cobros), derecha: true },
-              { clave: "monto", titulo: "Cobrado", valor: (f) => num(f.monto_usd), render: (f) => formatPrice(num(f.monto_usd)), derecha: true },
-            ]} />
+            {veDeuda && (
+              <TablaReporte titulo="Top clientes que pagaron" filas={cobros.cliente ?? []} exportar="cobranza-por-cliente" metrica={(f) => num(f.monto_usd)} columnas={[
+                { clave: "etiqueta", titulo: "Cliente", valor: (f) => f.etiqueta },
+                { clave: "detalle", titulo: "RIF · ciudad", valor: (f) => f.detalle, secundaria: true },
+                { clave: "cobros", titulo: "Cobros", valor: (f) => num(f.cobros), derecha: true },
+                { clave: "monto", titulo: "Cobrado", valor: (f) => num(f.monto_usd), render: (f) => formatPrice(num(f.monto_usd)), derecha: true },
+              ]} />
+            )}
           </div>
           {/* 21b (agente F2-3): DSO y mora por vendedor y por cliente. Muestra deuda por cliente: solo con el permiso de Cuentas */}
           {veDeuda && <CobranzaDso />}
@@ -659,7 +663,11 @@ const Reportes = () => {
         </TabsContent>
 
         <TabsContent value="calidad" className="mt-0">
-          {tab === "calidad" && <CalidadDatos onCargando={setCargando} />}
+          {tab === "calidad" && (veDeuda
+            ? <CalidadDatos onCargando={setCargando} />
+            : <p className="rounded-lg border border-border bg-card p-6 text-center text-sm text-muted-foreground" data-testid="calidad-sin-permiso">
+                Calidad y cuadre muestra datos por cliente: necesitas también el permiso de Cuentas.
+              </p>)}
         </TabsContent>
       </Tabs>
     </MainLayout>

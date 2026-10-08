@@ -10,6 +10,60 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-08 (tarde) · Respuestas a lo abierto de 22a–22d: clasificación y consignación activas, tasa de las NC, permisos (22e)
+
+- **Clasificación en Odoo activa** (autorizado: "solo escribe uno ahora y confirmas"):
+  - Se escribió **un cliente de GUDS** (tipo Distribuidor del Excel de finanzas) por el camino normal: confirmar →
+    `enviar_clasificacion_odoo` → cola → `sync-odoo`, en 3 s.
+  - Verificado leyendo Odoo:
+    - el partner tiene Industria "Distribuidor", Canal "Tradicional indirecto" y Segmento "Independiente / Distribuidor";
+    - "DISTRIBUIDOR" se renombró a "Distribuidor" (base y es_VE), sin tocar los 21 sectores en inglés;
+    - se crearon el canal y el segmento (id 1 en cada uno);
+    - la nota "(GUDS)" quedó en el historial.
+  - Tres sincronizaciones después, GUDS lo mantiene y los 3 clientes de Quirutec que tenían DISTRIBUIDOR ya muestran
+    "Distribuidor".
+  - `odoo_escritura_clasificacion = 'activo'`: el resto lo envía finanzas desde Configuración → Clasificación.
+- **Consignación activa** (`odoo_envio_consignacion = 'activo'`):
+  - **Sin precio no se declara ni se aprueba** (decisión): `declarar_venta_consignacion` y
+    `revisar_declaracion_consignacion` responden con la lista de productos.
+    - El formulario (portal del vendedor y del cliente) muestra el precio, avisa y bloquea el botón.
+    - El admin ve la alerta y "Aprobar" queda bloqueado.
+  - Tampoco se declara en un almacén sin cliente.
+  - Probado de punta a punta en el navegador con un cliente y un almacén de prueba sin Odoo: el vendedor declara, el admin
+    aprueba, el pedido sale con el almacén de consignación, y el envío a Odoo se intenta y **para antes de escribir**
+    (cliente sin Odoo). Todo se borró y la numeración DC/ORD se devolvió.
+  - Simulación del payload: `sale.order` sin `state` (queda cotización en borrador) desde el almacén de consignación.
+  - Hallazgo: **46 almacenes de consignación no tienen cliente** (22 de GUDS y 24 de Quirutec). Odoo no da pista: sin
+    pedidos ni entregas, y el contacto del almacén es la propia empresa. Hay que asignarlos a mano en Almacenes; la lista
+    con sugerencias está en `docs/privado/22e/`.
+- **Estado de cuenta, tasa (decisiones D11 y D12):**
+  - Una **NC lleva la tasa de la factura que afecta**: la que revierte; si no, aquella en la que más se aplicó; si no, la
+    que dice Profit (`profit_documentos.numero_origen`, **solo del mismo cliente**, porque solo por número las devoluciones
+    de otra serie daban tasas equivocadas).
+  - Cada documento dice de dónde sale su tasa (`tasa_origen`: factura, documento, bcv o profit; `tasa_factura`):
+    - pantalla: marcas F y P con leyenda y detalle;
+    - PDF: marca y leyenda;
+    - Excel: columna "Origen de la tasa".
+  - Las 335 tasas de Profit se conservan, marcadas.
+  - Cliente de muestra: de 66 a **70 de 100** filas con la tasa idéntica al Excel. Las que siguen distintas son NC viejas
+    sin rastro de su factura, y días con tasa de Profit redondeada a 2 decimales.
+- **Permisos (D10 ampliado):** Calidad y cuadre (funciones, RLS de tareas e historial, responsables) y la cobranza
+  agrupada por cliente ("Top clientes que pagaron") exigen `reportes` y `cuentas`. En pantalla se ocultan sin Cuentas.
+- **Usuarios:**
+  - La pantalla convertía en "cliente" cualquier rol que no fuera Administrador, Vendedor o Delivery: así quedó la cuenta
+    de Contador de finanzas del 1-oct.
+  - Corregido (`portalDeRol`: todo rol interno entra al admin), y la cuenta pasó a personal interno con rol Contador.
+  - `qa.admin` y `qa.cliente` **no se tocaron**: su perfil es temporal a propósito (lo crean y lo borran las pruebas).
+    Un perfil fijo dejaría un administrador permanente con clave compartida y rompería unas 8 pruebas.
+- Migración `20261008_fase22e_respuestas_finanzas.sql`:
+  - las funciones largas se reescriben desde su definición vigente;
+  - los reemplazos puntuales se pueden volver a correr.
+- Verificación:
+  - tsc y build limpios;
+  - suites: 22a 36/36, 22b 29/29 en GUDS y en Quirutec, 22c 23/23, 22d 45/45 y multiempresa 567/567;
+  - Playwright: recorrido 22e 19/19, consignación de punta a punta 19/19 y recorrido general 42/42.
+  - Descargas del estado de cuenta: el Excel trae la columna "Origen de la tasa" después de Estatus, y el PDF la marca F/P con su leyenda.
+
 ## 2026-10-08 · Reportes de finanzas: plan, estado de cuenta único, papelera, consignación → Odoo y clasificación (22a–22d)
 
 - **Pedido del usuario:** el equipo de finanzas mandó 4 Excel que hace a mano (estado de cuenta, análisis de

@@ -212,6 +212,31 @@ if (vendGuds) {
 }
 await caso('DSO: el Administrador lo ve', (r) => r.n > 0, como({}, dso));
 
+// ── 22e: Calidad y cuadre y "Top clientes que pagaron" también exigen reportes Y cuentas ──
+const cobCliente = `v := (select row_to_json(t)::text from (select count(*) n from public.reporte_cobranza(current_date - 90, current_date, 'cliente')) t);`;
+const cobEmpresa = `v := (select row_to_json(t)::text from (select count(*) n from public.reporte_cobranza(current_date - 90, current_date, 'empresa')) t);`;
+const tareas = `v := (select row_to_json(t)::text from (select (select count(*) from calidad_tareas) tareas, (select count(*) from calidad_tareas_historial) hist,
+  (select count(*) from public.calidad_responsables()) resp) t);`;
+const cuadre = `v := (select row_to_json(t)::text from (select count(*) n from public.reporte_cuadre_profit_odoo()) t);`;
+if (vendGuds) {
+  const sinCuentas = darPermiso('reportes') + quitarPermiso('cuentas');
+  const conAmbos = darPermiso('reportes') + darPermiso('cuentas');
+  await caso('22e: cobranza por cliente ("Top clientes que pagaron") con reportes y sin cuentas no se ve', 'permiso de Cuentas',
+    como({ uid: vendGuds, previo: sinCuentas }, cobCliente));
+  await caso('22e: el resto de la cobranza (por empresa) sí se ve solo con reportes', (r) => r.n >= 0,
+    como({ uid: vendGuds, previo: sinCuentas }, cobEmpresa));
+  await caso('22e: cobranza por cliente con reportes y cuentas sí se ve', (r) => r.n >= 0,
+    como({ uid: vendGuds, previo: conAmbos }, cobCliente));
+  await caso('22e: Calidad y cuadre con reportes y sin cuentas: ni tareas, ni historial, ni responsables', (r) => r.tareas === 0 && r.hist === 0 && r.resp === 0,
+    como({ uid: vendGuds, previo: sinCuentas }, tareas));
+  await caso('22e: el cuadre Profit ↔ Odoo con reportes y sin cuentas no se ve', 'permiso de Cuentas',
+    como({ uid: vendGuds, previo: sinCuentas }, cuadre));
+  await caso('22e: Calidad y cuadre con reportes y cuentas sí ve las tareas', (r) => r.tareas > 0,
+    como({ uid: vendGuds, previo: conAmbos }, tareas));
+}
+await caso('22e: el Administrador ve las tareas de calidad y la cobranza por cliente', (r) => r.tareas > 0,
+  como({}, tareas));
+
 console.table(casos);
 const fallas = casos.filter((c) => c.ok !== '✓').length;
 console.log(fallas ? `✗ ${fallas} de ${casos.length} casos fallaron` : `✓ ${casos.length} casos OK`);

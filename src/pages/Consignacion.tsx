@@ -81,6 +81,7 @@ const Consignacion = () => {
   const [loading, setLoading] = useState(true);
   const [detalle, setDetalle] = useState<Declaracion | null>(null);
   const [items, setItems] = useState<Item[]>([]);
+  const sinPrecio = items.filter((it) => !(Number(it.precio_unitario) > 0));
   const [notas, setNotas] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmar, setConfirmar] = useState(false);
@@ -325,12 +326,13 @@ const Consignacion = () => {
                 <span>Total: <span className="font-semibold text-primary">{formatPrice(detalle.total)}</span></span>
               </div>
               {detalle.notas && <p className="text-sm text-muted-foreground">Notas: {detalle.notas}</p>}
-              {detalle.estado === "pendiente" && items.some((it) => !(Number(it.precio_unitario) > 0)) && (
-                <p className="flex items-start gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100" data-testid="consignacion-sin-precio">
+              {/* 22e: con líneas sin precio no se aprueba (irían en 0 a Odoo); la base también lo impide */}
+              {detalle.estado === "pendiente" && sinPrecio.length > 0 && (
+                <p role="alert" className="flex items-start gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive" data-testid="consignacion-sin-precio">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
-                    Sin precio en GUDS: {items.filter((it) => !(Number(it.precio_unitario) > 0)).map((it) => it.nombre_producto).join(", ")}.
-                    En la cotización de Odoo irán en 0: corrige el precio en Odoo antes de confirmarla, o rechaza la declaración.
+                    <strong>No se puede aprobar:</strong> {sinPrecio.map((it) => it.nombre_producto).join(", ")} sin precio.
+                    Recházala y que se declare de nuevo cuando {sinPrecio.length === 1 ? "tenga" : "tengan"} precio.
                   </span>
                 </p>
               )}
@@ -408,14 +410,14 @@ const Consignacion = () => {
               {confirmar ? (
                 <>
                   <Button variant="outline" onClick={() => setConfirmar(false)} disabled={saving} autoFocus>Cancelar</Button>
-                  <Button onClick={() => revisar(true)} disabled={saving || soloLectura} className="gap-2">
+                  <Button onClick={() => revisar(true)} disabled={saving || soloLectura || sinPrecio.length > 0} className="gap-2">
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Sí, crear el pedido en Odoo
                   </Button>
                 </>
               ) : (
                 <>
                   <Button variant="destructive" onClick={() => revisar(false)} disabled={saving || soloLectura}>Rechazar</Button>
-                  <Button onClick={() => setConfirmar(true)} disabled={saving || soloLectura} className="gap-2">
+                  <Button onClick={() => setConfirmar(true)} disabled={saving || soloLectura || sinPrecio.length > 0} className="gap-2">
                     <Send className="h-4 w-4" /> Aprobar y crear pedido en Odoo
                   </Button>
                 </>

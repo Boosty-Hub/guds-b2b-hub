@@ -158,18 +158,25 @@ for (const emp of [guds, qrt]) {
              jsonb_array_elements(public.estado_cuenta_documentos(c.id, c.e, 'abiertas', null, null, false, null)) x
         join facturas f on f.id = (x->>'factura_id')::uuid)
     select count(*) n,
-      count(*) filter (where moneda = 'USD' and (x->>'tasa_emision')::numeric is not distinct from round(public.tasa_bcv_dia(fecha_emision), 4) and x->>'tasa_origen' = 'bcv') usd_ok,
-      count(*) filter (where moneda = 'USD') usd,
-      count(*) filter (where moneda <> 'USD' and abs((x->>'tasa_emision')::numeric - implicita) / implicita < 0.001 and x->>'tasa_origen' = 'documento') ves_ok,
-      count(*) filter (where moneda <> 'USD') ves,
+      -- 22e: la BCV del día dice si salió de Profit; las NC con la tasa de su factura se cuentan aparte
+      count(*) filter (where moneda = 'USD' and x->>'tasa_origen' <> 'factura' and (x->>'tasa_emision')::numeric is not distinct from round(public.tasa_bcv_dia(fecha_emision), 4)
+                       and x->>'tasa_origen' = case when public.tasa_bcv_dia_fuente(fecha_emision) ~* 'profit' then 'profit' else 'bcv' end) usd_ok,
+      count(*) filter (where moneda = 'USD' and x->>'tasa_origen' <> 'factura') usd,
+      count(*) filter (where moneda <> 'USD' and x->>'tasa_origen' <> 'factura' and abs((x->>'tasa_emision')::numeric - implicita) / implicita < 0.001 and x->>'tasa_origen' = 'documento') ves_ok,
+      count(*) filter (where moneda <> 'USD' and x->>'tasa_origen' <> 'factura') ves,
+      count(*) filter (where x->>'tasa_origen' = 'factura') fac,
+      count(*) filter (where x->>'tasa_origen' = 'factura' and x->>'tipo' = 'nota_credito' and x->>'tasa_factura' is not null and (x->>'tasa_emision')::numeric > 1) fac_ok,
+      count(*) filter (where x->>'tasa_origen' = 'profit') profit,
       count(*) filter (where (x->>'nro_control') is not distinct from nullif(btrim(nro_control), '')) control_ok,
       count(*) filter (where x->>'estatus' = 'nc_favor' and not (x->>'tipo' = 'nota_credito' and (x->>'saldo')::numeric < 0)) nc_mal,
       count(*) filter (where x->>'estatus' = 'retencion' and coalesce(x->'que_falta'->>'codigo', '') not in ('retencion_iva', 'retencion_municipal', 'retenciones')) ret_mal,
       count(*) filter (where x->>'estatus' = 'pendiente' and ((x->>'saldo')::numeric < 0 or x->'que_falta'->>'codigo' in ('retencion_iva', 'retencion_municipal', 'retenciones'))) pend_mal,
       count(*) filter (where (x->>'dias')::int is null) sin_dias
     from d`))[0];
-  await caso('Formato: tasa USD = BCV del día de emisión; en Bs a ±0,1 % de total ÷ total_usd; Nº de control de la factura', (x) =>
+  await caso('Formato: tasa USD = BCV del día de emisión (marcada "profit" si ese día viene de Profit); en Bs a ±0,1 % de total ÷ total_usd; Nº de control', (x) =>
     x.n > 100 && x.usd_ok === x.usd && x.ves_ok === x.ves && x.control_ok === x.n, dato(r));
+  await caso('22e: las NC con factura afectada llevan su tasa (origen "factura" con el número); solo NC', (x) =>
+    x.fac > 0 && x.fac_ok === x.fac, dato(r));
   await caso('Formato: estatus NC a favor / Pendiente comprobante de retención / Pendiente por cobrar según el saldo y "qué falta"', (x) =>
     x.nc_mal === 0 && x.ret_mal === 0 && x.pend_mal === 0 && x.sin_dias === 0, dato(r));
 }
@@ -221,11 +228,12 @@ for (const emp of [guds, qrt]) {
 const muestraP = path.join(ROOT, 'docs', 'privado', '22c', 'edc-esperado.json');
 if (fs.existsSync(muestraP)) {
   const m = JSON.parse(fs.readFileSync(muestraP, 'utf8'));
-  const g = await sql(`select d->>'numero' numero, d->>'tipo' tipo, d->>'nro_control' control, (d->>'saldo')::float8 saldo, (d->>'tasa_emision')::float8 tasa, d->>'moneda' moneda
+  const g = await sql(`select d->>'numero' numero, d->>'tipo' tipo, d->>'nro_control' control, (d->>'saldo')::float8 saldo, (d->>'tasa_emision')::float8 tasa, d->>'moneda' moneda,
+      d->>'tasa_origen' origen
     from jsonb_array_elements((${ec(m.cliente, m.empresa, m.corte)})->'abiertos') d`);
   const clave = (tipo, num) => `${tipo === 'nota_credito' || tipo === 'NC' ? 'NC' : 'F'}|${num}`;
   const gm = new Map(g.map((x) => [clave(x.tipo, x.numero), x]));
-  let iguales = 0, tasaExacta = 0, tasa2 = 0, usd = 0;
+  let iguales = 0, tasaExacta = 0, tasa2 = 0, usd = 0, ncFactura = 0, ncFacturaIgual = 0;
   const soloExcel = [], usados = new Set();
   for (const f of m.filas) {
     const [t, num] = f.doc.split(' ');
@@ -234,13 +242,17 @@ if (fs.existsSync(muestraP)) {
     usados.add(clave(t, num));
     if (Math.abs(x.saldo - f.deuda) <= 0.011) iguales++;
     if (x.moneda === 'USD') { usd++; if (Math.abs(x.tasa - f.tasa) < 0.00005) tasaExacta++; else if (Math.abs(x.tasa - f.tasa) < 0.0051) tasa2++; }
+    if (x.tipo === 'nota_credito' && x.origen === 'factura') { ncFactura++; if (Math.abs(x.tasa - f.tasa) < 0.00005) ncFacturaIgual++; }
   }
   const soloGuds = g.filter((x) => !usados.has(clave(x.tipo, x.numero))).map((x) => `${x.tipo === 'nota_credito' ? 'NC' : 'F'} ${x.numero}`);
-  const r = { filas_excel: m.filas.length, filas_guds: g.length, iguales, solo_excel: soloExcel.length, solo_guds: soloGuds.length, usd, tasa_exacta: tasaExacta, tasa_2dec: tasa2 };
+  const r = { filas_excel: m.filas.length, filas_guds: g.length, iguales, solo_excel: soloExcel.length, solo_guds: soloGuds.length, usd, tasa_exacta: tasaExacta, tasa_2dec: tasa2,
+    nc_factura: ncFactura, nc_factura_igual: ncFacturaIgual };
   await caso(`Cuadre con el Excel de finanzas al ${m.corte}: 100 de 109 al centavo; 9 en Bs imputados distinto; GUDS trae además 3 del 29-sep, 11079 y la imputación en Bs`, (x) =>
     x.iguales === 100 && x.solo_excel === 9 && x.solo_guds === 11 && x.filas_guds === 111, dato(r));
-  await caso('Cuadre: la tasa de emisión de los documentos USD coincide con el Excel (53 exactas y 12 a 2 decimales; el resto son NC/ND con la tasa de la factura)', (x) =>
-    x.tasa_exacta >= 53 && x.tasa_exacta + x.tasa_2dec >= 65, dato(r));
+  await caso('Cuadre: la tasa de emisión de los documentos USD coincide con el Excel (57 exactas desde 22e y las de Profit a 2 decimales; el resto son NC sin factura conocida)', (x) =>
+    x.tasa_exacta >= 57 && x.tasa_exacta + x.tasa_2dec >= 69, dato(r));
+  await caso('22e: las NC de la muestra con factura conocida (Odoo o Profit) llevan la misma tasa que en el Excel', (x) =>
+    x.nc_factura >= 4 && x.nc_factura_igual >= 4 && x.nc_factura_igual >= x.nc_factura - 1, dato(r));
 }
 
 console.table(casos);

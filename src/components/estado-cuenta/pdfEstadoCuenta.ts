@@ -3,8 +3,8 @@ import { autoTable, type CellInput, type RowInput, type UserOptions } from "jspd
 import logoGuds from "@/assets/guds-logo.png";
 import { TRAMOS, condicionPagoTexto } from "@/hooks/useFinanzasPortal";
 import {
-  ESTATUS, anioMes, colorEmpresa, conceptoAbono, corteDe, direccionTexto, estatusDe, fechaHora, fechaLarga, fechaNumerica, fmtBs, fmtTasa,
-  fmtUsd, formatoRif, nombreArchivoEstadoCuenta, tipoYNumero, totalesDocumentos,
+  ESTATUS, ORIGEN_TASA, anioMes, colorEmpresa, conceptoAbono, corteDe, direccionTexto, estatusDe, fechaHora, fechaLarga, fechaNumerica, fmtBs,
+  fmtTasa, fmtUsd, formatoRif, leyendaTasas, nombreArchivoEstadoCuenta, tipoYNumero, totalesDocumentos,
 } from "./formato";
 import type { EmpresaEstadoCuenta, EstadoCuentaCompleto } from "./tipos";
 
@@ -332,7 +332,7 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
         fechaNumerica(d.emision),
         fechaNumerica(d.vence ?? d.emision),
         { content: String(d.dias), styles: { ...der, textColor: vencida ? ROJO : TENUE } },
-        { content: d.tasa_emision != null ? fmtTasa(d.tasa_emision) : "—", styles: { ...der, textColor: TENUE } },
+        { content: d.tasa_emision != null ? fmtTasa(d.tasa_emision) + (d.tasa_origen && ORIGEN_TASA[d.tasa_origen]?.marca ? ` ${ORIGEN_TASA[d.tasa_origen].marca}` : "") : "—", styles: { ...der, textColor: TENUE } },
         { content: m(d.base), styles: der },
         { content: m(d.iva), styles: der },
         { content: m(d.total), styles: der },
@@ -378,7 +378,8 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
   // ── Notas ──
   const notas = [
     "Montos en dólares (US$); las notas de crédito a favor van en negativo. Los documentos en bolívares se expresan en US$ a la tasa de cada documento.",
-    "Días transcurridos = fecha de corte − vencimiento (negativo = por vencer). Tasa de emisión: en bolívares, la del documento; en dólares, la BCV del día de emisión (o la última publicada antes).",
+    "Días transcurridos = fecha de corte − vencimiento (negativo = por vencer). Tasa de emisión: en bolívares, la del documento; en dólares, la BCV del día de emisión (o la última publicada antes); en una nota de crédito, la de la factura que afecta."
+      + (leyendaTasas(docsPdf) ? ` ${leyendaTasas(docsPdf)}.` : ""),
     "Refleja lo registrado a la fecha de corte; los pagos declarados quedan pendientes hasta su verificación. «Qué falta» es una sugerencia automática según la base, el IVA y lo abonado; los comentarios los escribe nuestro equipo.",
   ];
   asegurar(notas.length * 3.6 + 3);

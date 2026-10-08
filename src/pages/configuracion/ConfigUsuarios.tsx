@@ -112,6 +112,14 @@ function describirErrorEliminar(error: { code?: string; message: string; details
   return `No se pudo eliminar a ${nombre}: ${error.message}`;
 }
 
+// Portal de la cuenta según su rol: Vendedor y Delivery tienen su portal; cualquier otro rol (Administrador, Contador, Almacén…)
+// es personal interno y entra al admin. Antes todo lo que no era Administrador/Vendedor/Delivery quedaba como "cliente" (22e:
+// así quedó una cuenta de Contador). Los clientes del portal no se crean aquí (no tienen rol).
+function portalDeRol(nombre: string | undefined): 'admin' | 'vendedor' | 'delivery' {
+  const n = (nombre ?? '').toLowerCase();
+  return n === 'vendedor' ? 'vendedor' : n === 'delivery' ? 'delivery' : 'admin';
+}
+
 const ConfigUsuarios = () => {
   const [usuarios, setUsuarios] = useState<UsuarioConRol[]>([]);
   const [roles, setRoles] = useState<Rol[]>([]);
@@ -269,10 +277,7 @@ const ConfigUsuarios = () => {
     }
 
     const rol = roles.find(r => r.id === userForm.rol_id);
-    const roleEnum: 'admin' | 'vendedor' | 'delivery' | 'cliente' =
-      rol?.nombre.toLowerCase() === 'administrador' ? 'admin' :
-      rol?.nombre.toLowerCase() === 'vendedor' ? 'vendedor' :
-      rol?.nombre.toLowerCase() === 'delivery' ? 'delivery' : 'cliente';
+    const roleEnum = portalDeRol(rol?.nombre);
 
     // Crear la cuenta en el servidor (sin signUp en el navegador, que cerraría
     // la sesión del admin). Devuelve una contraseña temporal para comunicar.
@@ -327,9 +332,7 @@ const ConfigUsuarios = () => {
         apellido: userForm.apellido || null,
         telefono: userForm.telefono || null,
         rol_id: userForm.rol_id || null,
-        role: rol?.nombre.toLowerCase() === 'administrador' ? 'admin' : 
-              rol?.nombre.toLowerCase() === 'vendedor' ? 'vendedor' : 
-              rol?.nombre.toLowerCase() === 'delivery' ? 'delivery' : 'cliente',
+        role: portalDeRol(rol?.nombre),
       })
       .eq('id', selectedUsuario.id);
 

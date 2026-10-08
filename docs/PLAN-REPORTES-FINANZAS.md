@@ -28,7 +28,11 @@ GS = GUDS).
 | D7 | **Un solo estado de cuenta**, con el formato de finanzas. El detalle de la cuenta, el enlace público, el PDF, el Excel, el portal, la ficha del vendedor y el correo muestran el mismo. Facturas, NC, Pagos y Retenciones quedan como listas de consulta | ✅ decidido 8-oct (fase 22c) |
 | D8 | **Papelera general.** Todo lo anulado o archivado va a la papelera, con su foto completa y opción de restaurar. Los administradores pueden anular cobros registrados en GUDS (los de Odoo se anulan en Odoo) | ✅ decidido 8-oct (fase 22a) |
 | D9 | **Consignación.** Al aprobar una declaración se crea un pedido que va a Odoo como cotización y sigue allí hasta la factura. No más factura interna ni descuento de stock en GUDS | ✅ decidido 8-oct (fase 22b) |
-| D10 | Los reportes con **deuda por cliente** exigen los permisos `reportes` **y** `cuentas` | ✅ decidido 8-oct (fase 22a) |
+| D10 | Los reportes con **deuda por cliente** exigen los permisos `reportes` **y** `cuentas`. Ampliado a *Calidad y cuadre* y a "Top clientes que pagaron" | ✅ decidido 8-oct (fases 22a y 22e) |
+| D11 | **Tasa de las NC = la de la factura que afectan** (como finanzas): la que revierten; si no, aquella en la que más se aplicaron; si no, la que dice Profit (`numero_origen`, solo del mismo cliente). En USD, la BCV del día de esa factura | ✅ decidido 8-oct (fase 22e) |
+| D12 | Las **335 tasas tomadas de Profit** (días sin tasa en Odoo) se conservan, pero **se ve de dónde sale cada tasa**: marca F (factura de la NC) y P (Profit) con leyenda en pantalla y PDF, y columna "Origen de la tasa" en el Excel | ✅ decidido 8-oct (fase 22e) |
+| D13 | **Consignación sin precio:** no se declara ni se aprueba con productos en precio 0; alerta en el portal del vendedor/cliente y en el admin | ✅ decidido 8-oct (fase 22e) |
+| D14 | Clasificación en Odoo **activa**: primera escritura real verificada el 8-oct (un cliente); "DISTRIBUIDOR" quedó "Distribuidor". El resto lo envía finanzas desde Configuración → Clasificación | ✅ 8-oct (22e) |
 
 ---
 
@@ -429,6 +433,13 @@ Cada fase se cierra con el cuadre contra el Excel del equipo (es la "respuesta c
 Playwright a 1440 y 390 px en GUDS, Quirutec y «Ambas».
 
 ## Hallazgos para revisar
+
+> 8-oct (tarde, 22e): consignación **activa** (aprobar crea la cotización en borrador en Odoo, verificado de punta a punta
+> con un cliente de prueba sin Odoo: el envío para antes de escribir). Pendiente de datos: **46 almacenes de consignación
+> sin cliente** (22 de GUDS y 24 de Quirutec) que Odoo no permite identificar: se asignan a mano en Almacenes (lista con
+> sugerencias en `docs/privado/22e/`). Tasa de las NC: con la regla nueva el cliente de muestra pasa de 66 a 70 de 100
+> filas con la tasa idéntica a la del Excel; lo que queda son NC viejas sin rastro de su factura y días con tasa de Profit
+> (redondeada a 2 decimales).
 
 > 8-oct, decisiones del usuario: 1 → anular los 2 cobros y que los administradores puedan anular, todo a la papelera (22a);
 > 2 → archivar y quitar la pestaña (22a); 3 → la consignación crea un pedido en Odoo (22b); 4 → exigir `reportes` y

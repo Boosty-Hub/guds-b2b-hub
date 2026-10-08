@@ -77,8 +77,10 @@ const arr = (ids) => `array[${ids.map(lit).join(',')}]::uuid[]`;
 await caso('Cola: odoo_escrituras acepta el tipo clasificacion (y conserva los anteriores)', (r) => r.ok,
   como({}, j(`select pg_get_constraintdef(oid) ~ 'clasificacion' and pg_get_constraintdef(oid) ~ 'cliente_limite' and pg_get_constraintdef(oid) ~ 'producto' ok
     from pg_constraint where conrelid = 'public.odoo_escrituras'::regclass and conname = 'odoo_escrituras_tipo_check'`)));
-casos.push({ ok: (await sql(`select valor from configuracion where clave = 'odoo_escritura_clasificacion'`))[0]?.valor === 'simular' ? '✓' : '✗',
-  caso: 'Modo de escritura de la clasificación arranca en "simular" (modo prueba)', resultado: (await sql(`select valor from configuracion where clave = 'odoo_escritura_clasificacion'`))[0]?.valor });
+// Arrancó en "simular"; el 8-oct (22e) el dueño autorizó la primera escritura real y quedó en "activo"
+const modoClasif = (await sql(`select valor from configuracion where clave = 'odoo_escritura_clasificacion'`))[0]?.valor;
+casos.push({ ok: ['simular', 'activo'].includes(modoClasif) ? '✓' : '✗',
+  caso: 'Modo de escritura de la clasificación: "simular" (prueba) o "activo" (autorizado el 8-oct)', resultado: modoClasif });
 await caso('Catálogo sembrado: 18 tipos en GUDS (2 por confirmar) y 12 en Quirutec', (r) => r.g === 18 && r.q === 12 && r.pc === 2,
   como({ empresa: 'todas' }, j(`select count(*) filter (where empresa_id = '${guds.id}') g, count(*) filter (where empresa_id = '${qrt.id}') q,
     count(*) filter (where por_confirmar) pc from clasificacion_tipos`)));
@@ -126,7 +128,7 @@ await caso('Confirmar propuestas: pasan a "asignada" conservando el origen (Exce
       from public.clasificacion_clientes where cliente_id = any (${arr(propG.slice(0, 3))})) x);`));
 await caso('Enviar sin confirmar: no encola (motivo sin_confirmar)', (r) => r.encolados === 0 && r.omitidos.sin_confirmar === 3,
   como({ empresa: guds.id }, j(`select (x ->> 'encolados')::int encolados, x -> 'omitidos' omitidos from (select public.enviar_clasificacion_odoo(${arr(propG.slice(0, 3))}) x) s`)));
-await caso('Enviar confirmadas: 1 fila "clasificacion" en la cola, clientes "enviando", modo prueba', (r) => r.encolados === 3 && r.filas === 1 && r.enviando === 3 && r.modo === 'simular',
+await caso('Enviar confirmadas: 1 fila "clasificacion" en la cola, clientes "enviando", con el modo vigente (en el bloque no sale)', (r) => r.encolados === 3 && r.filas === 1 && r.enviando === 3 && r.modo === modoClasif,
   pasos(guds.id, `perform public.confirmar_clasificacion(${arr(propG.slice(0, 3))});
     v := public.enviar_clasificacion_odoo(${arr(propG.slice(0, 3))});
     return (select row_to_json(x)::text from (select (v ->> 'encolados')::int encolados, v ->> 'modo' modo,
