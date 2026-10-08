@@ -3,6 +3,8 @@
 // 21b: la franja aprobada (por cobrar, vencido con su antigüedad, por vencer, a favor, neto y notas de débito) y los
 // documentos con saldo con lo abonado, el saldo, "qué falta" y el comentario visible para el cliente (hasta 15; el resto
 // en el PDF y en el enlace).
+// 22c: los documentos con el formato de finanzas (Tipo y Nº, Nº de control, vencimiento y días, total, deuda y estatus),
+// las notas de crédito a favor en negativo y la fila de total; el detalle completo va en el PDF adjunto y en el enlace.
 
 export interface DatosCorreo {
   hoy: string;
@@ -25,7 +27,15 @@ export interface DatosCorreo {
 export interface DocumentoCorreo {
   numero: string; tipo: string; vence: string | null; dias: number; total: number; abonado: number; saldo: number;
   que_falta?: string | null; comentario?: string | null;
+  nro_control?: string | null; emision?: string | null; tasa?: number | null; base?: number | null; iva?: number | null; estatus?: string | null;
 }
+
+const TIPO_CORTO: Record<string, string> = { factura: "FACT", nota_credito: "NC", nota_debito: "ND" };
+const ESTATUS: Record<string, string> = {
+  pendiente: "Pendiente por cobrar", retencion: "Pendiente comprobante de retención", nc_favor: "NC a favor", a_favor: "Saldo a favor",
+};
+const estatusDe = (x: DocumentoCorreo) => ESTATUS[x.estatus ?? ""] ?? (x.saldo < 0 ? "NC a favor" : "Pendiente por cobrar");
+const fechaDMA = (s: string | null | undefined) => (s && /^\d{4}-\d{2}-\d{2}/.test(s) ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : "—");
 
 const MAX_DOCS = 15;
 
@@ -74,25 +84,31 @@ export function armarCorreo(d: DatosCorreo) {
     ["A favor (notas de crédito y anticipos)", fmtUsd(-Number(r.a_favor || 0)), Number(r.a_favor) > 0.004 ? "#047857" : undefined],
     ...(Number(r.notas_debito_saldo) > 0.004 ? [["Notas de débito (incluidas en el saldo)", fmtUsd(r.notas_debito_saldo), "#6b7280", true] as Fila] : []),
   ];
-  const docs = (d.documentos ?? []).filter((x) => x.tipo !== "nota_credito");
+  const docs = d.documentos ?? [];
   const docsVisibles = docs.slice(0, MAX_DOCS);
-  const vence = (x: DocumentoCorreo) => (x.dias > 0 ? `vencida hace ${x.dias} ${x.dias === 1 ? "día" : "días"}` : x.dias === 0 ? "vence hoy" : `vence en ${-x.dias} ${x.dias === -1 ? "día" : "días"}`);
+  const totalDeuda = docs.reduce((s, x) => s + Number(x.saldo || 0), 0);
+  const vence = (x: DocumentoCorreo) => (x.saldo < 0 ? `${x.dias} días` : x.dias > 0 ? `vencida hace ${x.dias} ${x.dias === 1 ? "día" : "días"}` : x.dias === 0 ? "vence hoy" : `vence en ${-x.dias} ${x.dias === -1 ? "día" : "días"}`);
+  const tipoNum = (x: DocumentoCorreo) => `${TIPO_CORTO[x.tipo] ?? ""} ${x.numero}`.trim();
   const celda = "padding:9px 12px; font-size:13px; line-height:18px; border-top:1px solid #f0f1f3;";
   const cab = "padding:8px 12px; font-size:11px; line-height:16px; color:#6b7280; font-weight:600;";
   const tablaDocs = docsVisibles.length ? `<p style="margin:26px 0 8px 0; font-size:14px; line-height:20px; font-weight:700;">Documentos con saldo</p>
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e5e7eb; border-radius:8px; border-collapse:separate;">
-              <tr><td style="${cab}">Documento</td><td align="right" style="${cab}">Total</td><td align="right" style="${cab}">Abonado</td><td align="right" style="${cab}">Saldo</td></tr>
+              <tr><td style="${cab}">Tipo y Nº</td><td style="${cab}">Vencimiento</td><td align="right" style="${cab}">Total US$</td><td align="right" style="${cab}">Deuda US$</td></tr>
               ${docsVisibles.map((x) => `<tr>
                 <td style="${celda}">
-                  <strong>${esc(x.numero)}</strong>${x.tipo === "nota_debito" ? ` <span style="color:#6b7280;">(nota de débito)</span>` : ""}
-                  <div style="font-size:11px; line-height:16px; color:${x.dias > 0 ? "#b91c1c" : "#6b7280"};">${esc(vence(x))}</div>
+                  <strong>${esc(tipoNum(x))}</strong>
+                  ${x.nro_control ? `<div style="font-size:11px; line-height:16px; color:#6b7280;">Control ${esc(x.nro_control)} · emitida ${esc(fechaDMA(x.emision))}</div>` : ""}
+                  <div style="font-size:11px; line-height:16px; color:${x.estatus === "retencion" ? "#92400e" : x.saldo < 0 ? "#047857" : "#374151"};">${esc(estatusDe(x))}</div>
                   ${x.que_falta ? `<div style="font-size:11px; line-height:16px; color:#92400e;">${esc(x.que_falta)}</div>` : ""}
                   ${x.comentario ? `<div style="font-size:11px; line-height:16px; color:#374151; font-style:italic;">${esc(x.comentario)}</div>` : ""}
                 </td>
+                <td valign="top" style="${celda} white-space:nowrap;">${esc(fechaDMA(x.vence ?? x.emision))}
+                  <div style="font-size:11px; line-height:16px; color:${x.saldo > 0 && x.dias > 0 ? "#b91c1c" : "#6b7280"};">${esc(vence(x))}</div></td>
                 <td align="right" valign="top" style="${celda} white-space:nowrap;">${esc(fmtUsd(x.total))}</td>
-                <td align="right" valign="top" style="${celda} white-space:nowrap; color:#047857;">${esc(fmtUsd(x.abonado))}</td>
-                <td align="right" valign="top" style="${celda} white-space:nowrap; font-weight:700;">${esc(fmtUsd(x.saldo))}</td>
+                <td align="right" valign="top" style="${celda} white-space:nowrap; font-weight:700;${x.saldo < 0 ? " color:#047857;" : ""}">${esc(fmtUsd(x.saldo))}</td>
               </tr>`).join("")}
+              <tr><td colspan="3" style="${celda} font-weight:700; background-color:#f7f8fa;">Total deuda${docs.length > docsVisibles.length ? ` (${docs.length} documentos)` : ""}</td>
+                <td align="right" style="${celda} font-weight:700; white-space:nowrap; background-color:#f7f8fa;">${esc(fmtUsd(totalDeuda))}</td></tr>
             </table>
             ${docs.length > docsVisibles.length ? `<p style="margin:8px 0 0 0; font-size:12px; line-height:18px; color:#6b7280;">Y ${docs.length - docsVisibles.length} documentos más: están en el PDF adjunto y en el enlace.</p>` : ""}` : "";
 
@@ -201,8 +217,9 @@ export function armarCorreo(d: DatosCorreo) {
     ...filas.map(([k, v, , sub]) => `${sub ? "  " : ""}${k}: ${v}`),
     `Saldo neto: ${fmtUsd(r.neto)}`,
     ...(docsVisibles.length ? ["", "Documentos con saldo:", ...docsVisibles.map((x) =>
-      `- ${x.numero}: total ${fmtUsd(x.total)}, abonado ${fmtUsd(x.abonado)}, saldo ${fmtUsd(x.saldo)} (${vence(x)})${x.que_falta ? ` · ${x.que_falta}` : ""}${x.comentario ? ` · ${x.comentario}` : ""}`),
-      ...(docs.length > docsVisibles.length ? [`Y ${docs.length - docsVisibles.length} documentos más en el PDF y en el enlace.`] : [])] : []),
+      `- ${tipoNum(x)}${x.nro_control ? ` (control ${x.nro_control})` : ""}: vence ${fechaDMA(x.vence ?? x.emision)} (${vence(x)}), total ${fmtUsd(x.total)}, deuda ${fmtUsd(x.saldo)} · ${estatusDe(x)}${x.que_falta ? ` · ${x.que_falta}` : ""}${x.comentario ? ` · ${x.comentario}` : ""}`),
+      ...(docs.length > docsVisibles.length ? [`Y ${docs.length - docsVisibles.length} documentos más en el PDF y en el enlace.`] : []),
+      `Total deuda: ${fmtUsd(totalDeuda)}`] : []),
     "",
     "Ver estado de cuenta:",
     d.url,

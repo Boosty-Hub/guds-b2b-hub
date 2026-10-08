@@ -31,6 +31,7 @@ import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "
 import { useColumnas } from "@/components/datos/columnas";
 import { VerificarCobroDialog } from "@/components/vendedor/VerificarCobroDialog";
 import { urlComprobante } from "@/components/vendedor/comprobantes";
+import { AnularCobroBoton } from "@/components/cobros/AnularCobroBoton";
 import {
   FiltrosLista, useFiltros, useFiltroEmpresa, opcionesDe, opcionesPrueba, pasaPrueba, coincide, enRango, contadorFiltrado, type OpcionPrueba,
 } from "@/components/datos/FiltrosLista";
@@ -46,8 +47,10 @@ interface PagoAdmin {
   referencia: string | null;
   comprobante_url: string | null;
   banco: string | null;
-  estado: "pendiente" | "verificado" | "rechazado";
+  estado: "pendiente" | "verificado" | "rechazado" | "anulado";
   notas: string | null;
+  motivo_anulacion?: string | null;
+  monto_moneda?: number | null;
   created_at: string;
   fecha_verificacion: string | null;
   orden?: { numero: string; total: number } | null;
@@ -66,6 +69,7 @@ const estadoConfig: Record<string, { label: string; variant: "default" | "second
   pendiente: { label: "Pendiente", variant: "secondary" },
   verificado: { label: "Verificado", variant: "default" },
   rechazado: { label: "Rechazado", variant: "destructive" },
+  anulado: { label: "Anulado", variant: "outline" },
 };
 
 const METODO: Record<string, string> = { transferencia: "Transferencia", efectivo: "Efectivo", pago_movil: "Pago móvil", tarjeta: "Tarjeta", credito: "Crédito" };
@@ -90,7 +94,7 @@ const Pagos = () => {
     const { data, error } = await supabase
       .from("pagos")
       .select(`
-        id, numero, monto, metodo, referencia, comprobante_url, banco, estado, notas, created_at, fecha_verificacion, odoo_id, es_igtf, igtf_origen:igtf_origen_id(numero),
+        id, numero, monto, monto_moneda, metodo, referencia, comprobante_url, banco, estado, notas, motivo_anulacion, created_at, fecha_verificacion, odoo_id, es_igtf, igtf_origen:igtf_origen_id(numero),
         registrado_por, propuesta_estado, cliente_id, banco_id, moneda, empresa_id, banco_ref:bancos!pagos_banco_id_fkey(nombre),
         orden:ordenes(numero, total),
         cliente:clientes(nombre_negocio)
@@ -147,6 +151,7 @@ const Pagos = () => {
     { valor: "pendiente", etiqueta: "Por verificar", prueba: (p) => p.estado === "pendiente" },
     { valor: "verificado", etiqueta: "Verificados", prueba: (p) => p.estado === "verificado" },
     { valor: "rechazado", etiqueta: "Rechazados", prueba: (p) => p.estado === "rechazado" },
+    { valor: "anulado", etiqueta: "Anulados (en la Papelera)", prueba: (p) => p.estado === "anulado" },
     { valor: "todos", etiqueta: "Todos", prueba: () => true },
   ];
   const pruebasOrigen: OpcionPrueba<PagoAdmin>[] = [
@@ -280,7 +285,9 @@ const Pagos = () => {
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(pago.created_at)}</TableCell>
                   <TableCell className="whitespace-nowrap">
-                    <Badge variant={estadoConfig[pago.estado]?.variant || "secondary"}>
+                    <Badge variant={estadoConfig[pago.estado]?.variant || "secondary"}
+                      className={pago.estado === "anulado" ? "text-muted-foreground line-through decoration-muted-foreground/50" : undefined}
+                      title={pago.estado === "anulado" && pago.motivo_anulacion ? `Motivo: ${pago.motivo_anulacion}` : undefined}>
                       {estadoConfig[pago.estado]?.label || pago.estado}
                     </Badge>
                   </TableCell>
@@ -308,9 +315,16 @@ const Pagos = () => {
                         </Button>
                       </div>
                     ) : (
-                      <span className="text-xs text-muted-foreground">
-                        {pago.fecha_verificacion ? formatDate(pago.fecha_verificacion) : ""}
-                      </span>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <span className="text-xs text-muted-foreground">
+                          {pago.fecha_verificacion ? formatDate(pago.fecha_verificacion) : ""}
+                        </span>
+                        {pago.estado === "verificado" && (
+                          <AnularCobroBoton variante="icono" onAnulado={fetchPagos}
+                            cobro={{ id: pago.id, numero: pago.numero, monto: pago.monto, estado: pago.estado, odoo_id: pago.odoo_id, es_igtf: pago.es_igtf,
+                              moneda: pago.moneda, monto_moneda: pago.monto_moneda, cliente: pago.cliente?.nombre_negocio }} />
+                        )}
+                      </div>
                     )}
                   </TableCell>
                 </TableRow>

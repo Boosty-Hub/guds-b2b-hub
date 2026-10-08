@@ -14,7 +14,8 @@ import {
   Package,
   Smile,
   CalendarClock,
-  ClipboardCheck
+  ClipboardCheck,
+  Tags
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
@@ -33,6 +34,7 @@ export const configNavItems = [
   { icon: Truck, label: "Envíos", path: "/admin/configuracion/envios" },
   { icon: FileText, label: "Plantillas", path: "/admin/configuracion/plantillas" },
   { icon: ClipboardCheck, label: "Verificación con Odoo", path: "/admin/configuracion/verificacion-odoo" },
+  { icon: Tags, label: "Clasificación de clientes", path: "/admin/configuracion/clasificacion-clientes" },
 ];
 
 export const ConfiguracionSidebar = () => {

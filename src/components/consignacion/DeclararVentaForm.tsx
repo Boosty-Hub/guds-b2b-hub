@@ -12,7 +12,16 @@ export interface StockConsignacion {
   producto_id: string;
   nombre: string;
   sku: string | null;
-  cantidad: number; // disponible
+  cantidad: number; // disponible para declarar
+  comprometido?: number; // reservado en Odoo + declarado en GUDS que aún no se procesa (22b)
+}
+
+/** Lo que se puede declarar en un almacén de consignación: existencia de Odoo menos lo reservado y lo ya declarado (22b). */
+export async function cargarStockConsignacion(almacenId: string): Promise<StockConsignacion[]> {
+  const { data } = await supabase.rpc("consignacion_disponible", { p_almacen_id: almacenId });
+  return ((data as { producto_id: string; nombre: string; sku: string | null; reservado: number; comprometido: number; disponible: number }[] | null) ?? [])
+    .map((r) => ({ producto_id: r.producto_id, nombre: r.nombre, sku: r.sku, cantidad: Number(r.disponible),
+      comprometido: Number(r.reservado || 0) + Number(r.comprometido || 0) }));
 }
 
 interface Props {
@@ -60,7 +69,7 @@ export function DeclararVentaForm({ almacenId, stock, onDeclarado }: Props) {
       toast({ title: "No se pudo declarar la venta", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Declaración enviada", description: "Queda pendiente de revisión por el administrador." });
+    toast({ title: "Declaración enviada", description: "Queda pendiente de revisión. Al aprobarse se crea el pedido y la factura llega cuando se procese." });
     setCantidades({});
     setNotas("");
     onDeclarado();
@@ -85,10 +94,15 @@ export function DeclararVentaForm({ almacenId, stock, onDeclarado }: Props) {
                   <p className="font-medium">{s.nombre}</p>
                   {s.sku && <p className="font-mono text-xs text-muted-foreground">{s.sku}</p>}
                 </TableCell>
-                <TableCell className="text-right text-muted-foreground">{s.cantidad}</TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {s.cantidad}
+                  {!!s.comprometido && s.comprometido > 0 && (
+                    <span className="block text-[11px]" title="Reservado en Odoo o declarado y aún sin procesar">{s.comprometido} en proceso</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-right">
                   <Input
-                    type="number" min="0" max={s.cantidad} step="1" className="h-8 text-right" inputMode="numeric"
+                    type="number" min="0" max={s.cantidad} step="1" className="h-8 text-right" inputMode="numeric" disabled={s.cantidad <= 0}
                     aria-label={`Cantidad vendida de ${s.nombre}`}
                     value={cantidades[s.producto_id] || ""}
                     onChange={(e) => setCantidad(s.producto_id, parseInt(e.target.value) || 0, s.cantidad)}
@@ -109,6 +123,9 @@ export function DeclararVentaForm({ almacenId, stock, onDeclarado }: Props) {
       <Button onClick={declarar} disabled={saving || items.length === 0} className="gap-2">
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Declarar venta ({items.length} producto{items.length !== 1 ? "s" : ""})
       </Button>
+      <p className="text-xs text-muted-foreground" data-testid="declarar-ayuda">
+        Al aprobarse, la venta se convierte en un pedido; la factura llega cuando se procese.
+      </p>
     </div>
   );
 }

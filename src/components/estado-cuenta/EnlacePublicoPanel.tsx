@@ -11,6 +11,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
+import { hoyCaracas, sumarDias } from "@/lib/fechas";
 import { fechaHora, fechaLarga, urlEstadoCuenta } from "./formato";
 
 // Enlace público del estado de cuenta (fase 20w) en CuentaDetalle: generar (o reutilizar el activo), copiar, abrir, ver
@@ -33,12 +34,6 @@ export interface EnlaceEstadoCuenta {
 
 const MOTIVO: Record<string, string> = { revocado: "Revocado", reemplazado: "Reemplazado", vencido: "Vencido" };
 
-const hoyCaracas = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" });
-const sumarDias = (f: string, n: number) => {
-  const d = new Date(`${f}T00:00:00`);
-  d.setDate(d.getDate() + n);
-  return d.toLocaleDateString("en-CA");
-};
 
 export function EnlacePublicoPanel({ clienteId, puedeEditar, onEnlace, recargarSenal = 0 }: {
   clienteId: string;

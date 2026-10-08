@@ -36,6 +36,7 @@ const estadoConfig: Record<string, { label: string; cls: string }> = {
   pendiente: { label: "Pendiente", cls: "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200" },
   verificado: { label: "Verificado", cls: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300" },
   rechazado: { label: "Rechazado", cls: "border-red-300 bg-red-50 text-red-800 dark:bg-red-500/10 dark:text-red-300" },
+  anulado: { label: "Anulado", cls: "border-border bg-muted text-muted-foreground" },
 };
 const PROPUESTA: Record<string, string> = { pendiente: "Propuesta enviada", aplicada: "Aplicada como propusiste", corregida: "Aplicación corregida" };
 
@@ -83,6 +84,7 @@ const VendedorPagos = () => {
     { valor: "verificado", etiqueta: "Verificados", prueba: (p) => p.estado === "verificado" },
     { valor: "verificado_mes", etiqueta: `Verificados en ${mesDe(resumen) || "el mes"} (sin IGTF)`, prueba: verificadoMes },
     { valor: "rechazado", etiqueta: "Rechazados", prueba: (p) => p.estado === "rechazado" },
+    { valor: "anulado", etiqueta: "Anulados por administración", prueba: (p) => p.estado === "anulado" },
   ];
   const f = useFiltros([
     { clave: "estado", etiqueta: "Estado", todos: "Todos", principal: true, opciones: opcionesPrueba(pagos, pruebasEstado) },

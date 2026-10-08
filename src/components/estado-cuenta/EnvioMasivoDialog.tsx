@@ -14,8 +14,8 @@ import { urlEstadoCuenta } from "./formato";
 import type { EstadoCuentaCompleto } from "./tipos";
 
 // Envío masivo del estado de cuenta (fase 21b, punto 2.7): a cada cliente elegido en Cuentas (p. ej. todos los vencidos de
-// un vendedor) le llega SU estado de cuenta, igual que el envío individual: enlace público, el mismo PDF (movimientos desde
-// la factura abierta más antigua) y el mismo correo. Se registra como un lote (crear_lote_estado_cuenta) y cada envío queda
+// un vendedor) le llega SU estado de cuenta, igual que el envío individual: enlace público, el mismo PDF (22c: formato de
+// finanzas, al corte de hoy) y el mismo correo. Se registra como un lote (crear_lote_estado_cuenta) y cada envío queda
 // en el historial del cliente con su entrega o rebote (webhook de Resend). Clientes sin correo: se omiten, salvo que se
 // escriba uno para este envío. Se envía de uno en uno (el navegador genera cada PDF) y se puede detener.
 
@@ -93,7 +93,7 @@ export function EnvioMasivoDialog({ open, onOpenChange, clientes, onTerminado }:
       if (detener.current) break;
       cambiar(f.id, { estado: "enviando" });
       try {
-        const { data: ec, error: eEc } = await supabase.rpc("estado_cuenta_cliente", { p_cliente_id: f.id, p_desde_abierta: true });
+        const { data: ec, error: eEc } = await supabase.rpc("estado_cuenta_cliente", { p_cliente_id: f.id, p_movimientos: false });
         if (eEc) throw new Error(eEc.message);
         const { data: enl, error: eEnl } = await supabase.rpc("crear_enlace_estado_cuenta", { p_cliente_id: f.id });
         if (eEnl) throw new Error(eEnl.message);
@@ -128,7 +128,7 @@ export function EnvioMasivoDialog({ open, onOpenChange, clientes, onTerminado }:
       <DialogContent className="flex max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0" data-testid="envio-masivo">
         <DialogHeader className="border-b border-border px-4 py-4 text-left sm:px-5">
           <DialogTitle className="text-base">Enviar el estado de cuenta a {clientes.length} {clientes.length === 1 ? "cliente" : "clientes"}</DialogTitle>
-          <DialogDescription className="text-xs">A cada uno le llega el suyo: enlace en línea y PDF adjunto, con movimientos desde su factura abierta más antigua.</DialogDescription>
+          <DialogDescription className="text-xs">A cada uno le llega el suyo: enlace en línea y PDF adjunto con sus documentos con saldo al día de hoy.</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
           <div className="grid gap-3 sm:grid-cols-2">

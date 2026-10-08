@@ -27,6 +27,7 @@ import { FiltrosLista, useFiltros, opcionesTexto, opcionesPrueba, pasaPrueba, co
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useEmpresa } from "@/contexts/EmpresaContext";
+import { usePermissions } from "@/contexts/PermissionsContext";
 import { useToast } from "@/hooks/use-toast";
 
 // ── Tipos de las funciones de reporte (migraciones 18u y 20g: Odoo + histórico de Profit) ──
@@ -148,6 +149,9 @@ function GraficoVentas({ datos, formato }: { datos: { mes: string; odoo: number;
 const Reportes = () => {
   const { formatPrice } = useCurrency();
   const { soloLectura, seleccion } = useEmpresa();
+  // 22a4: los reportes con deuda por cliente exigen reportes Y cuentas (la base también lo exige)
+  const { can } = usePermissions();
+  const veDeuda = can("cuentas", "ver");
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState(params.get("tab") || "ventas");
@@ -589,8 +593,8 @@ const Reportes = () => {
               { clave: "monto", titulo: "Cobrado", valor: (f) => num(f.monto_usd), render: (f) => formatPrice(num(f.monto_usd)), derecha: true },
             ]} />
           </div>
-          {/* 21b (agente F2-3): DSO y mora por vendedor y por cliente */}
-          <CobranzaDso />
+          {/* 21b (agente F2-3): DSO y mora por vendedor y por cliente. Muestra deuda por cliente: solo con el permiso de Cuentas */}
+          {veDeuda && <CobranzaDso />}
         </TabsContent>
 
         <TabsContent value="inventario" className="mt-0">

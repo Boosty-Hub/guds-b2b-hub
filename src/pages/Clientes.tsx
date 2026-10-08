@@ -37,7 +37,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Building2, Eye, Edit, Loader2, Trash2, Save, UserPlus } from "lucide-react";
+import { Plus, Building2, Eye, Edit, Loader2, Trash2, Save, UserPlus, Tags } from "lucide-react";
+import { usePermissions } from "@/contexts/PermissionsContext";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase, Cliente, ListaPrecios } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -63,6 +64,10 @@ interface ClienteConLista extends Cliente {
   es_empresa?: boolean | null;
   /** Empleado (compras de personal, fase 21a): no cuenta como cartera de vendedor ni como "sin vendedor". */
   es_empleado?: boolean | null;
+  /** Clasificación de finanzas que trae la sincronización desde Odoo (22d): Industria, Canal y Segmento de contacto */
+  tipo_cliente?: string | null;
+  canal?: string | null;
+  segmento?: string | null;
 }
 
 /** Deuda del cliente según sus facturas publicadas (misma regla que Cuentas por Cobrar): saldo, vencido y a favor. */
@@ -93,6 +98,7 @@ const Clientes = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const { formatPrice } = useCurrency();
   const { toast } = useToast();
+  const { can } = usePermissions();
   const navigate = useNavigate();
 
   // Sheet states
@@ -321,6 +327,10 @@ const Clientes = () => {
     { clave: "activo", etiqueta: "Situación", todos: "Activos e inactivos", opciones: opcionesPrueba(clientes, pruebasActivo) },
     { clave: "portal", etiqueta: "Portal", todos: "Con y sin acceso", opciones: opcionesPrueba(clientes, pruebasPortal) },
     { clave: "origen", etiqueta: "Origen", todos: "Odoo y GUDS", opciones: opcionesPrueba(clientes, pruebasOrigen) },
+    // Clasificación de finanzas (22d), tal como está en Odoo
+    { clave: "tipo_cliente", etiqueta: "Tipo de cliente", todos: "Todos", opciones: opcionesDe(clientes, (c) => c.tipo_cliente, undefined, "Sin tipo de cliente") },
+    { clave: "canal", etiqueta: "Canal", todos: "Todos", opciones: opcionesDe(clientes, (c) => c.canal, undefined, "Sin canal") },
+    { clave: "segmento", etiqueta: "Categoría de cobranza", todos: "Todas", opciones: opcionesDe(clientes, (c) => c.segmento, undefined, "Sin categoría") },
     filtroEmpresa,
   ]);
   const pasaFiltros = (c: ClienteConLista) =>
@@ -329,6 +339,7 @@ const Clientes = () => {
     && coincide(c.condicion_pago, f.v("condicion")) && pasaPrueba(pruebasCredito, f.v("credito"), c)
     && coincide(c.lista_precios_id, f.v("lista")) && pasaPrueba(pruebasActivo, f.v("activo"), c)
     && pasaPrueba(pruebasPortal, f.v("portal"), c) && pasaPrueba(pruebasOrigen, f.v("origen"), c) && pasaPrueba(pruebasTipo, f.v("tipo"), c)
+    && coincide(c.tipo_cliente, f.v("tipo_cliente")) && coincide(c.canal, f.v("canal")) && coincide(c.segmento, f.v("segmento"))
     && (!filtroEmpresa || coincide(c.empresa_id, f.v("empresa")));
   // Base de los indicadores: los filtros sin la búsqueda (sin filtros = todos los clientes, como antes)
   const base = useMemo(() => (f.activos ? clientes.filter(pasaFiltros) : clientes),
@@ -354,6 +365,7 @@ const Clientes = () => {
     { titulo: "Estado", valor: (c) => estadoVe(c.estado) ?? c.estado }, { titulo: "Vendedor", valor: (c) => nombreVendedor(c) },
     { titulo: "Condición de pago", valor: (c) => (c.condicion_pago ? textoCondicion(c.condicion_pago) : "") },
     { titulo: "Deuda USD", valor: (c) => Number(deudaDe(c).neto.toFixed(2)) }, { titulo: "Vencido USD", valor: (c) => Number(deudaDe(c).vencido.toFixed(2)) },
+    { titulo: "Tipo de cliente", valor: (c) => c.tipo_cliente }, { titulo: "Canal", valor: (c) => c.canal }, { titulo: "Categoría de cobranza", valor: (c) => c.segmento },
   ]);
 
   const stats = {
@@ -386,6 +398,11 @@ const Clientes = () => {
           <>
             {cols.selector}
             <BotonExportar onClick={exportar} total={ordenadas.length} />
+            {can("clasificacion_clientes", "ver") && (
+              <Link to="/admin/configuracion/clasificacion-clientes" title="Tipo de cliente, canal y categoría de cobranza de finanzas">
+                <Button size="sm" variant="outline" className="h-8 gap-1.5"><Tags className="h-3.5 w-3.5" /> Clasificación</Button>
+              </Link>
+            )}
             <Button size="sm" className="gap-1.5" onClick={() => { resetForm(); setIsCreateOpen(true); }}>
               <Plus className="h-3.5 w-3.5" />
               Nuevo Cliente

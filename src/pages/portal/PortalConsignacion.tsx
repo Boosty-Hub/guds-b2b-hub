@@ -1,19 +1,26 @@
 import { useEffect, useState } from "react";
 import { PortalPagina } from "@/components/portal/PortalPagina";
-import { EstadoVacio, Panel, PillTono, SkeletonFilas, fechaCorta, type Tono } from "@/components/portal/sistema";
+import { Link } from "react-router-dom";
+import { EstadoVacio, EstadoPill, Panel, PillTono, SkeletonFilas, fechaCorta, type Tono } from "@/components/portal/sistema";
 import { NavFinanzas } from "@/components/portal/finanzas";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Boxes } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { DeclararVentaForm, type StockConsignacion } from "@/components/consignacion/DeclararVentaForm";
+import { DeclararVentaForm, cargarStockConsignacion, type StockConsignacion } from "@/components/consignacion/DeclararVentaForm";
 
 interface Almacen { id: string; nombre: string; }
 interface Declaracion {
   id: string; numero: string; estado: string; fecha: string; total: number;
-  factura_id: string | null; factura?: { numero: string } | null;
+  factura_id: string | null; factura?: { numero: string } | null;   // factura interna (declaraciones aprobadas antes de 22b)
+  // Pedido creado al aprobar (22b): sigue su camino en Odoo hasta la factura
+  orden?: { id: string; numero: string; numero_guds: string | null; odoo_id: number | null; aprobacion: string | null; estado: string;
+    estado_odoo: string | null; facturas?: { numero: string; tipo: string; estado_pago: string | null }[] | null } | null;
 }
+
+const facturaDe = (d: Declaracion) =>
+  (d.orden?.facturas ?? []).find((f) => f.tipo === "factura" && f.estado_pago !== "anulado")?.numero ?? d.factura?.numero ?? null;
 
 const ESTADO: Record<string, { label: string; tono: Tono }> = {
   pendiente: { label: "Pendiente", tono: "pendiente" },
@@ -35,16 +42,9 @@ const PortalConsignacion = () => {
     const { data: alm } = await supabase.from("almacenes").select("id, nombre")
       .eq("cliente_id", user.cliente_id).eq("tipo", "consignacion").eq("activo", true).maybeSingle();
     setAlmacen((alm as Almacen) ?? null);
-    if (alm) {
-      const { data: inv } = await supabase.from("inventario_almacen")
-        .select("cantidad, producto:productos(id, nombre, sku)")
-        .eq("almacen_id", alm.id).gt("cantidad", 0);
-      setStock(((inv as unknown as { cantidad: number; producto: { id: string; nombre: string; sku: string | null } | null }[]) ?? [])
-        .filter((r) => r.producto)
-        .map((r) => ({ producto_id: r.producto!.id, nombre: r.producto!.nombre, sku: r.producto!.sku, cantidad: Number(r.cantidad) })));
-    }
+    if (alm) setStock(await cargarStockConsignacion(alm.id));
     const { data: decs } = await supabase.from("declaraciones_consignacion")
-      .select("id, numero, estado, fecha, total, factura_id, factura:facturas(numero)")
+      .select("id, numero, estado, fecha, total, factura_id, factura:facturas(numero), orden:ordenes(id, numero, numero_guds, odoo_id, aprobacion, estado, estado_odoo, facturas(numero, tipo, estado_pago))")
       .eq("cliente_id", user.cliente_id).order("created_at", { ascending: false });
     setDeclaraciones((decs as unknown as Declaracion[]) ?? []);
     setLoading(false);
@@ -53,7 +53,7 @@ const PortalConsignacion = () => {
   useEffect(() => { cargar(); }, [user?.cliente_id]);
 
   return (
-    <PortalPagina titulo="Consignación" descripcion="Declara lo que vendiste del inventario que tienes en consignación.">
+    <PortalPagina titulo="Consignación" descripcion="Declara lo que vendiste del inventario que tienes en consignación. Al aprobarse se convierte en un pedido y la factura llega cuando se procese.">
       <NavFinanzas />
       {loading ? (
         <SkeletonFilas n={2} alto="h-48" />
@@ -77,7 +77,7 @@ const PortalConsignacion = () => {
                   <TableRow>
                     <TableHead>Nº</TableHead><TableHead>Fecha</TableHead>
                     <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Estado</TableHead><TableHead>Factura</TableHead>
+                    <TableHead>Estado</TableHead><TableHead>Pedido</TableHead><TableHead>Factura</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -87,7 +87,15 @@ const PortalConsignacion = () => {
                       <TableCell className="text-muted-foreground">{fechaCorta(d.fecha)}</TableCell>
                       <TableCell className="text-right font-semibold tabular-nums">{formatPrice(d.total)}</TableCell>
                       <TableCell><PillTono tono={ESTADO[d.estado]?.tono ?? "neutro"}>{ESTADO[d.estado]?.label ?? d.estado}</PillTono></TableCell>
-                      <TableCell className="font-mono text-sm text-muted-foreground">{d.factura?.numero || "—"}</TableCell>
+                      <TableCell>
+                        {d.orden ? (
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            <Link to={`/portal/pedidos?pedido=${d.orden.id}`} className="font-mono text-sm text-primary hover:underline">{d.orden.numero}</Link>
+                            <EstadoPill pedido={d.orden} />
+                          </span>
+                        ) : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm text-muted-foreground">{facturaDe(d) || (d.orden ? "Por facturar" : "—")}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -98,7 +106,11 @@ const PortalConsignacion = () => {
                   <li key={d.id} className="flex items-start justify-between gap-3 px-4 py-3">
                     <div className="min-w-0">
                       <p className="text-sm font-medium tabular-nums">{d.numero}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">{fechaCorta(d.fecha)}{d.factura?.numero ? ` · Factura ${d.factura.numero}` : ""}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {fechaCorta(d.fecha)}
+                        {d.orden && <> · Pedido <Link to={`/portal/pedidos?pedido=${d.orden.id}`} className="font-mono text-primary hover:underline">{d.orden.numero}</Link></>}
+                        {facturaDe(d) ? ` · Factura ${facturaDe(d)}` : ""}
+                      </p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1.5">
                       <span className="text-sm font-semibold tabular-nums">{formatPrice(d.total)}</span>

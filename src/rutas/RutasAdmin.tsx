@@ -48,6 +48,7 @@ const CuentasPorPagar = pagina(["cuentas-por-pagar"], () => import("../pages/Cue
 const FacturaProveedorDetalle = pagina(["facturas-proveedor/:facturaId"], () => import("../pages/FacturaProveedorDetalle"));
 const PlanPagoDetalle = pagina(["planes-pago/:planId"], () => import("../pages/PlanPagoDetalle"));
 const Conciliacion = pagina(["conciliacion"], () => import("../pages/Conciliacion"));
+const Papelera = pagina(["papelera"], () => import("../pages/Papelera"));
 const Cupones = pagina(["cupones"], () => import("../pages/Cupones"));
 const Banners = pagina(["banners"], () => import("../pages/Banners"));
 const Categorias = pagina(["categorias"], () => import("../pages/Categorias"));
@@ -69,6 +70,7 @@ const ConfigEmpaques = pagina(["configuracion/empaques"], () => import("../pages
 const ConfigIconos = pagina(["configuracion/iconos"], () => import("../pages/configuracion/ConfigIconos"));
 const ConfigDiasCaja = pagina(["configuracion/dias-caja"], () => import("../pages/configuracion/ConfigDiasCaja"));
 const ConfigVerificacionOdoo = pagina(["configuracion/verificacion-odoo"], () => import("../pages/configuracion/ConfigVerificacionOdoo"));
+const ConfigClasificacionClientes = pagina(["configuracion/clasificacion-clientes"], () => import("../pages/configuracion/ConfigClasificacionClientes"));
 const NotFound = lazy(() => import("../pages/NotFound"));
 
 // Precarga la pantalla de la URL actual (la más específica si hay varias)
@@ -118,6 +120,7 @@ export default function RutasAdmin() {
       <Route path="facturas-proveedor/:facturaId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="compras"><FacturaProveedorDetalle /></ProtectedRoute>} />
       <Route path="planes-pago/:planId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="planificacion_pagos"><PlanPagoDetalle /></ProtectedRoute>} />
       <Route path="conciliacion" element={<ProtectedRoute allowedRoles={["admin"]} modulo="bancos"><Conciliacion /></ProtectedRoute>} />
+      <Route path="papelera" element={<ProtectedRoute allowedRoles={["admin"]} modulo="papelera"><Papelera /></ProtectedRoute>} />
       <Route path="cupones" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cupones"><Cupones /></ProtectedRoute>} />
       <Route path="banners" element={<ProtectedRoute allowedRoles={["admin"]} modulo="banners"><Banners /></ProtectedRoute>} />
       <Route path="categorias" element={<ProtectedRoute allowedRoles={["admin"]} modulo="categorias"><Categorias /></ProtectedRoute>} />
@@ -141,6 +144,7 @@ export default function RutasAdmin() {
       <Route path="configuracion/iconos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigIconos /></ProtectedRoute>} />
       <Route path="configuracion/dias-caja" element={<ProtectedRoute allowedRoles={["admin"]} modulo="configuracion"><ConfigDiasCaja /></ProtectedRoute>} />
       <Route path="configuracion/verificacion-odoo" element={<ProtectedRoute allowedRoles={["admin"]}><ConfigVerificacionOdoo /></ProtectedRoute>} />
+      <Route path="configuracion/clasificacion-clientes" element={<ProtectedRoute allowedRoles={["admin"]} modulo="clasificacion_clientes"><ConfigClasificacionClientes /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

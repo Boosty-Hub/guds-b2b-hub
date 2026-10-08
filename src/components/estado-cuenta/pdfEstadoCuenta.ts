@@ -1,11 +1,10 @@
 import { jsPDF } from "jspdf";
 import { autoTable, type CellInput, type RowInput, type UserOptions } from "jspdf-autotable";
 import logoGuds from "@/assets/guds-logo.png";
-import { conceptoMovimiento } from "@/components/portal/finanzas";
-import { TRAMOS, condicionPagoTexto, type Movimiento } from "@/hooks/useFinanzasPortal";
+import { TRAMOS, condicionPagoTexto } from "@/hooks/useFinanzasPortal";
 import {
-  TIPO_DOCUMENTO, colorEmpresa, conceptoAbono, direccionTexto, fechaHora, fechaLarga, fechaNumerica, fmtBs, fmtUsd, nombreArchivoEstadoCuenta,
-  textoPeriodo,
+  ESTATUS, anioMes, colorEmpresa, conceptoAbono, corteDe, direccionTexto, estatusDe, fechaHora, fechaLarga, fechaNumerica, fmtBs, fmtTasa,
+  fmtUsd, formatoRif, nombreArchivoEstadoCuenta, tipoYNumero, totalesDocumentos,
 } from "./formato";
 import type { EmpresaEstadoCuenta, EstadoCuentaCompleto } from "./tipos";
 
@@ -14,9 +13,12 @@ import type { EmpresaEstadoCuenta, EstadoCuentaCompleto } from "./tipos";
 // descarga al pulsar "Descargar PDF" (import dinámico desde ./pdf.ts): no pesa en el arranque de los portales.
 // Letra: Plus Jakarta Sans del repo en tres grosores fijos con cifras tabulares (public/fonts/pdf, ver
 // scripts/fuentes-pdf.py). Montos en USD con la convención -$1,234.69.
-// 21b: A4 horizontal para que quepa el cruce por documento (base, IVA, pagos, NC, retenciones, otros, saldo, qué falta y
-// comentario visible, con una línea de abonos debajo de cada documento); la franja de arriba lleva por cobrar, vencido con
-// su antigüedad, por vencer, a favor, saldo neto y notas de débito.
+// 21b: A4 horizontal; la franja de arriba lleva por cobrar, vencido con su antigüedad, por vencer, a favor, saldo neto y
+// notas de débito.
+// 22c: el cuerpo es el formato de finanzas ("FORMATO EDC"): una fila por documento con saldo al corte (Año · Mes del
+// vencimiento · Tipo y Nº · Nº de control · Emisión · Vencimiento · Días · Tasa de emisión · Base · Impuesto · Total · Deuda ·
+// Estatus) y debajo de cada uno su detalle (qué falta, comentario visible y abonos); fila de totales. Ya no lleva el libro
+// de movimientos.
 
 export interface OpcionesPdf {
   /** Enlace público vigente (va en el pie de cada página). */
@@ -117,7 +119,7 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
   const marca = hexARgb(colorEmpresa(empresa));
   const marcaSuave = mezclar(marca, [255, 255, 255], 0.9);
   const r = datos.resumen;
-  const corte = datos.periodo.hasta ?? datos.hoy;
+  const corte = corteDe(datos);
   const generado = new Date();
   const nombreEmpresa = empresa?.nombre ?? "GUDS";
   const clienteNombre = datos.cliente.nombre;
@@ -158,7 +160,7 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
   letra(7.6, "normal", TENUE);
   const dirEmpresa = (doc.splitTextToSize(direccionTexto(empresa), 102) as string[]).slice(0, 2);
   const lineasEmpresa = [
-    empresa?.rif ? `RIF ${empresa.rif}` : "",
+    empresa?.rif ? `RIF ${formatoRif(empresa.rif)}` : "",
     ...dirEmpresa,
     [empresa?.telefono, empresa?.email, empresa?.sitio_web].filter(Boolean).join("  ·  "),
   ].filter(Boolean);
@@ -167,9 +169,9 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
   letra(15, "bold", marca);
   texto("ESTADO DE CUENTA", ANCHO - MX, y + 5.2, { derecha: true });
   letra(8.4, "semi");
-  texto(`Corte al ${fechaLarga(corte)}`, ANCHO - MX, y + 10.6, { derecha: true });
+  texto(`Actualizado al ${fechaNumerica(corte)}`, ANCHO - MX, y + 10.6, { derecha: true });
   letra(7.6, "normal", TENUE);
-  texto(textoPeriodo(datos), ANCHO - MX, y + 14.4, { derecha: true });
+  texto("Montos en US$ · documentos con saldo al corte", ANCHO - MX, y + 14.4, { derecha: true });
 
   y = 14 + Math.max(LOGO, 8.4 + lineasEmpresa.length * 3.6) + 3;
   doc.setDrawColor(...marca);
@@ -188,7 +190,7 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
   letra(11, "bold");
   texto(clienteNombre, MX + 5, y + 11.6, { ancho: 180 });
   letra(7.8, "normal");
-  texto([datos.cliente.rif && `RIF ${datos.cliente.rif}`, datos.cliente.codigo && `Código ${datos.cliente.codigo}`].filter(Boolean).join("   ·   ") || "—",
+  texto([datos.cliente.rif && `RIF ${formatoRif(datos.cliente.rif)}`, datos.cliente.codigo && `Código ${datos.cliente.codigo}`].filter(Boolean).join("   ·   ") || "—",
     MX + 5, y + 16.2, { ancho: 180 });
   let yc = y + 16.2;
   if (dirCliente) { yc += 3.8; letra(7.4, "normal", TENUE); texto(dirCliente, MX + 5, yc, { ancho: 180 }); }
@@ -284,6 +286,8 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
     y += 2.8;
   };
   const tabla = (o: UserOptions) => {
+    // Los estilos de cada tabla se suman a los de base (antes los reemplazaban y el cuerpo salía en Helvetica)
+    const { styles, headStyles, ...resto } = o;
     autoTable(doc, {
       theme: "plain",
       startY: y,
@@ -292,129 +296,91 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
       styles: {
         font: "PJS", fontStyle: "normal", fontSize: 7.6, textColor: TEXTO, cellPadding: { top: 1.7, bottom: 1.7, left: 1.8, right: 1.8 },
         lineColor: BORDE, lineWidth: { bottom: 0.2 }, valign: "middle", overflow: "linebreak",
+        ...styles,
       },
-      headStyles: { font: "PJSS", fontStyle: "normal", fontSize: 6.8, textColor: TENUE, fillColor: FONDO, lineWidth: 0 },
-      ...o,
+      headStyles: { font: "PJSS", fontStyle: "normal", fontSize: 6.8, textColor: TENUE, fillColor: FONDO, lineWidth: 0, ...headStyles },
+      ...resto,
     });
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 7;
   };
   const der = { halign: "right" as const };
 
-  // ── Documentos: el cruce por factura (base, IVA, abonos por tipo, saldo, qué falta y comentario visible) ──
-  const filtro = datos.filtro ?? "abiertas";
-  const docsPdf = (filtro === "abiertas" ? datos.abiertos : datos.documentos) ?? [];
-  const tituloDocs = filtro === "abiertas" ? "Documentos con saldo" : filtro === "todas" ? "Documentos emitidos en el período" : "Documentos pagados en el período";
-  seccion(tituloDocs, docsPdf.length ? `${docsPdf.length} ${docsPdf.length === 1 ? "documento" : "documentos"} · montos en USD (en Bs a la tasa del documento si es en bolívares) · días al corte` : undefined);
+  // ── Documentos con saldo al corte, con el formato de finanzas ──
+  const docsPdf = datos.abiertos ?? [];
+  seccion(`Estado de cuenta actualizado al ${fechaNumerica(corte)}`,
+    docsPdf.length ? `${docsPdf.length} ${docsPdf.length === 1 ? "documento" : "documentos"} · días = corte − vencimiento · tasa de emisión en Bs por US$` : undefined);
   if (docsPdf.length === 0) {
     asegurar(10);
     letra(7.8, "normal", TENUE);
-    texto(filtro === "abiertas" ? "No hay facturas ni notas con saldo pendiente." : "No hay documentos en este período.", MX, y + 3.5);
+    texto("No hay facturas ni notas con saldo pendiente.", MX, y + 3.5);
     y += 11;
   } else {
     const num = (v: number | null | undefined) => Number(v ?? 0);
-    const m = (v: number | null | undefined, bs?: number | null) => {
-      const t = Math.abs(num(v)) >= 0.005 ? fmtUsd(num(v)) : "—";
-      return bs != null ? `${t}\n${fmtBs(bs)}` : t;
-    };
-    const facs = docsPdf.filter((d) => d.tipo !== "nota_credito");
-    const sum = (k: "base" | "iva" | "total" | "pagos" | "nc" | "retenciones" | "otros" | "saldo") => facs.reduce((a, d) => a + num(d[k]), 0);
-    const favor = docsPdf.filter((d) => d.tipo === "nota_credito").reduce((a, d) => a + num(d.saldo), 0);
+    const m = (v: number | null | undefined) => (Math.abs(num(v)) >= 0.005 ? fmtUsd(num(v)) : "—");
+    const t = totalesDocumentos(docsPdf);
+    const COLOR_ESTATUS: Record<string, RGB> = { pendiente: TEXTO, retencion: [146, 64, 14], nc_favor: VERDE, a_favor: VERDE };
     const filas: RowInput[] = [];
     docsPdf.forEach((d) => {
+      const { anio, mes } = anioMes(d);
+      const est = estatusDe(d);
       const vencida = d.saldo > 0 && d.dias > 0;
       filas.push([
-        { content: `${d.numero}${d.tipo !== "factura" ? `\n${TIPO_DOCUMENTO[d.tipo] ?? d.tipo}` : ""}`, styles: { font: "PJSS" } },
+        { content: anio ?? "—", styles: { textColor: TENUE } },
+        { content: mes ?? "—", styles: { textColor: TENUE } },
+        { content: tipoYNumero(d), styles: { font: "PJSS" } },
+        d.nro_control ?? "—",
         fechaNumerica(d.emision),
         fechaNumerica(d.vence ?? d.emision),
-        { content: d.saldo < 0 || Math.abs(d.saldo) <= 0.009 ? "—" : String(d.dias), styles: { ...der, textColor: vencida ? ROJO : TENUE } },
-        { content: m(d.base, d.base_bs), styles: der },
-        { content: m(d.iva, d.iva_bs), styles: der },
-        { content: m(d.total, d.total_bs), styles: der },
-        { content: m(d.pagos), styles: { ...der, textColor: VERDE } },
-        { content: m(d.nc), styles: { ...der, textColor: VERDE } },
-        { content: m(d.retenciones), styles: { ...der, textColor: VERDE } },
-        { content: m(d.otros), styles: { ...der, textColor: VERDE } },
-        { content: m(d.saldo, d.saldo_bs), styles: { ...der, font: "PJSS", textColor: d.saldo < 0 ? VERDE : TEXTO } },
-        { content: d.que_falta?.texto ?? "", styles: { textColor: [146, 64, 14] as RGB, fontSize: 6.3 } },
-        // Solo los visibles: el PDF del admin es el mismo que se adjunta al correo del cliente
-        { content: (d.comentarios ?? []).filter((c) => c.visible !== false).map((c) => c.texto).join(" · "), styles: { fontSize: 6.3 } },
+        { content: String(d.dias), styles: { ...der, textColor: vencida ? ROJO : TENUE } },
+        { content: d.tasa_emision != null ? fmtTasa(d.tasa_emision) : "—", styles: { ...der, textColor: TENUE } },
+        { content: m(d.base), styles: der },
+        { content: m(d.iva), styles: der },
+        { content: m(d.total), styles: der },
+        { content: fmtUsd(d.saldo), styles: { ...der, font: "PJSS", textColor: d.saldo < 0 ? VERDE : TEXTO } },
+        { content: ESTATUS[est].texto, styles: { textColor: COLOR_ESTATUS[est], fontSize: 6.3 } },
       ] as CellInput[]);
+      // Detalle: qué falta, comentario visible y abonos (lo mismo que se despliega en pantalla)
       const abonos = d.abonos ?? [];
-      if (abonos.length) {
-        const max = 8;
-        const linea = abonos.slice(0, max).map((a) => [
+      const max = 8;
+      const partes = [
+        d.que_falta ? `Qué falta: ${d.que_falta.texto}` : "",
+        // Solo los visibles: el PDF del admin es el mismo que se adjunta al correo del cliente
+        ...(d.comentarios ?? []).filter((c) => c.visible !== false).slice(0, 2).map((c) => `Comentario: ${c.texto}`),
+        abonos.length ? `Abonos: ${abonos.slice(0, max).map((a) => [
           fechaNumerica(a.fecha), conceptoAbono(a), a.documento, a.banco, a.referencia && `ref. ${a.referencia}`,
           `${fmtUsd(a.monto)}${a.moneda === "VES" && a.monto_moneda != null ? ` (${fmtBs(a.monto_moneda)})` : ""}`,
-        ].filter(Boolean).join(" ")).join("   ·   ") + (abonos.length > max ? `   ·   y ${abonos.length - max} más` : "");
-        filas.push([{ content: `Abonos: ${linea}`, colSpan: 14, styles: { fontSize: 5.9, textColor: TENUE, cellPadding: { top: 0.4, bottom: 1.6, left: 4, right: 1.8 } } }] as CellInput[]);
+        ].filter(Boolean).join(" ")).join("   ·   ")}${abonos.length > max ? `   ·   y ${abonos.length - max} más` : ""}` : "",
+      ].filter(Boolean);
+      if (partes.length) {
+        filas.push([{ content: partes.join("     "), colSpan: 13, styles: { fontSize: 5.9, textColor: TENUE, cellPadding: { top: 0.4, bottom: 1.6, left: 4, right: 1.8 } } }] as CellInput[]);
       }
     });
-    const pie = { font: "PJS", fontStyle: "bold" as const, lineWidth: 0 };
+    const pie = { font: "PJS", fontStyle: "bold" as const, lineWidth: 0, fillColor: marcaSuave };
     filas.push([
-      { content: filtro === "abiertas" ? "Total por cobrar (facturas y notas de débito)" : "Total (facturas y notas de débito)", colSpan: 4, styles: pie },
-      { content: fmtUsd(sum("base")), styles: { ...der, ...pie } }, { content: fmtUsd(sum("iva")), styles: { ...der, ...pie } },
-      { content: fmtUsd(sum("total")), styles: { ...der, ...pie } }, { content: fmtUsd(sum("pagos")), styles: { ...der, ...pie } },
-      { content: fmtUsd(sum("nc")), styles: { ...der, ...pie } }, { content: fmtUsd(sum("retenciones")), styles: { ...der, ...pie } },
-      { content: fmtUsd(sum("otros")), styles: { ...der, ...pie } }, { content: fmtUsd(sum("saldo")), styles: { ...der, ...pie } },
-      { content: "", colSpan: 2, styles: pie },
+      { content: "Totales", colSpan: 8, styles: pie },
+      { content: fmtUsd(t.base), styles: { ...der, ...pie } }, { content: fmtUsd(t.iva), styles: { ...der, ...pie } },
+      { content: fmtUsd(t.total), styles: { ...der, ...pie } }, { content: fmtUsd(t.deuda), styles: { ...der, ...pie } },
+      { content: t.aFavor < -0.004 ? `Por cobrar ${fmtUsd(t.porCobrar)} · a favor ${fmtUsd(t.aFavor)}` : "", styles: { ...pie, fontSize: 5.9, fontStyle: "normal" as const } },
     ] as CellInput[]);
-    if (Math.abs(favor) >= 0.005) {
-      filas.push([
-        { content: "Notas de crédito a favor", colSpan: 11, styles: { ...pie, textColor: VERDE } },
-        { content: fmtUsd(favor), styles: { ...der, ...pie, textColor: VERDE } },
-        { content: "", colSpan: 2, styles: pie },
-      ] as CellInput[]);
-    }
     tabla({
-      head: [["Nº", "Emisión", "Vence", { content: "Días", styles: der }, { content: "Base imp.", styles: der }, { content: "IVA", styles: der },
-        { content: "Total", styles: der }, { content: "Pagos", styles: der }, { content: "NC", styles: der }, { content: "Retenc.", styles: der },
-        { content: "Otros", styles: der }, { content: "Saldo", styles: der }, "Qué falta (sugerido)", "Comentario"]],
+      head: [["Año", "Mes", "Tipo y Nº", "Nº de control", "Emisión", "Vencimiento", { content: "Días", styles: der },
+        { content: "Tasa de emisión", styles: der }, { content: "Base imponible US$", styles: der }, { content: "Impuesto US$", styles: der },
+        { content: "Total US$", styles: der }, { content: "Deuda US$", styles: der }, "Estatus"]],
       body: filas,
       styles: { fontSize: 6.7, cellPadding: { top: 1.4, bottom: 1.4, left: 1.4, right: 1.4 } },
       columnStyles: {
-        0: { cellWidth: 22 }, 1: { cellWidth: 15 }, 2: { cellWidth: 15 }, 3: { cellWidth: 8.5 }, 4: { cellWidth: 19 }, 5: { cellWidth: 16 },
-        6: { cellWidth: 19 }, 7: { cellWidth: 17.5 }, 8: { cellWidth: 16 }, 9: { cellWidth: 16 }, 10: { cellWidth: 14 }, 11: { cellWidth: 19 },
-        12: { cellWidth: 36 },
+        0: { cellWidth: 10 }, 1: { cellWidth: 8 }, 2: { cellWidth: 22 }, 3: { cellWidth: 21 }, 4: { cellWidth: 16 }, 5: { cellWidth: 18.5 },
+        6: { cellWidth: 10 }, 7: { cellWidth: 16.5 }, 8: { cellWidth: 22 }, 9: { cellWidth: 19 }, 10: { cellWidth: 21 }, 11: { cellWidth: 21 },
       },
     });
   }
 
-  // ── Movimientos con saldo corrido ──
-  const movs = datos.movimientos;
-  seccion("Movimientos", `${textoPeriodo(datos)} · ${movs.length} ${movs.length === 1 ? "movimiento" : "movimientos"}`);
-  const fila = (m: EstadoCuentaCompleto["movimientos"][number]) => {
-    const concepto = conceptoMovimiento(m as Movimiento);
-    const vence = (m.tipo === "factura" || m.tipo === "nota_debito") && m.vence && m.estado !== "anulado" ? ` · vence ${fechaNumerica(m.vence)}` : "";
-    return [
-      fechaNumerica(m.fecha),
-      { content: m.tipo === "redondeo" ? "—" : m.documento || "—", styles: { font: m.tipo === "factura" || m.tipo === "nota_debito" || m.tipo === "nota_credito" ? "PJSS" : "PJS" } },
-      { content: `${concepto}${vence}`, styles: m.tipo === "nota_debito" ? { textColor: TEXTO } : {} },
-      { content: m.monto > 0 ? fmtUsd(m.monto) : "", styles: der },
-      { content: m.monto < 0 ? fmtUsd(-m.monto) : "", styles: { ...der, textColor: VERDE } },
-      { content: fmtUsd(m.saldo), styles: { ...der, font: "PJSS" } },
-    ] as CellInput[];
-  };
-  const filaSaldo = (etiqueta: string, valor: number, fuerte: boolean) => [
-    { content: etiqueta, colSpan: 5, styles: { font: fuerte ? "PJS" : "PJSS", fontStyle: fuerte ? "bold" : "normal", fillColor: fuerte ? marcaSuave : FONDO, lineWidth: 0 } },
-    { content: fmtUsd(valor), styles: { ...der, font: "PJS", fontStyle: "bold", fillColor: fuerte ? marcaSuave : FONDO, lineWidth: 0 } },
-  ] as CellInput[];
-  tabla({
-    head: [["Fecha", "Documento", "Concepto", { content: "Cargo", styles: der }, { content: "Abono", styles: der }, { content: "Saldo", styles: der }]],
-    body: [
-      ...(datos.periodo.desde ? [filaSaldo(`Saldo anterior al ${fechaLarga(datos.periodo.desde)}`, datos.saldo_inicial, false)] : []),
-      ...(movs.length ? movs.map(fila) : [[{ content: "Sin movimientos en este período.", colSpan: 6, styles: { textColor: TENUE } }] as CellInput[]]),
-      filaSaldo(`Saldo al ${fechaLarga(corte)}`, datos.saldo_final, true),
-    ] as RowInput[],
-    columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 40 }, 3: { cellWidth: 28 }, 4: { cellWidth: 28 }, 5: { cellWidth: 30 } },
-  });
-
   // ── Notas ──
   const notas = [
-    "Montos en dólares (USD). Los documentos en bolívares se expresan en USD a la tasa de cada documento.",
-    "Refleja lo registrado a la fecha de corte; los pagos declarados quedan pendientes hasta su verificación.",
-    "«Qué falta» es una sugerencia automática según la base, el IVA y lo abonado; los comentarios los escribe nuestro equipo.",
-    datos.ajustes_cambiarios ? `No se listan ${datos.ajustes_cambiarios} ${datos.ajustes_cambiarios === 1 ? "ajuste" : "ajustes"} por diferencial cambiario (notas de débito o de crédito en bolívares de 0,00 USD): no cambian el saldo.` : "",
-  ].filter(Boolean);
+    "Montos en dólares (US$); las notas de crédito a favor van en negativo. Los documentos en bolívares se expresan en US$ a la tasa de cada documento.",
+    "Días transcurridos = fecha de corte − vencimiento (negativo = por vencer). Tasa de emisión: en bolívares, la del documento; en dólares, la BCV del día de emisión (o la última publicada antes).",
+    "Refleja lo registrado a la fecha de corte; los pagos declarados quedan pendientes hasta su verificación. «Qué falta» es una sugerencia automática según la base, el IVA y lo abonado; los comentarios los escribe nuestro equipo.",
+  ];
   asegurar(notas.length * 3.6 + 3);
   letra(6.9, "normal", TENUE);
   notas.forEach((n) => {
@@ -431,7 +397,7 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
       letra(7.6, "bold");
       texto(empresa?.nombre_corto ?? nombreEmpresa, MX, 13, { ancho: 60 });
       letra(7.4, "normal", TENUE);
-      const cab = `Estado de cuenta · corte al ${fechaLarga(corte)}`;
+      const cab = `Estado de cuenta · actualizado al ${fechaNumerica(corte)}`;
       const anchoCab = doc.getTextWidth(cab);
       texto(cab, ANCHO - MX, 13, { derecha: true });
       letra(7.4, "semi");
@@ -453,7 +419,7 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
       doc.textWithLink(corto, MX, yp + 3.6, { url });
     } else {
       letra(6.9, "normal", TENUE);
-      texto(`${nombreEmpresa}${empresa?.rif ? ` · RIF ${empresa.rif}` : ""}`, MX, yp, { ancho: 130 });
+      texto(`${nombreEmpresa}${empresa?.rif ? ` · RIF ${formatoRif(empresa.rif)}` : ""}`, MX, yp, { ancho: 130 });
     }
     letra(6.4, "normal", TENUE);
     texto(`Generado el ${fechaHora(generado)}`, MX, yp + (opciones.enlace ? 7.2 : 3.6));

@@ -98,6 +98,23 @@ ecommerce por empresa, pedidos de vendedores desde el celular, delivery y report
   El envío va como línea del servicio configurado (Configuración → Políticas de venta) o, si falta, como nota. Ver bitácora.
 - **Primera prueba (27-sep):** GUDS-ORD-00001 → **S00927** (Quirutec como cliente de GUDS, 1 × CARAMELOS CHAO $0,38, "No procesar").
   Detalle y hallazgos en la bitácora (almacén de consignación en S00927, envío de $50 sin equivalente en Odoo).
+- **Consignación → pedido en Odoo (8-oct, migración `20261008_fase22b_consignacion_pedido_odoo.sql`):** aprobar una declaración de
+  venta en consignación ya **no** crea factura interna ni descuenta `inventario_almacen`: crea un pedido aprobado (`ordenes` +
+  ítems, `ordenes.almacen_id` = almacén de consignación del cliente, `declaraciones_consignacion.orden_id`) que sale por el mismo
+  envío de 9b. `enviar.js` manda `warehouse_id` = ese almacén (comprobado en Odoo: activo y de la misma compañía), como ya vende el
+  equipo en Odoo (entrega `C-xx/OUT` desde `C-xx/Existencias`); los demás pedidos siguen con P-01. Avisos en el pedido si en Odoo
+  el almacén tiene menos existencia libre de la declarada o si una línea va sin precio de GUDS. En Odoo se confirma, se entrega y
+  se factura; la sincronización baja el inventario y enlaza la factura (`facturas.orden_id`). Lo declarado que Odoo aún no reservó
+  queda comprometido (`consignacion_disponible`). Pruebas: `node scripts/probar-22b-consignacion.mjs [--quirutec]` (rollback +
+  payload simulado). **Primera prueba real (pendiente de autorización):** elegir con el equipo una venta real chica de un almacén
+  de consignación de un cliente con `odoo_id` (lista USD); 1) declararla (portal o admin); 2) ver el payload simulado con
+  `node scripts/probar-22b-consignacion.mjs` (el pedido nace al aprobar, así que la simulación se hace en rollback);
+  3) desplegar `sync-odoo` con el `enviar.js` nuevo (sin eso el pedido saldría de P-01) y recién entonces levantar la pausa de
+  seguridad (`20261008_fase22b_consignacion_pausa_envio.sql`: mientras `configuracion.odoo_envio_consignacion` = `pausado`,
+  aprobar responde con un aviso y rechazar funciona): `update configuracion set valor = 'activo' where clave =
+  'odoo_envio_consignacion';`; 4) aprobar en Consignación → revisar en Odoo que la cotización `<número> (GUDS)` tenga el almacén `X-CONSIGNADO …`,
+  cliente, líneas y precios; 5) el equipo la confirma en Odoo, valida la entrega y factura; 6) tras la sincronización comprobar
+  en GUDS el pedido confirmado/despachado, la baja en el almacén y la factura enlazada en la declaración.
 - **Clientes nuevos (29-sep, migración `20260929_fase20s_clientes_nuevos_odoo.sql`; decisiones 3 y B):** al **aprobar un registro**
   (o dar de alta un cliente en Clientes) el cliente se crea en Odoo **automáticamente y sin duplicar**:
   - En GUDS: si en la empresa (o entre los compartidos) ya hay un cliente con el mismo RIF (`clave_rif`: `J-12345678-9` =

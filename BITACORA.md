@@ -10,6 +10,68 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-08 · Reportes de finanzas: plan, estado de cuenta único, papelera, consignación → Odoo y clasificación (22a–22d)
+
+- **Pedido del usuario:** el equipo de finanzas mandó 4 Excel que hace a mano (estado de cuenta, análisis de
+  vencimiento, lo cobrado, promedio de ventas). Se analizaron uno por uno contra la base y Odoo (solo lectura). El plan y
+  las decisiones D1–D10 están en `docs/PLAN-REPORTES-FINANZAS.md`.
+  - Hallazgos principales:
+    - el Nº de control del Excel de estado de cuenta venía desalineado en todas las filas;
+    - "lo cobrado" usa una tasa semanal y contaba cobros anulados en Odoo;
+    - el "promedio de ventas" es venta mensual por cliente con IVA frente a su deuda, no inventario;
+    - los cobros de ene–abr (Profit) no están en Odoo.
+  - Decidido:
+    - BCV del día para pasar cobros a USD;
+    - antigüedad con selector, arrancando en vencimiento;
+    - Odoo es la fuente de los cobros (los de Profit se cargarán desde el Excel);
+    - días de recuperación con la fórmula de finanzas y la explicación visible;
+    - clasificación de finanzas guardada en Odoo (opción A).
+- **22a. Papelera y anular cobros:**
+  - Papelera general en `/admin/papelera`, con la foto completa de lo anulado y opción de restaurar.
+  - `anular_cobro` solo para administradores y solo para cobros de GUDS; los de Odoo se anulan en Odoo.
+  - **Se anularon los 2 cobros de prueba del 6-oct** (USD 102,29), con autorización del usuario: las 7 facturas volvieron a
+    cuadrar con Odoo.
+  - Las 185 "cuentas manuales" viejas quedaron archivadas en la papelera y se quitó su pestaña.
+  - El DSO pide los permisos `reportes` y `cuentas` (helper `exigir_permiso_reportes_cuentas()`).
+- **22b. Consignación:**
+  - Al aprobar una declaración se crea un pedido aprobado, que va a Odoo como cotización desde el almacén «X-CONSIGNADO
+    <cliente>».
+  - Ya no se crea factura interna ni se descuenta stock en GUDS.
+  - **Envío en pausa** (`configuracion.odoo_envio_consignacion = 'pausado'`) hasta que el usuario autorice la primera
+    prueba real.
+- **22c. Un solo estado de cuenta, con el formato de finanzas:**
+  - Columnas: año y mes del vencimiento, Nº de control, tasa de emisión, estatus del equipo y totales.
+  - Fecha de corte en el admin.
+  - Es el mismo en el detalle de la cuenta, el enlace público, el portal, la ficha del vendedor, el PDF, el Excel y el
+    correo.
+  - Piezas comunes nuevas: `src/lib/excel.ts` (exceljs, carga diferida), `src/lib/fechas.ts` y `SelectorCorte`.
+  - Tasas BCV históricas:
+    - 1.301 fechas de Odoo `res.currency.rate`;
+    - 335 de Profit para tapar huecos, con su propia fuente y borrables.
+  - Cuadre con el Excel de finanzas: 100 de 109 filas iguales al centavo; Nº de control correcto en las 111.
+  - `enviar-estado-cuenta` redesplegada.
+- **22d. Clasificación de clientes de finanzas:**
+  - Catálogo por empresa más asignación (propuestas del Excel: 145 en GUDS y 116 en Quirutec) en Configuración →
+    Clasificación de clientes.
+  - Escribe Industria, Canal y Segmento en Odoo por la cola, **en modo `simular`** hasta que se autorice.
+- **`sync-odoo` redesplegada** desde el árbol completo, con el `enviar.js` de 22b y el escritor de 22d. Corrida `ok` a las
+  9:30 VE.
+- **Verificación:**
+  - tsc y build limpios.
+  - Suites 22a 29/29, 22b 25/25 (GUDS y Quirutec), 22c 21/21 y 22d 45/45.
+  - Recorrido Playwright conjunto 42/42: 7 pantallas × GUDS/Quirutec/«Ambas» × 1440/390.
+  - Suite multiempresa 568/569. La falla era de la prueba: tomaba como "cliente del portal" una cuenta del personal (role
+    `cliente` con rol Contador). Se corrigió la consulta de la prueba.
+- **Pendiente:**
+  - autorizar la primera escritura real de la clasificación y la primera cotización de consignación;
+  - decisiones abiertas: renombrar los tipos de Profit en Odoo, bloquear consignaciones con precio 0, tasa de las NC,
+    permisos de Calidad y de "Top clientes";
+  - las cuentas `qa.admin` y `qa.cliente` no tienen perfil en `usuarios`, y la cuenta de finanzas tiene role `cliente` con
+    rol Contador;
+  - R0–R4 restantes del plan: lo cobrado, antigüedad, ventas vs deuda, cobros de Profit y módulo de notas de entrega.
+
+---
+
 ## 2026-10-02 · Contraseñas desde Usuarios + cambio obligatorio + verificación de "olvidé mi contraseña" (21f)
 
 - **Pedido del usuario:** cambiar la contraseña de los usuarios desde Configuración → Usuarios y un ícono para obligar

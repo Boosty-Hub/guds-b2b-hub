@@ -48,7 +48,7 @@ const DIMS: Record<Dim, { titulo: string; tiempo?: boolean; profit?: boolean; mi
   cliente: { titulo: "Cliente", detalle: "RIF" },
   tipo_cliente: { titulo: "Tipo de cliente", mixta: true },
   canal: { titulo: "Canal", mixta: true },
-  segmento: { titulo: "Segmento", mixta: true },
+  segmento: { titulo: "Categoría de cobranza", mixta: true },   // Segmento de contacto en Odoo (clasificación de finanzas, 22d)
   categoria_profit: { titulo: "Categoría Profit", profit: true },
   linea_profit: { titulo: "Línea Profit", profit: true },
   sublinea_profit: { titulo: "Sub-línea Profit", profit: true },
@@ -680,7 +680,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
               )}
               <span>Venta neta en USD sin IVA: facturas − NC y devoluciones; sin saldos iniciales, ND ni facturas anuladas por completo.</span>
               {veCosto && medidas.includes("margen_pct") && <span>Margen sobre las líneas con costo (Odoo: costo promedio actual; Profit: último costo). * = parte de la venta sin costo.</span>}
-              {niveles.some((d) => DIMS[d].mixta) && <span>Marca, tipo de cliente, canal y segmento: los de Odoo (marca del producto; industria, canal y segmento del contacto) y, si Odoo no los tiene, los de Profit.</span>}
+              {niveles.some((d) => DIMS[d].mixta) && <span>Marca, tipo de cliente, canal y categoría de cobranza: los de Odoo (marca del producto; Industria, Canal y Segmento del contacto, donde vive la clasificación de finanzas) y, si Odoo no los tiene, los de Profit.</span>}
               {niveles.some((d) => DIMS[d].profit) && <span>La clasificación de Profit (como en el Excel) solo existe en las ventas de Profit.</span>}
               {niveles.some((d) => d === "categoria" || d === "linea" || d === "sublinea") && <span>Categoría › Línea › Sub-línea: niveles de la categoría de Odoo (Profit, por artículo o por la equivalencia de Histórico Profit).</span>}
               {comparar && <span>{TEXTO_COMPARACION[comparar]}: {fechaCorta(cDesde)} – {fechaCorta(cHasta)}, mismos filtros.</span>}

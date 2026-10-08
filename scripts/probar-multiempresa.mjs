@@ -150,7 +150,12 @@ await caso('Compras: anónimo no ve cuentas por pagar', (r, err) => (r && r.n ==
   como({ rol: 'anon', uid: null, empresa: guds.id }, cuenta('facturas_proveedor')));
 
 // ── Inventario (Fase 6): espejo de solo lectura + cierre de políticas "todo permitido" ──
-const cliUser = (await sql(`select u.auth_id from usuarios u where u.role = 'cliente' and u.auth_id is not null limit 1`))[0]?.auth_id;
+// Un cliente real del portal: role 'cliente' con cliente asignado y sin rol de personal (8-oct: una cuenta con role
+// 'cliente' y rol Contador hacía fallar los casos de seguridad del portal)
+const cliUser = (await sql(`select u.auth_id from usuarios u left join roles r on r.id = u.rol_id
+  where u.role = 'cliente' and u.auth_id is not null and u.cliente_id is not null
+    and (r.id is null or r.nombre not in ('Administrador', 'Contador', 'Vendedor', 'Delivery'))
+  order by u.created_at limit 1`))[0]?.auth_id;
 const almConsig = (await sql(`select id from almacenes where empresa_id = '${guds.id}' and tipo = 'consignacion' limit 1`))[0].id;
 const loteGuds = (await sql(`select id from lotes where empresa_id = '${guds.id}' limit 1`))[0].id;
 const transfGuds = (await sql(`select id from transferencias where empresa_id = '${guds.id}' limit 1`))[0].id;

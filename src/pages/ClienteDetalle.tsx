@@ -27,6 +27,7 @@ import { BotonUbicacionesCliente } from "@/components/delivery/UbicacionesClient
 import { ContactosEntidad } from "@/components/contactos/ContactosEntidad";
 import { EmpresasPortalCliente } from "@/components/contactos/EmpresasPortalCliente";
 import { UsuariosPortalSinContacto } from "@/components/contactos/UsuariosPortalSinContacto";
+import { ClasificacionClientePanel } from "@/components/clasificacion/ClasificacionClientePanel";
 
 interface ClienteFull extends Cliente {
   lista_precios?: ListaPrecios | null;
@@ -268,6 +269,9 @@ const ClienteDetalle = () => {
           ...(cliente.notas ? [{ label: "Notas", valor: cliente.notas, odoo, ancho: 3 as const }] : []),
         ]} />
       </Panel>
+
+      {/* Clasificación de finanzas: tipo, canal y categoría de cobranza (en Odoo) y su estado en GUDS (22d) */}
+      <ClasificacionClientePanel clienteId={cliente.id} />
 
       {puedeVerOdoo && (
         <EstadoOdooCliente clienteId={cliente.id} version={versionOdoo} puedeCrear={puedeCrearOdoo} onCambio={recargarOdoo} onEstado={setEstadoOdoo} />

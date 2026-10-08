@@ -14,6 +14,9 @@
 //
 // - Al crearla deja una nota interna "(GUDS)" en la cotización con quién la aprobó (decisión D, 29-sep); si la nota falla,
 //   el pedido no se revierte y el error queda en el resultado.
+// - Almacén: el general de la empresa (P-01), salvo que el pedido traiga ordenes.almacen_id (fase 22b): una venta en
+//   consignación aprobada sale del almacén de consignación del cliente ("X-CONSIGNADO <cliente>"), como hace hoy el equipo en
+//   Odoo (la entrega C-xx/OUT descuenta de C-xx/Existencias). Si en Odoo ese almacén tiene menos de lo declarado, va un aviso.
 //
 // Uso: enviarPedido({ odoo, sql, ordenId, aplicar, log }) — `sql(query)` como en importar.js (rol postgres).
 import { m2oId, m2oNombre } from './odoo.js';
@@ -28,9 +31,12 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
            to_char(o.aprobado_at at time zone 'America/Caracas', 'DD/MM/YYYY HH24:MI') aprobado_el,
            nullif(trim(concat_ws(' ', ua.nombre, ua.apellido)), '') aprobado_por,
            e.odoo_company_id, e.nombre_corto, c.id cliente_id, c.odoo_id cliente_odoo_id, c.nombre_negocio,
-           (select valor from configuracion where clave = 'odoo_producto_envio') producto_envio
+           (select valor from configuracion where clave = 'odoo_producto_envio') producto_envio,
+           o.almacen_id, al.odoo_id almacen_odoo_id, al.nombre almacen_nombre, al.tipo almacen_tipo, al.empresa_id almacen_empresa_id,
+           (select dc.numero from declaraciones_consignacion dc where dc.orden_id = o.id) declaracion
     from ordenes o join empresas e on e.id = o.empresa_id join clientes c on c.id = o.cliente_id
     left join usuarios ua on ua.id = o.aprobado_por
+    left join almacenes al on al.id = o.almacen_id
     where o.id = ${lit(ordenId)}`);
   if (!o) throw new Error('Pedido no encontrado');
   if (o.odoo_id) throw new Error(`El pedido ${o.numero} ya está en Odoo (id ${o.odoo_id})`);
@@ -74,9 +80,32 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
 
   // Almacén: el general de la empresa (código P-01, el que usan las ventas normales). Sin esto Odoo toma el
   // predeterminado del usuario de la API, que puede ser un almacén de consignación.
-  const almacenes = await odoo.leer('stock.warehouse', 'search_read', [[['company_id', '=', cid], ['code', '=', 'P-01'], ['active', '=', true]]],
-    { fields: ['name'], limit: 2 }, cid);
-  if (almacenes.length !== 1) throw new Error(`No se encontró un único almacén general (P-01) activo en ${o.nombre_corto}`);
+  // Venta en consignación (22b): el almacén de consignación del cliente, comprobado en Odoo (activo y de la misma empresa).
+  let almacenes;
+  let libreEnAlmacen = null;   // variante → existencia libre (cantidad − reservado) en el almacén de consignación
+  if (o.almacen_id) {
+    if (!o.almacen_odoo_id) throw new Error(`El almacén ${o.almacen_nombre ?? ''} del pedido no está enlazado a Odoo`);
+    if (o.almacen_empresa_id && o.almacen_empresa_id !== o.empresa_id) throw new Error(`El almacén ${o.almacen_nombre} es de otra empresa`);
+    almacenes = await odoo.leer('stock.warehouse', 'search_read', [[['id', '=', Number(o.almacen_odoo_id)]]],
+      { fields: ['name', 'code', 'company_id', 'active', 'lot_stock_id'], limit: 1 }, cid);
+    const [w] = almacenes;
+    if (!w) throw new Error(`El almacén ${o.almacen_nombre} (id ${o.almacen_odoo_id}) no existe en Odoo`);
+    if (!w.active) throw new Error(`El almacén ${w.name} está archivado en Odoo`);
+    if (m2oId(w.company_id) !== cid) throw new Error(`El almacén ${w.name} es de otra empresa en Odoo (${m2oNombre(w.company_id)})`);
+    // Existencia del almacén en Odoo (solo lectura): si no alcanza, la cotización igual se crea y queda el aviso
+    const quants = m2oId(w.lot_stock_id) ? await odoo.leer('stock.quant', 'search_read',
+      [[['location_id', 'child_of', m2oId(w.lot_stock_id)], ['product_id', 'in', [...varianteDe.values()]]]],
+      { fields: ['product_id', 'quantity', 'reserved_quantity'] }, cid) : [];
+    libreEnAlmacen = new Map();
+    for (const q of quants) {
+      const v = m2oId(q.product_id);
+      libreEnAlmacen.set(v, (libreEnAlmacen.get(v) ?? 0) + Number(q.quantity || 0) - Number(q.reserved_quantity || 0));
+    }
+  } else {
+    almacenes = await odoo.leer('stock.warehouse', 'search_read', [[['company_id', '=', cid], ['code', '=', 'P-01'], ['active', '=', true]]],
+      { fields: ['name'], limit: 2 }, cid);
+    if (almacenes.length !== 1) throw new Error(`No se encontró un único almacén general (P-01) activo en ${o.nombre_corto}`);
+  }
 
   // 3. Valores de la cotización (los precios de GUDS por unidad; en Odoo la cantidad va en unidades)
   const lineas = items.map((i) => {
@@ -91,6 +120,23 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
   // Envío cobrado en GUDS → línea de servicio (o nota si falta el producto en Odoo)
   const envio = Math.round(Number(o.envio || 0) * 100) / 100;
   let aviso = null;
+  if (libreEnAlmacen) {
+    const pedido = new Map();
+    for (const l of lineas) pedido.set(l.product_id, (pedido.get(l.product_id) ?? 0) + l.product_uom_qty);
+    const faltan = items.filter((i, k) => k === items.findIndex((x) => x.plantilla === i.plantilla))
+      .map((i) => ({ nombre: i.nombre, pedido: pedido.get(varianteDe.get(i.plantilla)), libre: Math.round((libreEnAlmacen.get(varianteDe.get(i.plantilla)) ?? 0) * 100) / 100 }))
+      .filter((x) => x.pedido > x.libre + 1e-6);
+    if (faltan.length) {
+      aviso = `En Odoo el almacén ${almacenes[0].name} tiene menos existencia libre de la declarada: `
+        + faltan.map((x) => `${x.nombre} (${x.libre} de ${x.pedido})`).join(', ');
+    }
+  }
+  // Líneas sin precio en GUDS: la cotización se crea igual (es un borrador que el equipo revisa en Odoo), con el aviso
+  const sinPrecio = items.filter((i, k) => !(lineas[k].price_unit > 0));
+  if (sinPrecio.length) {
+    aviso = [aviso, `Sin precio en GUDS (van en 0 en la cotización; revisar el precio en Odoo antes de confirmar): ${sinPrecio.map((i) => i.nombre).join(', ')}`]
+      .filter(Boolean).join(' · ');
+  }
   const lineasExtra = [];
   if (envio > 0) {
     const codigo = String(o.producto_envio || '').trim();
@@ -101,9 +147,9 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
     if (prodEnvio) {
       lineasExtra.push({ product_id: prodEnvio.id, product_uom_qty: 1, price_unit: envio, name: `Envío (GUDS) · pedido ${o.numero}` });
     } else {
-      aviso = codigo
+      aviso = [aviso, codigo
         ? `No existe en Odoo un servicio vendible con código "${codigo}": el envío de $${envio.toFixed(2)} va como nota`
-        : `Falta configurar el producto de servicio de envío en Odoo: el envío de $${envio.toFixed(2)} va como nota`;
+        : `Falta configurar el producto de servicio de envío en Odoo: el envío de $${envio.toFixed(2)} va como nota`].filter(Boolean).join(' · ');
       lineasExtra.push({ display_type: 'line_note', name: `(GUDS) Envío cobrado en GUDS: $${envio.toFixed(2)} (agregar la línea de servicio de envío en Odoo)` });
     }
   }
@@ -114,10 +160,11 @@ export async function enviarPedido({ odoo, sql, ordenId, aplicar = false, log = 
     warehouse_id: almacenes[0].id,
     client_order_ref: ref,
     origin: 'GUDS',
-    note: `<p>(GUDS) Pedido creado desde la plataforma GUDS: ${escaparHtml(o.numero)}. ${escaparHtml(aprobacionTxt)}${nota ? ` ${escaparHtml(nota)}` : ''}${o.notas ? `<br/>Notas del pedido: ${escaparHtml(o.notas)}` : ''}</p>`,
+    note: `<p>(GUDS) Pedido creado desde la plataforma GUDS: ${escaparHtml(o.numero)}. ${escaparHtml(aprobacionTxt)}${nota ? ` ${escaparHtml(nota)}` : ''}${o.declaracion ? `<br/>Venta en consignación declarada en GUDS (${escaparHtml(o.declaracion)}): sale del almacén ${escaparHtml(almacenes[0].name)}.` : ''}${o.notas ? `<br/>Notas del pedido: ${escaparHtml(o.notas)}` : ''}</p>`,
     order_line: [...lineas, ...lineasExtra].map((l) => [0, 0, l]),
   };
-  const resumen = { pedido: o.numero, empresa: o.nombre_corto, cliente: o.nombre_negocio, moneda, almacen: almacenes[0].name, lineas, lineasExtra, aviso, vals, existente: existentes[0] ?? null };
+  const resumen = { pedido: o.numero, empresa: o.nombre_corto, cliente: o.nombre_negocio, moneda, almacen: almacenes[0].name,
+    consignacion: o.declaracion ?? null, lineas, lineasExtra, aviso, vals, existente: existentes[0] ?? null };
   if (!aplicar) { log(`Simulación: se crearía en Odoo (${o.nombre_corto}) la cotización ${ref} con ${lineas.length} línea(s)`); return resumen; }
 
   // 4. Crear (o tomar la existente) y leerla de vuelta

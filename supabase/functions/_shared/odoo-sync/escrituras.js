@@ -8,6 +8,7 @@ import { escribirProducto } from './escribir-producto.js';
 import { escribirClienteNuevo } from './escribir-cliente-nuevo.js';
 import { escribirPersonaContacto } from './escribir-persona-contacto.js';
 import { escribirLimite } from './escribir-limite.js';
+import { escribirClasificacion } from './escribir-clasificacion.js';
 
 const ESCRITORES = {
   entrega_estado: { fn: escribirEntrega, modo: 'odoo_escritura_entregas' },
@@ -17,6 +18,7 @@ const ESCRITORES = {
   cliente_nuevo: { fn: escribirClienteNuevo, modo: 'odoo_escritura_clientes_nuevos' },        // crear o enlazar (20s)
   persona_contacto: { fn: escribirPersonaContacto, modo: 'odoo_escritura_clientes_nuevos' },  // contactos hijos de clientes y proveedores (20s, 20v)
   cliente_limite: { fn: escribirLimite, modo: 'odoo_escritura_clientes' },                    // límite de crédito (20s)
+  clasificacion: { fn: escribirClasificacion, modo: 'odoo_escritura_clasificacion' },          // tipo, canal y categoría de finanzas (22d)
 };
 
 const lit = (v) => `'${String(v).replace(/'/g, "''")}'`;

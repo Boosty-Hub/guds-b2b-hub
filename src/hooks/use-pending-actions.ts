@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Receipt, UserPlus, Boxes, FileMinus2, ListChecks, Package, UserX, CalendarX, CalendarClock, Truck, Landmark,
-  ClipboardCheck, Gauge, CreditCard,
+  ClipboardCheck, Gauge, CreditCard, CloudOff,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -30,7 +30,7 @@ export function usePendingActions() {
     const [
       pagosRes, registrosRes, consignacionRes, retencionesRes,
       extractoLineasRes, stockBajoRes, sinVendedorRes, vencidosRes, porVencerRes, despachosRes, porIdentificarRes, porAprobarRes,
-      cobranzaRes,
+      cobranzaRes, errorEnvioRes,
     ] = await Promise.all([
       supabase.from("pagos").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
       supabase.from("registros_clientes").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
@@ -46,11 +46,16 @@ export function usePendingActions() {
       supabase.from("ordenes").select("id", { count: "exact", head: true }).eq("aprobacion", "pendiente"),
       // Alertas de cobranza (21b): DSO sobre el umbral y deuda sobre el límite de crédito (0 si no hay permiso de cuentas)
       supabase.rpc("alertas_cobranza"),
+      // Pedidos aprobados (de clientes, vendedores, admin o ventas en consignación, 22b) que no se pudieron crear en Odoo
+      // (mismo filtro que "Error al enviar a Odoo" en Órdenes)
+      supabase.from("ordenes").select("id", { count: "exact", head: true }).eq("aprobacion", "aprobada").is("odoo_id", null)
+        .not("odoo_envio_error", "is", null),
     ]);
     const cobranza = (cobranzaRes.data as { umbral: number; dso_alto: number; sobre_limite: number } | null) ?? { umbral: 60, dso_alto: 0, sobre_limite: 0 };
 
     const lista: PendingActionItem[] = [
       { clave: "por-aprobar", label: "Pedidos por aprobar", count: porAprobarRes.count || 0, link: "/admin/ordenes?aprobacion=pendiente", icono: ClipboardCheck },
+      { clave: "error-envio-odoo", label: "Pedidos aprobados con error al crearse en Odoo", count: errorEnvioRes.count || 0, link: "/admin/ordenes?aprobacion=error", icono: CloudOff },
       { clave: "pagos", label: "Pagos por verificar", count: pagosRes.count || 0, link: "/admin/cuentas-por-cobrar", icono: Receipt },
       { clave: "registros", label: "Registros de clientes pendientes", count: registrosRes.count || 0, link: "/admin/registros", icono: UserPlus },
       { clave: "consignacion", label: "Consignación por revisar", count: consignacionRes.count || 0, link: "/admin/consignacion", icono: Boxes },

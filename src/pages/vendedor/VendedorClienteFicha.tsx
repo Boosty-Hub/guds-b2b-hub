@@ -21,7 +21,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useEmpresa } from "@/contexts/EmpresaContext";
 import { mostrarEstado } from "@/lib/estados";
-import { CruceDocumentosVendedor } from "@/components/estado-cuenta/CruceDocumentosVendedor";
+import { EstadoCuentaVendedor } from "@/components/estado-cuenta/EstadoCuentaVendedor";
 
 // Ficha del cliente para el vendedor (plan de portales §5, V3): datos y contacto (llamar, WhatsApp), dirección, crédito,
 // deuda con antigüedad por tramos (misma lógica que Cuentas por cobrar del admin), facturas pendientes, últimos pedidos,
@@ -52,6 +52,7 @@ const ESTADO_COBRO: Record<string, string> = {
   pendiente: "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
   verificado: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300",
   rechazado: "border-red-300 bg-red-50 text-red-800 dark:bg-red-500/10 dark:text-red-300",
+  anulado: "border-border bg-muted text-muted-foreground",
 };
 const claseDias = (d: number) => (d <= 0 ? "text-sky-700 dark:text-sky-300" : d <= 30 ? "text-amber-700 dark:text-amber-300" : "text-destructive");
 
@@ -242,44 +243,19 @@ const VendedorClienteFicha = () => {
           <div className="order-1 min-w-0 lg:order-none">
             <Tabs defaultValue="facturas">
               <TabsList className="mb-2 grid h-auto w-full grid-cols-4">
-                <TabsTrigger value="facturas" className="px-1 text-xs sm:text-sm" data-testid="tab-facturas">Facturas ({facturasAbiertas.length})</TabsTrigger>
+                <TabsTrigger value="facturas" className="px-1 text-xs sm:text-sm" data-testid="tab-facturas">Estado de cuenta ({facturasAbiertas.length + notasCredito.length})</TabsTrigger>
                 <TabsTrigger value="pedidos" className="px-1 text-xs sm:text-sm">Pedidos</TabsTrigger>
                 <TabsTrigger value="cobros" className="px-1 text-xs sm:text-sm">Cobros</TabsTrigger>
                 <TabsTrigger value="frecuentes" className="px-1 text-xs sm:text-sm">Compra</TabsTrigger>
               </TabsList>
 
+              {/* 22c: el estado de cuenta con el formato de finanzas (el mismo del admin, el enlace público y el portal) */}
               <TabsContent value="facturas" className="mt-0">
-                <Panel className="mb-0" sinPadding>
-                  {facturasAbiertas.length === 0 && notasCredito.length === 0 ? (
-                    <p className="px-3 py-6 text-center text-sm text-muted-foreground">No tiene facturas pendientes.</p>
-                  ) : (
-                    <ul className="divide-y divide-border" data-testid="facturas-pendientes">
-                      {[...facturasAbiertas, ...notasCredito].map((f) => {
-                        const nc = Number(f.saldo_usd) < 0;
-                        return (
-                          <li key={f.id} className="flex items-start justify-between gap-3 px-3 py-2 text-[13px]">
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-1.5 font-medium">
-                                <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />{nc ? "Nota de crédito" : "Factura"} {f.numero}
-                                {f.saldo_inicial && <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal text-muted-foreground">Saldo inicial</Badge>}
-                              </div>
-                              <p className="text-xs text-muted-foreground">
-                                Emitida {fechaCorta(f.fecha_emision)}{!nc && f.fecha_vencimiento ? ` · vence ${fechaCorta(f.fecha_vencimiento)}` : ""}
-                                {!nc && <span className={cn("ml-1 font-medium", claseDias(f.dias))}>· {f.dias > 0 ? `${f.dias} días vencida` : f.dias === 0 ? "vence hoy" : `faltan ${-f.dias} días`}</span>}
-                              </p>
-                            </div>
-                            <div className="shrink-0 text-right tabular-nums">
-                              <p className={cn("font-semibold", nc ? "text-success" : "")}>{monto(Number(f.saldo_usd))}</p>
-                              <p className="text-[11px] text-muted-foreground">de {monto(Number(f.total_usd))}{Number(f.monto_retenido_usd) > 0.009 ? ` · ret. ${formatPrice(Number(f.monto_retenido_usd))}` : ""}</p>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </Panel>
-                {/* 21b: cruce por factura (base, IVA, abonos, qué falta y comentarios) */}
-                {(facturasAbiertas.length > 0 || notasCredito.length > 0) && <CruceDocumentosVendedor clienteId={id} />}
+                {facturasAbiertas.length === 0 && notasCredito.length === 0 ? (
+                  <Panel className="mb-0" sinPadding>
+                    <p className="px-3 py-6 text-center text-sm text-muted-foreground" data-testid="facturas-pendientes">No tiene facturas pendientes.</p>
+                  </Panel>
+                ) : <EstadoCuentaVendedor clienteId={id} />}
               </TabsContent>
 
               <TabsContent value="pedidos" className="mt-0">

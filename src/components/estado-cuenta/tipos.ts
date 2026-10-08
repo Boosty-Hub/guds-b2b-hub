@@ -1,8 +1,11 @@
 import type { EstadoCuenta, Movimiento } from "@/hooks/useFinanzasPortal";
 
-// Estado de cuenta completo (fase 20w): lo que devuelven estado_cuenta_portal (portal), estado_cuenta_cliente (admin) y
-// estado_cuenta_publico (enlace público), todas sobre la misma función del servidor (estado_cuenta_datos). El enlace
-// público no trae identificadores internos (id del cliente, de la empresa ni de los documentos).
+// Estado de cuenta completo (fase 20w): lo que devuelven estado_cuenta_portal (portal), estado_cuenta_cliente (admin y
+// vendedor) y estado_cuenta_publico (enlace público), todas sobre la misma función del servidor (estado_cuenta_datos). El
+// enlace público no trae identificadores internos (id del cliente, de la empresa ni de los documentos).
+// 22c: un solo estado de cuenta con el formato de finanzas (documentos con saldo al corte, con Nº de control, tasa de
+// emisión y estatus); el libro de movimientos ya no forma parte de él (el servidor lo sigue devolviendo para el frontend
+// anterior; el nuevo lo pide con p_movimientos = false).
 
 export interface EmpresaEstadoCuenta {
   id?: string;
@@ -34,6 +37,9 @@ export interface ClienteEstadoCuenta {
 
 export type TipoDocumentoAbierto = "factura" | "nota_debito" | "nota_credito";
 
+/** Estatus del formato de finanzas (22c): Pendiente por cobrar · Pendiente comprobante de retención · NC a favor · Saldo a favor. */
+export type EstatusDocumento = "pendiente" | "retencion" | "nc_favor" | "a_favor";
+
 /** Un abono aplicado a un documento (fase 21b): cobro, nota de crédito, retención, reintegro u otro ajuste. */
 export interface AbonoDocumento {
   fecha: string | null;
@@ -63,15 +69,22 @@ export interface DocumentoAbierto {
   factura_id?: string;
   numero: string;
   tipo: TipoDocumentoAbierto;
+  /** Nº de control fiscal (de Odoo). */
+  nro_control?: string | null;
+  /** Estatus del formato de finanzas (22c). */
+  estatus?: EstatusDocumento;
+  /** Tasa de emisión (Bs por USD): en Bs, la del documento; en USD, la BCV del día de emisión (o la última anterior). */
+  tasa_emision?: number | null;
+  tasa_origen?: "documento" | "bcv" | null;
   emision: string | null;
   vence: string | null;
   total: number;
   saldo: number;
-  /** Días desde el vencimiento (o la emisión): > 0 vencido, ≤ 0 por vencer. */
+  /** Días desde el vencimiento (o la emisión) hasta el corte: > 0 vencido, ≤ 0 por vencer. */
   dias: number;
   estado: string | null;
   moneda?: "USD" | "VES";
-  /** Bs por USD del documento (solo documentos en bolívares). */
+  /** Bs por USD implícita en el documento (solo documentos en bolívares; para mostrar, tasa_emision). */
   tasa?: number | null;
   base?: number;
   iva?: number;
@@ -98,7 +111,11 @@ export interface EstadoCuentaCompleto extends Omit<EstadoCuenta, "empresa" | "cl
   empresa: EmpresaEstadoCuenta | null;
   cliente: ClienteEstadoCuenta;
   resumen: EstadoCuenta["resumen"] & { notas_debito_abiertas?: number; notas_debito_saldo?: number };
+  /** Libro de movimientos (21b): vacío cuando se pide con p_movimientos = false (22c). */
   movimientos: MovimientoEstadoCuenta[];
+  /** Fecha de corte (22c): los saldos, los días y los abonos son a esta fecha. Hoy en el enlace público y el portal. */
+  corte?: string;
+  /** Documentos con saldo al corte, en el formato de finanzas. */
   abiertos?: DocumentoAbierto[];
   /** Documentos según el filtro (todas las emitidas o las pagadas en el período); null con el filtro 'abiertas'. */
   documentos?: DocumentoAbierto[] | null;

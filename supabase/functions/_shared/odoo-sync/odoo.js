@@ -7,6 +7,8 @@
 //         dirección de entrega hija de un cliente (parent_id + type delivery/other, 19w);
 //         persona de contacto hija de un cliente o de un proveedor (parent_id + type contact), marcada "(GUDS)" en las notas (20s, 20v);
 //         cliente nuevo (sin parent_id, customer_rank 1, con su compañía), marcado "(GUDS)" en las notas (20s).
+//     · res.partner.industry, eu.res.channel y eu.res.segment: un valor de catálogo con SOLO su nombre (clasificación de
+//       clientes de finanzas, decisión del 8-oct, 22d).
 // - `escribir`: solo `write`, solo en los modelos y CAMPOS de ESCRITURA_PERMITIDA (decisiones del dueño, 28 y 29-sep):
 //     · res.partner: dirección y teléfonos del cliente, editados en GUDS; límite de crédito (flanco 28); nombre y cargo SOLO
 //       de personas de contacto que creó GUDS; correo de esas personas o del propio cliente (partner principal, sin padre;
@@ -14,20 +16,32 @@
 //     · stock.move / stock.move.line: cantidades entregadas de un documento de entrega asignado a un repartidor.
 //     · product.template: imagen y descripción de venta editadas en GUDS (decisión 15, migración 20r). La imagen solo se
 //       reemplaza: escribir image_1920 = false borraría su adjunto en Odoo y está bloqueado.
+//     · res.partner: Industria, Canal y Segmento de contacto (tipo, canal y categoría de cobranza de finanzas, 22d), solo en
+//       el propio cliente (partner principal) y solo con el id de un valor del catálogo (quitarlos no se permite).
+//     · res.partner.industry / eu.res.channel / eu.res.segment: solo el nombre (ajuste de mayúsculas y tildes de un valor
+//       existente, p. ej. "DISTRIBUIDOR" → "Distribuidor"). Nunca se archivan.
 // - `accion`: solo los métodos de ACCIONES_PERMITIDAS (validar el documento de entrega cuando el repartidor lo cierra).
 // - `nota`: deja una NOTA INTERNA "(GUDS)" en el historial (chatter) de un registro de NOTAS_PERMITIDAS (decisión D, 29-sep).
 //   Siempre message_type 'comment' + subtipo mail.mt_note, sin destinatarios ni seguidores nuevos: no envía correos.
 // Está PROHIBIDO borrar registros de Odoo desde GUDS: unlink, archivar (active) y cualquier otro método no existen aquí.
 
 const METODOS_LECTURA = new Set(['search_read', 'read', 'search', 'search_count', 'read_group', 'fields_get', 'default_get']);
-const CREACION_PERMITIDA = new Set(['sale.order', 'res.partner']);
+// Catálogos de la clasificación de clientes de finanzas (22d): se crean y renombran valores, nunca se archivan ni borran
+const CATALOGOS_CLASIFICACION = new Set(['res.partner.industry', 'eu.res.channel', 'eu.res.segment']);
+const CREACION_PERMITIDA = new Set(['sale.order', 'res.partner', ...CATALOGOS_CLASIFICACION]);
 const ESCRITURA_PERMITIDA = {
   'res.partner': new Set(['street', 'street2', 'city', 'zip', 'state_id', 'country_id', 'phone', 'mobile',
-    'name', 'function', 'email', 'credit_limit', 'credit_limit_value', 'use_partner_credit_limit']),
+    'name', 'function', 'email', 'credit_limit', 'credit_limit_value', 'use_partner_credit_limit',
+    'industry_id', 'eu_partner_channel_id', 'eu_partner_segment_id']),
   'stock.move': new Set(['quantity', 'picked']),
   'stock.move.line': new Set(['quantity', 'picked']),
   'product.template': new Set(['image_1920', 'description_sale']),
+  ...Object.fromEntries([...CATALOGOS_CLASIFICACION].map((m) => [m, new Set(['name'])])),
 };
+// La clasificación (22d) solo se escribe en el propio cliente (partner principal, sin padre)
+const SOLO_CLIENTE = { 'res.partner': new Set(['industry_id', 'eu_partner_channel_id', 'eu_partner_segment_id']) };
+const idCatalogo = (campo) => (v) => (!Number.isInteger(v) || v <= 0 ? `${campo} solo acepta el id de un valor del catálogo (quitarlo no se permite)` : null);
+const nombreCatalogo = (v) => (typeof v !== 'string' || !v.trim() || v.length > 100 ? 'el nombre del valor del catálogo no puede quedar vacío (máx. 100)' : null);
 // Campos que solo se escriben en personas de contacto creadas por GUDS (type contact, con padre y marca "(GUDS)")
 const SOLO_CONTACTOS_GUDS = { 'res.partner': new Set(['name', 'function']) };
 // El correo, además, en el propio cliente (partner principal, sin padre), no en direcciones ni en contactos de Odoo
@@ -45,7 +59,11 @@ const VALOR_PROHIBIDO = {
     credit_limit: numeroNoNegativo('credit_limit'),
     credit_limit_value: numeroNoNegativo('credit_limit_value'),
     use_partner_credit_limit: (v) => (typeof v !== 'boolean' ? 'use_partner_credit_limit debe ser verdadero o falso' : null),
+    industry_id: idCatalogo('industry_id'),
+    eu_partner_channel_id: idCatalogo('eu_partner_channel_id'),
+    eu_partner_segment_id: idCatalogo('eu_partner_segment_id'),
   },
+  ...Object.fromEntries([...CATALOGOS_CLASIFICACION].map((m) => [m, { name: nombreCatalogo }])),
 };
 const RE_IDIOMA = /^[a-z]{2,3}_[A-Z]{2}$/;
 const ACCIONES_PERMITIDAS = { 'stock.picking': new Set(['button_validate']) };
@@ -146,6 +164,10 @@ export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 
     if (!vals || typeof vals !== 'object' || Array.isArray(vals)) throw new Error('crear: se espera un solo registro');
     // res.partner: dirección de entrega, persona de contacto hija de un cliente o proveedor, o cliente nuevo marcado "(GUDS)"
     if (model === 'res.partner') formaAltaPartner(vals);
+    // Catálogo de clasificación (22d): solo un valor con nombre
+    if (CATALOGOS_CLASIFICACION.has(model) && (Object.keys(vals).some((k) => k !== 'name') || nombreCatalogo(vals.name))) {
+      throw new Error(`Bloqueado: en ${model} solo se crea un valor con su nombre`);
+    }
     if (!uid) await autenticar();
     return rpc('object', 'execute_kw', [db, uid, apiKey, model, 'create', [vals], { context: contextoEmpresa(empresaActiva) }]);
   }
@@ -168,7 +190,8 @@ export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 
     // o del propio cliente (21b)
     const soloContacto = Object.keys(vals).some((k) => SOLO_CONTACTOS_GUDS[model]?.has(k));
     const correo = Object.keys(vals).some((k) => CORREO_CLIENTE_O_CONTACTO_GUDS[model]?.has(k));
-    if (soloContacto || correo) {
+    const soloCliente = Object.keys(vals).some((k) => SOLO_CLIENTE[model]?.has(k));
+    if (soloContacto || correo || soloCliente) {
       const regs = await rpc('object', 'execute_kw', [db, uid, apiKey, model, 'read', [ids, ['type', 'parent_id', 'comment']],
         { context: { active_test: false, allowed_company_ids: empresasPermitidas } }]);
       const deGuds = (r) => r.type === 'contact' && Array.isArray(r.parent_id) && RE_MARCA_GUDS.test(String(r.comment || '').trim());
@@ -179,12 +202,15 @@ export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 
         const r = regs.find((x) => x.id === id);
         if (!r) return true;
         if (soloContacto) return !deGuds(r);
-        return !(deGuds(r) || esCliente(r));
+        if (soloCliente && !esCliente(r)) return true;
+        return correo && !(deGuds(r) || esCliente(r));
       });
       if (ajenos.length) {
         throw new Error(soloContacto
           ? `Bloqueado: nombre y cargo solo se editan en personas de contacto creadas por GUDS (${ajenos.join(', ')})`
-          : `Bloqueado: el correo solo se edita en el cliente o en personas de contacto creadas por GUDS (${ajenos.join(', ')})`);
+          : soloCliente
+            ? `Bloqueado: la clasificación solo se escribe en el propio cliente, no en sus contactos ni direcciones (${ajenos.join(', ')})`
+            : `Bloqueado: el correo solo se edita en el cliente o en personas de contacto creadas por GUDS (${ajenos.join(', ')})`);
       }
     }
     return rpc('object', 'execute_kw', [db, uid, apiKey, model, 'write', [ids, vals], { context: contextoEmpresa(empresaActiva, lang ? { lang } : {}) }]);

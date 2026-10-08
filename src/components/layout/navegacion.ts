@@ -27,6 +27,7 @@ import {
   BarChart3,
   Undo2,
   Contact,
+  Trash2,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -87,6 +88,8 @@ export const navSections: NavSection[] = [
       { icon: Receipt, label: "Retenciones", path: "/admin/retenciones", modulo: "cuentas" },
       { icon: Landmark, label: "Bancos", path: "/admin/bancos", modulo: "bancos" },
       { icon: ListChecks, label: "Conciliación", path: "/admin/conciliacion", modulo: "bancos" },
+      // 22d: tipo de cliente, canal y categoría de cobranza de finanzas (se guarda en Odoo); la pantalla vive en Configuración
+      { icon: Tags, label: "Clasificación de clientes", path: "/admin/configuracion/clasificacion-clientes", modulo: "clasificacion_clientes" },
     ],
   },
   {
@@ -94,6 +97,13 @@ export const navSections: NavSection[] = [
     items: [
       { icon: Truck, label: "Delivery", path: "/admin/delivery", modulo: "delivery" },
       { icon: Undo2, label: "Devoluciones", path: "/admin/delivery/devoluciones", modulo: "inventario" },
+    ],
+  },
+  {
+    title: "Administración",
+    items: [
+      // Fase 22a: lo anulado o archivado (solo Administrador)
+      { icon: Trash2, label: "Papelera", path: "/admin/papelera", modulo: "papelera" },
     ],
   },
 ];

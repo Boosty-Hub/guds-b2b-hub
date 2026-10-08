@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/sheet";
 import { Link, useSearchParams } from "react-router-dom";
 import { EstadoTransferencia, TIPO_TRANSF, fmtFechaHora } from "@/components/inventario/EstadoTransferencia";
-import { Plus, Eye, Loader2, X, Users, ChevronRight, FileText, CheckCircle2, XCircle, RotateCw, AlertTriangle, Clock } from "lucide-react";
+import { Plus, Eye, Loader2, X, Users, ChevronRight, FileText, CheckCircle2, XCircle, AlertTriangle, Clock } from "lucide-react";
 import { supabase, Cliente, Producto } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
@@ -44,6 +44,7 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { ResumenPagoPedido } from "@/components/portal/ResumenPagoPedido";
 import { LineaTiempoPedido } from "@/components/pedidos/LineaTiempoPedido";
+import { estadoEnvioOdoo, PanelEnvioOdoo } from "@/components/pedidos/EnvioOdoo";
 import { OdooBadge } from "@/components/OdooBadge";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
@@ -70,6 +71,9 @@ interface OrdenDB {
   odoo_envio_aviso?: string | null;
   aprobado_at?: string | null;
   odoo_enviado_at?: string | null;
+  // Venta en consignación (22b): sale del almacén de consignación del cliente y viene de una declaración aprobada
+  almacen?: { nombre: string; tipo: string } | null;
+  declaracion?: { id: string; numero: string } | { id: string; numero: string }[] | null;
   editado_at?: string | null;       // editado por el cliente o el vendedor mientras estaba por aprobar (19p)
   vendedor_id?: string | null;      // vendedor en GUDS (asignable si el pedido no tiene, 19x)
   empresa_id?: string | null;
@@ -222,6 +226,8 @@ const Ordenes = () => {
         *,
         cliente:clientes(nombre_negocio, direccion, ciudad, telefono, vendedor_asignado_id),
         vendedor:usuarios!ordenes_vendedor_id_fkey(nombre, apellido),
+        almacen:almacenes(nombre, tipo),
+        declaracion:declaraciones_consignacion(id, numero),
         items:orden_items(*, producto:productos(nombre, imagen_emoji, imagen_url))
       `)
       .order('created_at', { ascending: false })
@@ -455,6 +461,9 @@ const Ordenes = () => {
           {orden.odoo_id ? <OdooBadge /> : <Badge variant="outline" className="px-1 py-0 text-[10px]" title="Creado en GUDS · pendiente de enviar a Odoo">GUDS</Badge>}
           {orden.numero_guds && <Badge variant="secondary" className="px-1 py-0 text-[10px] font-normal" title={`Creado en GUDS como ${orden.numero_guds} y enviado a Odoo`}>{orden.numero_guds}</Badge>}
           {estadoEnvio(orden) && <Badge variant="outline" className={cn("px-1.5 py-0 text-[10px] font-medium", estadoEnvio(orden)!.cls)} title={orden.odoo_envio_error || orden.rechazo_motivo || undefined}>{estadoEnvio(orden)!.txt}</Badge>}
+          {orden.almacen?.tipo === "consignacion" && (
+            <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal" title={`Venta en consignación${declaracionDe(orden) ? ` (${declaracionDe(orden)!.numero})` : ""} · sale de ${orden.almacen.nombre}`}>Consignación</Badge>
+          )}
           {!nombreVendedor(orden) && (
             <button type="button" onClick={(e) => { e.stopPropagation(); abrirAsignarVendedor(orden); }}
               className="rounded border border-dashed border-amber-400 bg-amber-50 px-1 py-0 text-[10px] font-medium text-amber-900 hover:bg-amber-100"
@@ -530,12 +539,10 @@ const Ordenes = () => {
     fetchOrdenes(); seguirEnvio();
   };
 
-  // Estado del pedido frente a la aprobación y el envío a Odoo
-  const estadoEnvio = (o: OrdenDB) =>
-    o.aprobacion === "pendiente" ? { txt: "Por aprobar", cls: "border-amber-300 bg-amber-100 text-amber-900" }
-    : o.aprobacion === "rechazada" ? { txt: "Rechazado", cls: "border-destructive/40 bg-destructive/10 text-destructive" }
-    : o.aprobacion === "aprobada" && !o.odoo_id ? (o.odoo_envio_error ? { txt: "Error al enviar a Odoo", cls: "border-destructive/40 bg-destructive/10 text-destructive" } : { txt: "Enviando a Odoo…", cls: "border-sky-300 bg-sky-100 text-sky-900" })
-    : null;
+  // Estado del pedido frente a la aprobación y el envío a Odoo (compartido con Consignación)
+  const estadoEnvio = estadoEnvioOdoo;
+  // Venta en consignación (22b): declaración de origen
+  const declaracionDe = (o: OrdenDB) => (Array.isArray(o.declaracion) ? o.declaracion[0] : o.declaracion) ?? null;
 
   const cols = useColumnas("ordenes", [{ etiqueta: "Orden", fija: true }, { etiqueta: "Cliente" }, { etiqueta: "Items" }, { etiqueta: "Total" }, { etiqueta: "Estado" }, { etiqueta: "Fecha" }, { etiqueta: "Método Pago" }]);
   return (
@@ -677,6 +684,14 @@ const Ordenes = () => {
                   campos={[
                     { label: "Fecha", valor: formatDate(selectedOrder.fecha_pedido || selectedOrder.created_at) },
                     ...(selectedOrder.numero_guds ? [{ label: "Pedido GUDS", valor: `${selectedOrder.numero_guds} · enviado ${selectedOrder.odoo_enviado_at ? formatDate(selectedOrder.odoo_enviado_at) : ""}` }] : []),
+                    ...(selectedOrder.almacen?.tipo === "consignacion" ? [{ label: "Consignación", ancho: 2 as const, valor: (
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        {declaracionDe(selectedOrder) && (
+                          <Link to={`/admin/consignacion?tab=aprobadas&declaracion=${declaracionDe(selectedOrder)!.id}`} className="font-mono text-xs text-primary hover:underline">{declaracionDe(selectedOrder)!.numero}</Link>
+                        )}
+                        <span className="text-muted-foreground">sale de {selectedOrder.almacen.nombre}</span>
+                      </span>
+                    ) }] : []),
                     ...(selectedOrder.ediciones ? [{ label: "Editado", valor: `${selectedOrder.ediciones} ${selectedOrder.ediciones === 1 ? "vez" : "veces"}${selectedOrder.editado_at ? ` · último ${formatDate(selectedOrder.editado_at)}` : ""}` }] : []),
                     { label: "Vendedor", valor: nombreVendedor(selectedOrder) || (
                       <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => abrirAsignarVendedor(selectedOrder)}>Asignar vendedor</Button>
@@ -754,7 +769,8 @@ const Ordenes = () => {
                 </div>
               </div>
 
-              {!selectedOrder.odoo_id && (
+              {/* Pedidos viejos de GUDS sin el flujo de aprobación (los demás muestran su aprobación y envío abajo) */}
+              {!selectedOrder.odoo_id && !selectedOrder.aprobacion && (
                 <p className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[13px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                   Pedido creado en GUDS · pendiente de enviar a Odoo (se enviará cuando se active la sincronización).
                 </p>
@@ -796,19 +812,7 @@ const Ordenes = () => {
                   </div>
                 </div>
               )}
-              {selectedOrder.aprobacion === "aprobada" && !selectedOrder.odoo_id && (
-                selectedOrder.odoo_envio_error ? (
-                  <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-[13px]">
-                    <p className="mb-1 flex items-center gap-1.5 font-semibold text-destructive"><AlertTriangle className="h-4 w-4" /> No se pudo crear en Odoo</p>
-                    <p className="mb-2 text-xs">{selectedOrder.odoo_envio_error}</p>
-                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => reintentarEnvio(selectedOrder)}><RotateCw className="h-3.5 w-3.5" /> Reintentar</Button>
-                  </div>
-                ) : (
-                  <p className="flex items-center gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-[13px] text-sky-900">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Aprobado · creando la cotización en Odoo…
-                  </p>
-                )
-              )}
+              <PanelEnvioOdoo orden={selectedOrder} onReintentar={() => reintentarEnvio(selectedOrder)} />
               {selectedOrder.aprobacion === "rechazada" && (
                 <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[13px]">
                   <span className="font-semibold text-destructive">Rechazado:</span> {selectedOrder.rechazo_motivo}

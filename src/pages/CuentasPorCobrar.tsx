@@ -16,10 +16,13 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Loader2, HandCoins, FilePlus, Eye, ShieldCheck } from "lucide-react";
+import { Loader2, HandCoins, Eye, ShieldCheck } from "lucide-react";
 import { urlComprobante } from "@/components/vendedor/comprobantes";
+import { AnularCobroBoton } from "@/components/cobros/AnularCobroBoton";
+import { OdooBadge } from "@/components/OdooBadge";
 import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import { usePermissions } from "@/contexts/PermissionsContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
@@ -51,18 +54,19 @@ const TRAMOS = [
   { k: "porVencer", label: "Por vencer" }, { k: "d30", label: "1–30 días" }, { k: "d60", label: "31–60 días" },
   { k: "d90", label: "61–90 días" }, { k: "mas90", label: "+90 días" },
 ] as const;
-interface Cobro { id: string; numero: string; monto: number; monto_moneda: number; moneda: string; created_at: string; banco_id: string | null; empresa_id?: string | null; cliente?: { nombre_negocio: string } | null; banco?: { nombre: string } | null; }
-interface CuentaManual { id: string; numero: string; cliente_id: string; concepto: string; monto: number; monto_pagado: number; estado_pago: string; fecha: string; empresa_id?: string | null; }
+interface Cobro { id: string; numero: string; monto: number; monto_moneda: number; moneda: string; created_at: string; banco_id: string | null; empresa_id?: string | null; estado: string; odoo_id: number | null; es_igtf: boolean | null; cliente?: { nombre_negocio: string } | null; banco?: { nombre: string } | null; }
 interface PagoPendiente { id: string; numero: string; cliente_id: string; monto: number; monto_moneda: number | null; moneda: string; metodo: string; referencia: string | null; comprobante_url: string | null; banco_id: string | null; created_at: string; propuesta_estado?: string | null; registrado_por?: string | null; empresa_id?: string | null; cliente?: { nombre_negocio: string } | null; orden?: { numero: string } | null; }
 
-const ESTADO_MANUAL: Record<string, string> = { pendiente: "Pendiente", parcial: "Pagada en parte", pagado: "Pagada" };
 // Filtros propios de cada pestaña (claves distintas; se limpian al cambiar de pestaña). "empresa" vale para todas.
-const PESTANAS_CXC = ["cobrar", "manuales", "cobros", "anticipos", "verificar"] as const;
-const CLAVES_PESTANA = ["tramo", "vendedor", "ciudad", "favor", "m_estado", "m_fecha", "r_fecha", "r_banco", "r_moneda", "a_fecha", "v_fecha", "v_metodo", "v_origen"];
+// (22a: la pestaña "Cuentas manuales" se quitó; esas cuentas viejas del 14-ago están archivadas en la Papelera)
+const PESTANAS_CXC = ["cobrar", "cobros", "anticipos", "verificar"] as const;
+const CLAVES_PESTANA = ["tramo", "vendedor", "ciudad", "favor", "r_fecha", "r_banco", "r_moneda", "r_origen", "a_fecha", "v_fecha", "v_metodo", "v_origen"];
 interface Anticipo { pago_id: string; numero: string; cliente_id: string; monto_usd: number; aplicado: number; disponible: number; created_at: string; }
 
 const CuentasPorCobrar = () => {
   const { formatPrice, exchangeRate } = useCurrency();
+  const { can } = usePermissions();
+  const puedeAnular = can("papelera", "editar");
   const { toast } = useToast();
   const navigate = useNavigate();
   const [facturas, setFacturas] = useState<FacturaRow[]>([]);
@@ -70,7 +74,6 @@ const CuentasPorCobrar = () => {
   const [infoCli, setInfoCli] = useState<Record<string, InfoCliente>>({});
   const [bancos, setBancos] = useState<Banco[]>([]);
   const [cobros, setCobros] = useState<Cobro[]>([]);
-  const [cuentas, setCuentas] = useState<CuentaManual[]>([]);
   const [pendientes, setPendientes] = useState<PagoPendiente[]>([]);
   const [anticipos, setAnticipos] = useState<Anticipo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,10 +99,6 @@ const CuentasPorCobrar = () => {
   const [form, setForm] = useState({ cliente_id: "", banco_id: "", metodo: "", monto: 0, tasa: 0, referencia: "", notas: "" });
   const [asignaciones, setAsignaciones] = useState<Record<string, number>>({});
 
-  const [openCxc, setOpenCxc] = useState(false);
-  const [savingCxc, setSavingCxc] = useState(false);
-  const [cxcForm, setCxcForm] = useState({ cliente_id: "", concepto: "", monto: 0, fecha: "" });
-
   // Aplicar anticipo
   const [aplicarAnt, setAplicarAnt] = useState<Anticipo | null>(null);
   const [antAsignaciones, setAntAsignaciones] = useState<Record<string, number>>({});
@@ -107,12 +106,11 @@ const CuentasPorCobrar = () => {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [{ data: facs }, { data: clis }, { data: bcs }, { data: cbs }, { data: cxc }, { data: pend }, { data: ants }] = await Promise.all([
+    const [{ data: facs }, { data: clis }, { data: bcs }, { data: cbs }, { data: pend }, { data: ants }] = await Promise.all([
       supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, fecha_vencimiento, saldo_usd").eq("estado", "posted"),
       supabase.from("clientes").select("id, nombre_negocio, ciudad, empresa_id, vendedor_asignado_id, vendedor:usuarios!clientes_vendedor_asignado_id_fkey(nombre, apellido)").order("nombre_negocio"),
       supabase.from("bancos").select("id, nombre, moneda, metodo_pago, metodos").eq("activo", true).order("nombre"),
-      supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, banco_id, empresa_id, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("created_at", { ascending: false }).limit(5000),
-      supabase.from("cuentas_cobrar").select("id, numero, cliente_id, concepto, monto, monto_pagado, estado_pago, fecha, empresa_id").order("fecha", { ascending: false }),
+      supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, banco_id, empresa_id, estado, odoo_id, es_igtf, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("created_at", { ascending: false }).limit(5000),
       supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, comprobante_url, banco_id, created_at, propuesta_estado, registrado_por, empresa_id, cliente:clientes(nombre_negocio), orden:ordenes(numero)").eq("estado", "pendiente").order("created_at", { ascending: false }),
       supabase.from("v_anticipos").select("*").order("created_at", { ascending: false }),
     ]);
@@ -126,7 +124,6 @@ const CuentasPorCobrar = () => {
     }])));
     setBancos((bcs as Banco[]) ?? []);
     setCobros((cbs as unknown as Cobro[]) ?? []);
-    setCuentas((cxc as CuentaManual[]) ?? []);
     setPendientes((pend as unknown as PagoPendiente[]) ?? []);
     setAnticipos(((ants as Anticipo[]) ?? []).filter((a) => Number(a.disponible) > 0.009));
     setLoading(false);
@@ -159,25 +156,6 @@ const CuentasPorCobrar = () => {
     return [...m.values()].filter((d) => d.saldo > 0.009).sort((a, b) => b.saldo - a.saldo);
   }, [facturas, clientes, infoCli]);
 
-  const clientesLista = useMemo(() => Object.entries(clientes).map(([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre)), [clientes]);
-
-  const crearCuenta = async () => {
-    if (!cxcForm.cliente_id || !cxcForm.concepto.trim() || !cxcForm.monto || cxcForm.monto <= 0) {
-      toast({ title: "Faltan datos", description: "Cliente, concepto y monto (USD) son requeridos.", variant: "destructive" });
-      return;
-    }
-    setSavingCxc(true);
-    const { error } = await supabase.from("cuentas_cobrar").insert({
-      cliente_id: cxcForm.cliente_id, concepto: cxcForm.concepto.trim(), monto: cxcForm.monto,
-      fecha: cxcForm.fecha || undefined, origen: "manual",
-    });
-    setSavingCxc(false);
-    if (error) { toast({ title: "No se pudo crear", description: error.message, variant: "destructive" }); return; }
-    toast({ title: "Cuenta por cobrar creada", description: `${formatPrice(cxcForm.monto)} para ${clientes[cxcForm.cliente_id]}` });
-    setOpenCxc(false);
-    fetchAll();
-  };
-
   const totalPorCobrar = deudores.reduce((s, d) => s + d.saldo, 0);
   // Neto como en Odoo: facturas pendientes menos saldos a favor (notas de crédito sin aplicar) de todos los clientes
   const totalAFavor = facturas.reduce((s, f) => s + (Number(f.saldo_usd) < -0.009 ? Number(f.saldo_usd) : 0), 0);
@@ -196,8 +174,12 @@ const CuentasPorCobrar = () => {
     { valor: "vendedor", etiqueta: "Vendedor", prueba: (p) => !!p.registrado_por },
     { valor: "cliente", etiqueta: "Cliente (portal)", prueba: (p) => !p.registrado_por },
   ];
+  const pruebasOrigenCobro: OpcionPrueba<Cobro>[] = [
+    { valor: "odoo", etiqueta: "Odoo", prueba: (c) => !!c.odoo_id },
+    { valor: "guds", etiqueta: "Registrado en GUDS", prueba: (c) => !c.odoo_id },
+  ];
   const anticiposEmp = useMemo(() => anticipos.map((a) => ({ ...a, empresa_id: infoCli[a.cliente_id]?.empresa_id ?? null })), [anticipos, infoCli]);
-  const empDeud = useFiltroEmpresa(deudores), empCobros = useFiltroEmpresa(cobros), empCuentas = useFiltroEmpresa(cuentas);
+  const empDeud = useFiltroEmpresa(deudores), empCobros = useFiltroEmpresa(cobros);
   const empAnt = useFiltroEmpresa(anticiposEmp), empPend = useFiltroEmpresa(pendientes);
   const defsPorTab: Record<string, (DefFiltro | null)[]> = {
     cobrar: [
@@ -207,15 +189,11 @@ const CuentasPorCobrar = () => {
       { clave: "favor", etiqueta: "Saldo a favor", todos: "Con y sin saldo a favor", opciones: opcionesPrueba(deudores, pruebasFavor) },
       empDeud,
     ],
-    manuales: [
-      { clave: "m_estado", etiqueta: "Estado", todos: "Todos", principal: true, opciones: opcionesDe(cuentas, (c) => c.estado_pago, (_c, v) => ESTADO_MANUAL[v] ?? v) },
-      { clave: "m_fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
-      empCuentas,
-    ],
     cobros: [
       { clave: "r_fecha", etiqueta: "Fecha", tipo: "fecha", principal: true },
       { clave: "r_banco", etiqueta: "Banco", todos: "Todos los bancos", principal: true, opciones: opcionesDe(cobros, (c) => c.banco_id, (c) => c.banco?.nombre ?? "—", "Sin banco") },
       { clave: "r_moneda", etiqueta: "Moneda", todos: "Todas", principal: true, opciones: opcionesDe(cobros, (c) => c.moneda) },
+      { clave: "r_origen", etiqueta: "Origen", todos: "Odoo y GUDS", opciones: opcionesPrueba(cobros, pruebasOrigenCobro) },
       empCobros,
     ],
     anticipos: [{ clave: "a_fecha", etiqueta: "Fecha", tipo: "fecha", principal: true }, empAnt],
@@ -239,16 +217,15 @@ const CuentasPorCobrar = () => {
   const totalesTramo = TRAMOS.map((t) => ({ ...t, monto: deudBase.reduce((s, d) => s + d[t.k], 0) }));
   const filtrados = deudBase.filter((d) => d.nombre.toLowerCase().includes(texto));
   const cobrosFiltrados = cobros.filter((c) => enRango(c.created_at, f.v("r_fecha")) && coincide(c.banco_id, f.v("r_banco"))
-    && coincide(c.moneda, f.v("r_moneda")) && (!empCobros || enEmpresa(c.empresa_id)) && tiene(c.numero, c.cliente?.nombre_negocio));
-  const cuentasFiltradas = cuentas.filter((c) => coincide(c.estado_pago, f.v("m_estado")) && enRango(c.fecha, f.v("m_fecha"))
-    && (!empCuentas || enEmpresa(c.empresa_id)) && tiene(c.numero, clientes[c.cliente_id], c.concepto));
+    && coincide(c.moneda, f.v("r_moneda")) && pasaPrueba(pruebasOrigenCobro, f.v("r_origen"), c)
+    && (!empCobros || enEmpresa(c.empresa_id)) && tiene(c.numero, c.cliente?.nombre_negocio));
   const anticiposFiltrados = anticiposEmp.filter((a) => enRango(a.created_at, f.v("a_fecha")) && (!empAnt || enEmpresa(a.empresa_id))
     && tiene(a.numero, clientes[a.cliente_id]));
   const pendientesFiltrados = pendientes.filter((p) => enRango(p.created_at, f.v("v_fecha")) && coincide(p.metodo, f.v("v_metodo"))
     && pasaPrueba(pruebasOrigenPend, f.v("v_origen"), p) && (!empPend || enEmpresa(p.empresa_id))
     && tiene(p.numero, p.cliente?.nombre_negocio, p.referencia, p.orden?.numero));
   const conteoTab: Record<string, [number, number]> = {
-    cobrar: [filtrados.length, deudores.length], manuales: [cuentasFiltradas.length, cuentas.length], cobros: [cobrosFiltrados.length, cobros.length],
+    cobrar: [filtrados.length, deudores.length], cobros: [cobrosFiltrados.length, cobros.length],
     anticipos: [anticiposFiltrados.length, anticipos.length], verificar: [pendientesFiltrados.length, pendientes.length],
   };
   const { ordenadas: deudOrdenados, orden: ordenDeud, alternar: alternarDeud } = useOrdenTabla(filtrados, {
@@ -263,7 +240,6 @@ const CuentasPorCobrar = () => {
     { titulo: "Neto", valor: (d) => Number(d.neto.toFixed(2)) },
   ]);
   const pgCobros = usePagination(cobrosFiltrados, 50, f.firma);
-  const pgCuentas = usePagination(cuentasFiltradas, 50, f.firma);
   const pgAnt = usePagination(anticiposFiltrados, 50, f.firma);
 
   const bancoSel = bancos.find((b) => b.id === form.banco_id);
@@ -425,7 +401,6 @@ const CuentasPorCobrar = () => {
           pestanas={
             <TabsList className="h-auto flex-wrap justify-start">
               <TabsTrigger value="cobrar">Por cobrar ({deudores.length})</TabsTrigger>
-              <TabsTrigger value="manuales">Cuentas manuales ({cuentas.length})</TabsTrigger>
               <TabsTrigger value="cobros">Recibos ({cobros.length})</TabsTrigger>
               <TabsTrigger value="anticipos">Anticipos ({anticipos.length})</TabsTrigger>
               <TabsTrigger value="verificar" className="gap-1.5">
@@ -436,9 +411,6 @@ const CuentasPorCobrar = () => {
           }
           acciones={
             <>
-              <Button size="sm" variant="outline" className="gap-1.5" title="Nueva cuenta por cobrar manual" onClick={() => { setCxcForm({ cliente_id: "", concepto: "", monto: 0, fecha: "" }); setOpenCxc(true); }}>
-                <FilePlus className="h-3.5 w-3.5" /> Nueva CxC
-              </Button>
               <Button size="sm" className="gap-1.5" onClick={() => abrirCobro()}><HandCoins className="h-3.5 w-3.5" /> Registrar Cobro</Button>
               {tabCxc === "cobrar" && <>{cols.selector}<BotonExportar soloIcono onClick={exportarDeudores} total={deudOrdenados.length} /></>}
             </>
@@ -533,45 +505,9 @@ const CuentasPorCobrar = () => {
             </div>
           </TabsContent>
 
-          <TabsContent value="manuales">
-            <div className="rounded-lg border border-border bg-card">
-              {cuentasFiltradas.length === 0 ? (
-                <p className="p-6 text-center text-muted-foreground">{cuentas.length > 0 ? "Ninguna cuenta coincide con la búsqueda o los filtros." : "No hay cuentas por cobrar manuales. Creá una con \"Nueva cuenta por cobrar\"."}</p>
-              ) : (
-                <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Nº</TableHead><TableHead>Cliente</TableHead><TableHead>Concepto</TableHead>
-                        <TableHead>Fecha</TableHead><TableHead>Estado</TableHead>
-                        <TableHead className="text-right">Monto</TableHead><TableHead className="text-right">Saldo</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {pgCuentas.pageItems.map((c) => (
-                        <TableRow key={c.id}>
-                          <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{c.numero}</TableCell>
-                          <TableCell className="font-medium"><span className="block max-w-[260px] truncate" title={clientes[c.cliente_id] || undefined}>{clientes[c.cliente_id] || "—"}</span></TableCell>
-                          <TableCell className="text-muted-foreground"><span className="block max-w-[280px] truncate" title={c.concepto}>{c.concepto}</span></TableCell>
-                          <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(c.fecha).toLocaleDateString("es-VE")}</TableCell>
-                          <TableCell>
-                            <Badge variant={c.estado_pago === "pagado" ? "default" : c.estado_pago === "parcial" ? "outline" : "secondary"}>{ESTADO_MANUAL[c.estado_pago] ?? c.estado_pago}</Badge>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap text-right">{formatPrice(c.monto)}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right font-semibold text-destructive">{formatPrice(Number(c.monto) - Number(c.monto_pagado || 0))}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  <DataTablePagination pagination={pgCuentas} />
-                </>
-              )}
-            </div>
-          </TabsContent>
-
           <TabsContent value="cobros">
             <div className="rounded-lg border border-border bg-card">
-              <Table>
+              <Table data-tabla="cxc-recibos">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Nº</TableHead>
@@ -580,17 +516,32 @@ const CuentasPorCobrar = () => {
                     <TableHead className="text-right">Monto</TableHead>
                     <TableHead className="text-right">USD</TableHead>
                     <TableHead>Fecha</TableHead>
+                    {puedeAnular && <TableHead className="text-right">Acción</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
+                  {pgCobros.pageItems.length === 0 && (
+                    <TableRow><TableCell colSpan={puedeAnular ? 7 : 6} className="py-8 text-center text-muted-foreground">
+                      {cobros.length > 0 ? "Ningún recibo coincide con la búsqueda o los filtros." : "No hay recibos verificados."}
+                    </TableCell></TableRow>
+                  )}
                   {pgCobros.pageItems.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell className="whitespace-nowrap font-mono text-xs text-primary">{c.numero}</TableCell>
+                    <TableRow key={c.id} data-recibo={c.numero}>
+                      <TableCell className="whitespace-nowrap font-mono text-xs text-primary">
+                        <span className="inline-flex items-center gap-1.5">{c.numero}{c.odoo_id ? <OdooBadge /> : null}</span>
+                      </TableCell>
                       <TableCell className="font-medium"><span className="block max-w-[260px] truncate" title={c.cliente?.nombre_negocio || undefined}>{c.cliente?.nombre_negocio || "—"}</span></TableCell>
                       <TableCell className="text-muted-foreground"><span className="block max-w-[180px] truncate" title={c.banco?.nombre || undefined}>{c.banco?.nombre || "—"}</span></TableCell>
                       <TableCell className="whitespace-nowrap text-right">{Number(c.monto_moneda).toLocaleString("es-VE")} {c.moneda}</TableCell>
                       <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(c.monto)}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(c.created_at).toLocaleDateString("es-VE")}</TableCell>
+                      {puedeAnular && (
+                        <TableCell className="whitespace-nowrap text-right">
+                          <AnularCobroBoton variante={c.odoo_id ? "icono" : "boton"} onAnulado={fetchAll}
+                            cobro={{ id: c.id, numero: c.numero, monto: c.monto, estado: c.estado, odoo_id: c.odoo_id, es_igtf: c.es_igtf,
+                              moneda: c.moneda, monto_moneda: c.monto_moneda, cliente: c.cliente?.nombre_negocio }} />
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -718,42 +669,6 @@ const CuentasPorCobrar = () => {
             <Button onClick={registrar} disabled={saving} className="gap-2">
               {saving && <Loader2 className="h-4 w-4 animate-spin" />} Registrar Cobro
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Nueva cuenta por cobrar manual */}
-      <Dialog open={openCxc} onOpenChange={setOpenCxc}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Nueva Cuenta por Cobrar</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>Cliente *</Label>
-              <Select value={cxcForm.cliente_id} onValueChange={(v) => setCxcForm({ ...cxcForm, cliente_id: v })}>
-                <SelectTrigger><SelectValue placeholder="Seleccionar cliente" /></SelectTrigger>
-                <SelectContent>
-                  {clientesLista.map((c) => (<SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Concepto *</Label>
-              <Input value={cxcForm.concepto} onChange={(e) => setCxcForm({ ...cxcForm, concepto: e.target.value })} placeholder="Ej. Ajuste, servicio, saldo anterior…" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Monto (USD) *</Label>
-                <Input type="number" step="0.01" min="0" value={cxcForm.monto || ""} onChange={(e) => setCxcForm({ ...cxcForm, monto: parseFloat(e.target.value) || 0 })} />
-              </div>
-              <div className="space-y-2">
-                <Label>Fecha</Label>
-                <Input type="date" value={cxcForm.fecha} onChange={(e) => setCxcForm({ ...cxcForm, fecha: e.target.value })} />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpenCxc(false)}>Cancelar</Button>
-            <Button onClick={crearCuenta} disabled={savingCxc} className="gap-2">{savingCxc && <Loader2 className="h-4 w-4 animate-spin" />} Crear</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

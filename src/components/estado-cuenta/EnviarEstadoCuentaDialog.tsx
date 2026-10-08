@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "@/hooks/use-toast";
 import { useEmpresa } from "@/contexts/EmpresaContext";
 import { pdfEstadoCuentaBase64, precargarPdfEstadoCuenta } from "./pdf";
-import { nombreArchivoEstadoCuenta, urlEstadoCuenta } from "./formato";
+import { corteDe, fechaNumerica, nombreArchivoEstadoCuenta, urlEstadoCuenta } from "./formato";
 import type { EstadoCuentaCompleto } from "./tipos";
 
 // Enviar el estado de cuenta por correo (fase 20w): destinatarios prellenados con el correo del cliente y de sus
@@ -19,6 +19,7 @@ import type { EstadoCuentaCompleto } from "./tipos";
 // de siempre (con ese enlace en el pie) y la función lo adjunta y envía por Resend.
 // 21b (clientes sin correo): desde aquí se guarda el correo del cliente — se escribe en Odoo por la cola de escrituras,
 // como la dirección y los teléfonos — o se crea un contacto con correo (que su trigger también lleva a Odoo).
+// 22c: el correo y su PDF salen siempre con el corte de hoy (si en pantalla hay un corte pasado, el PDF se arma con el de hoy).
 
 const CORREO = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 const MAX = 10;
@@ -128,9 +129,15 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
       const { data: enl, error: errEnl } = await supabase.rpc("crear_enlace_estado_cuenta", { p_cliente_id: clienteId });
       if (errEnl) throw new Error(errEnl.message);
       const token = (enl as { token: string | null }).token;
-      // 2) El mismo PDF que "Descargar PDF"
+      // 2) El mismo PDF que "Descargar PDF", al corte de hoy (como el cuerpo del correo)
       setEnviando("pdf");
-      const pdf = await pdfEstadoCuentaBase64(datos, { enlace: token ? urlEstadoCuenta(token) : null });
+      let hoyDatos = datos;
+      if (corteDe(datos) !== datos.hoy) {
+        const { data: d, error: e } = await supabase.rpc("estado_cuenta_cliente", { p_cliente_id: clienteId, p_movimientos: false });
+        if (e) throw new Error(e.message);
+        hoyDatos = d as EstadoCuentaCompleto;
+      }
+      const pdf = await pdfEstadoCuentaBase64(hoyDatos, { enlace: token ? urlEstadoCuenta(token) : null });
       // 3) Envío
       setEnviando("correo");
       const r = await llamar({ modo: "enviar", cliente_id: clienteId, destinatarios: lista, asunto, mensaje, pdf_base64: pdf.base64 }, empresa);
@@ -165,7 +172,8 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
     setCorreoNuevo(""); setNombreContacto(""); setAgregarAbierto(false); setErrorDestino(null);
   };
 
-  const archivo = datos ? nombreArchivoEstadoCuenta(datos.cliente.nombre, datos.periodo.hasta ?? datos.hoy) : "";
+  const archivo = datos ? nombreArchivoEstadoCuenta(datos.cliente.nombre, datos.hoy) : "";
+  const cortePasado = !!datos && corteDe(datos) !== datos.hoy;
   const pasos = { enlace: "Preparando el enlace…", pdf: "Generando el PDF…", correo: "Enviando…" } as const;
 
   return (
@@ -241,6 +249,11 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
             <div className="flex items-center gap-2 rounded-md bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
               <Paperclip className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{archivo || "PDF del estado de cuenta"}</span>
             </div>
+            {cortePasado && datos && (
+              <p className="rounded-md border border-warning/40 bg-warning/5 px-2.5 py-2 text-xs" data-testid="ec-correo-corte">
+                En pantalla está el corte al {fechaNumerica(corteDe(datos))}; el correo y el PDF adjunto salen con el estado de cuenta de hoy.
+              </p>
+            )}
             {error && <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert" data-testid="ec-correo-error">{error}</p>}
           </div>
 
