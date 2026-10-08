@@ -43,7 +43,7 @@ interface FacturaRow {
 }
 interface PagoRow {
   id: string; numero: string; monto: number; moneda: string; monto_moneda: number | null; estado: string;
-  created_at: string; fecha_verificacion: string | null; banco?: { nombre: string } | null;
+  created_at: string; fecha_verificacion: string | null; fecha_pago: string; banco?: { nombre: string } | null;
   odoo_id: number | null; es_igtf: boolean;
 }
 interface ReintegroRow { id: string; numero: string; monto: number; moneda: string; monto_moneda: number | null; estado: string; fecha: string | null; referencia: string | null; banco?: { nombre: string } | null; }
@@ -122,7 +122,7 @@ const CuentaDetalle = () => {
       const [{ data: cli }, { data: facs }, { data: pgs }, { data: rets }, { data: reins }, { data: aplOdoo }] = await Promise.all([
         supabase.from("clientes").select("id, nombre_negocio, codigo, rif, limite_credito").eq("id", clienteId).maybeSingle(),
         supabase.from("facturas").select("id, numero, tipo, es_nota_debito, fecha_emision, fecha_vencimiento, total_usd, saldo_usd, estado_cobro").eq("cliente_id", clienteId).eq("estado", "posted").order("fecha_emision", { ascending: false }),
-        supabase.from("pagos").select("id, numero, monto, moneda, monto_moneda, estado, created_at, fecha_verificacion, odoo_id, es_igtf, banco:bancos(nombre)").eq("cliente_id", clienteId).order("created_at", { ascending: false }),
+        supabase.from("pagos").select("id, numero, monto, moneda, monto_moneda, estado, created_at, fecha_verificacion, fecha_pago, odoo_id, es_igtf, banco:bancos(nombre)").eq("cliente_id", clienteId).order("fecha_pago", { ascending: false }).order("created_at", { ascending: false }),
         supabase.from("retenciones").select("id, numero, tipo, estado, fecha, total, odoo_id").eq("cliente_id", clienteId).order("fecha", { ascending: false }),
         supabase.from("reintegros").select("id, numero, monto, moneda, monto_moneda, estado, fecha, referencia, banco:bancos(nombre)").eq("cliente_id", clienteId).order("fecha", { ascending: false }),
         // Cobros de Odoo aplicados a facturas (conciliaciones de Odoo)
@@ -397,7 +397,7 @@ const CuentaDetalle = () => {
                             <span className="flex items-center gap-1.5">{p.numero}{p.odoo_id && <OdooBadge />}{p.es_igtf && <Badge variant="outline" className="px-1 py-0 text-[10px]">IGTF</Badge>}</span>
                           </TableCell>
                           <TableCell className="text-muted-foreground">{p.banco?.nombre || "—"}</TableCell>
-                          <TableCell className="text-muted-foreground">{fmtFecha(p.fecha_verificacion || p.created_at)}</TableCell>
+                          <TableCell className="text-muted-foreground">{fmtFecha(p.fecha_pago)}</TableCell>
                           <TableCell>
                             <Badge variant={ESTADO_PAGO[p.estado]?.variant ?? "secondary"} className={p.estado === "anulado" ? "text-muted-foreground line-through" : undefined}>{ESTADO_PAGO[p.estado]?.label ?? p.estado}</Badge>
                           </TableCell>

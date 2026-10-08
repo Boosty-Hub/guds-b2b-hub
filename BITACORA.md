@@ -10,6 +10,52 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-08 (noche) · Lo cobrado: libro de cobros con Odoo + Profit y la fecha real de cada cobro (22f · R2)
+
+- **Pedido del usuario:** "continua" / "sigue" con el plan de reportes de finanzas (R2 del plan).
+- **Reportes → Cobranza → Lo cobrado** (`?cobranza=cobrado`, también en Ctrl+K):
+  - Es el libro de cobros del Excel "FORMATO DE LO COBRADO" de finanzas.
+  - Indicadores: cobrado, cobros, en Bs, en divisas y "No cuentan".
+  - Matriz diario / moneda / cliente / vendedor × mes, en USD o en la moneda del cobro.
+  - Detalle de cada cobro y tabla "No cuentan, y por qué".
+  - Excel con las hojas del libro de finanzas: Detalle · Diario × mes (moneda y USD) · Moneda × mes · Cliente × mes · Vendedor × mes · No cuentan · Parámetros.
+  - Sin el permiso de Cuentas: solo las matrices sin clientes, con aviso.
+  - El período personalizado de Reportes queda en la URL (`desde`/`hasta`).
+- **Fuente única** `cobros_unificados` (migración `20261008_fase22f_lo_cobrado.sql`):
+  - Odoo desde su arranque (`empresas.odoo_arranque` = 1-may-2026 en las dos empresas).
+  - Antes del arranque, los **recibos de Profit**, cargados del Excel de finanzas en `cobros_historicos` con `scripts/importar-cobros-profit.mjs`:
+    - 553 de GUDS y 700 de Quirutec; cuadran con las cifras de control;
+    - la carga se puede repetir;
+    - 1.159 ligados a un cliente de GUDS; el resto son clientes que no existen en Odoo;
+    - la caja o cuenta de Profit se lleva al diario de Odoo equivalente (verificado con may–sep).
+  - **No se cuenta dos veces:** los 173 anticipos de saldo inicial de 2026 anteriores al arranque (`bancos.saldo_inicial`) quedan fuera, porque son el mismo dinero que los recibos de Profit. Desde el arranque sí cuentan.
+  - USD = monto ÷ tasa BCV del día del cobro (D1), con la marca P cuando la tasa viene de Profit.
+  - Anulados, borradores, por verificar e IGTF van aparte, con su motivo.
+  - El **Resumen** de cobranza usa la misma fuente: ahora incluye ene–abr y la BCV del día.
+- **Cuadre con el Excel de finanzas, may–sep:**
+  - de 1.099 cobros, 1.092 están en GUDS;
+  - 1.046 cuentan en los dos: USD 1.381.323 en GUDS frente a 1.386.483 en el Excel (−0,4 %, por la tasa del día frente a la semanal);
+  - el Excel suma además 18 cobros anulados en Odoo (USD 106.463), 26 de IGTF y 2 borradores;
+  - 7 no están en GUDS;
+  - GUDS trae 90 cobros vigentes que el Excel no tiene.
+- **`pagos.fecha_pago`** (antes vacía):
+  - Llena en todos los cobros y obligatoria. En los de Odoo es la fecha de Odoo (la escribe la sincronización); en los de GUDS, la reportada o el día de Caracas.
+  - Solo se corrige en Odoo.
+  - Cuentas, CxC → Recibos, Pagos, el portal, el vendedor, la factura del portal y el resumen del vendedor la usan. Antes los cobros de Odoo salían un día antes, y 8 cuya fecha cambió en Odoo tenían la vieja.
+  - El estado de cuenta y el DSO ya la leían, con la misma corrección.
+- **`sync-odoo` redesplegada** (`importar.js` escribe `fecha_pago`).
+  - **Incidente:** la corrida de las 15:30 VE falló ("null value in column fecha_pago"). La migración entró antes que el despliegue, y la sincronización escribe con los disparadores apagados (`session_replication_role = replica`), así que el disparador que completa la fecha no corrió.
+  - La corrida siguiente, ya con la función nueva, salió `ok`, y las fechas quedaron bien en los 1.800 cobros de Odoo.
+  - Regla para la próxima vez: en tablas espejo, una columna obligatoria nueva se despliega **primero en la sincronización** y después en la base.
+- **Rendimiento:**
+  - La fuente única tarda unos 80 ms.
+  - Las matrices van juntas en una sola llamada (`reporte_cobranza_matrices`, unos 130 ms).
+  - El filtro de empresa se evalúa una vez por consulta.
+- **Verificación:**
+  - tsc y build limpios.
+  - Suites: 22f 31/31, 22a 36/36, 22b 29/29 en GUDS y en Quirutec, 22c 23/23, 22d 45/45 y multiempresa 566/566.
+  - Playwright: Lo cobrado 52/52 (GUDS, Quirutec y «Ambas» × 1440/390, Excel, solo reportes, Ctrl+K, Resumen y fecha en Pagos), recorrido general 42/42, 22e 19/19 y descargas 4/4.
+
 ## 2026-10-08 (tarde) · Respuestas a lo abierto de 22a–22d: clasificación y consignación activas, tasa de las NC, permisos (22e)
 
 - **Clasificación en Odoo activa** (autorizado: "solo escribe uno ahora y confirmas"):

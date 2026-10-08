@@ -108,3 +108,12 @@ export const navSections: NavSection[] = [
   },
 ];
 
+
+// Accesos directos del buscador (Ctrl+K) a vistas dentro de una página: no van en el menú lateral (NavLink compara solo la
+// ruta y marcaría dos ítems a la vez). `modulos`: todos los permisos que pide la vista.
+export type AccesoBuscador = { label: string; path: string; seccion: string; modulos: string[] };
+export const accesosBuscador: AccesoBuscador[] = [
+  { label: "Lo cobrado", path: "/admin/reportes?tab=cobranza&cobranza=cobrado", seccion: "Reportes · Cobranza", modulos: ["reportes"] },
+  { label: "Cobranza (resumen)", path: "/admin/reportes?tab=cobranza", seccion: "Reportes", modulos: ["reportes"] },
+  { label: "Calidad y cuadre", path: "/admin/reportes?tab=calidad", seccion: "Reportes", modulos: ["reportes", "cuentas"] },
+];

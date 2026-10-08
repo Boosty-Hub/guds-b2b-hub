@@ -53,6 +53,7 @@ interface PagoAdmin {
   monto_moneda?: number | null;
   created_at: string;
   fecha_verificacion: string | null;
+  fecha_pago: string;
   orden?: { numero: string; total: number } | null;
   cliente?: { nombre_negocio: string } | null;
   cliente_id?: string | null;
@@ -94,11 +95,12 @@ const Pagos = () => {
     const { data, error } = await supabase
       .from("pagos")
       .select(`
-        id, numero, monto, monto_moneda, metodo, referencia, comprobante_url, banco, estado, notas, motivo_anulacion, created_at, fecha_verificacion, odoo_id, es_igtf, igtf_origen:igtf_origen_id(numero),
+        id, numero, monto, monto_moneda, metodo, referencia, comprobante_url, banco, estado, notas, motivo_anulacion, created_at, fecha_verificacion, fecha_pago, odoo_id, es_igtf, igtf_origen:igtf_origen_id(numero),
         registrado_por, propuesta_estado, cliente_id, banco_id, moneda, empresa_id, banco_ref:bancos!pagos_banco_id_fkey(nombre),
         orden:ordenes(numero, total),
         cliente:clientes(nombre_negocio)
       `)
+      .order("fecha_pago", { ascending: false })
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -134,8 +136,9 @@ const Pagos = () => {
     fetchPagos();
   };
 
+  // 'AAAA-MM-DD' (fecha del cobro) se lee como día local; un timestamp, tal cual
   const formatDate = (s: string) =>
-    new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+    new Date(s.length === 10 ? `${s}T00:00:00` : s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
   // Los comprobantes de cobros de vendedor están en el bucket comprobantes-cobro (con prefijo); los demás, en documentos
   const verComprobante = async (path: string) => {
@@ -176,21 +179,21 @@ const Pagos = () => {
   ]);
   const filtro = f.v("estado");
   const texto = q.trim().toLowerCase();
-  const visibles = pagos.filter((p) => pasaPrueba(pruebasEstado, filtro, p) && enRango(p.created_at, f.v("fecha"))
+  const visibles = pagos.filter((p) => pasaPrueba(pruebasEstado, filtro, p) && enRango(p.fecha_pago, f.v("fecha"))
     && coincide(p.banco_id, f.v("banco")) && coincide(p.cliente_id, f.v("cliente")) && coincide(p.metodo, f.v("metodo"))
     && coincide(p.moneda, f.v("moneda")) && pasaPrueba(pruebasOrigen, f.v("origen"), p) && pasaPrueba(pruebasIgtf, f.v("igtf"), p)
     && (!filtroEmpresa || coincide(p.empresa_id, f.v("empresa")))
     && (!texto || [p.numero, p.cliente?.nombre_negocio, p.referencia, p.orden?.numero, p.metodo].some((v) => (v || "").toLowerCase().includes(texto))));
   const { ordenadas, orden, alternar } = useOrdenTabla(visibles, {
     numero: (p) => p.numero, cliente: (p) => p.cliente?.nombre_negocio, orden: (p) => p.orden?.numero, monto: (p) => Number(p.monto || 0),
-    metodo: (p) => p.metodo, referencia: (p) => p.referencia, fecha: (p) => p.created_at, estado: (p) => p.estado,
+    metodo: (p) => p.metodo, referencia: (p) => p.referencia, fecha: (p) => p.fecha_pago, estado: (p) => p.estado,
   });
   const pagination = usePagination(ordenadas, 50, f.firma);
   const exportar = () => exportarCSV("cobros", ordenadas, [
     { titulo: "Pago", valor: (p) => p.numero }, { titulo: "Origen", valor: (p) => (p.odoo_id ? "Odoo" : "GUDS") },
     { titulo: "Cliente", valor: (p) => p.cliente?.nombre_negocio }, { titulo: "Orden", valor: (p) => p.orden?.numero },
     { titulo: "Monto USD", valor: (p) => Number(p.monto || 0) }, { titulo: "Método", valor: (p) => p.metodo }, { titulo: "Referencia", valor: (p) => p.referencia },
-    { titulo: "Fecha", valor: (p) => p.created_at?.slice(0, 10) }, { titulo: "Estado", valor: (p) => estadoConfig[p.estado]?.label || p.estado },
+    { titulo: "Fecha", valor: (p) => p.fecha_pago }, { titulo: "Estado", valor: (p) => estadoConfig[p.estado]?.label || p.estado },
     { titulo: "IGTF", valor: (p) => (p.es_igtf ? "Sí" : "") }, { titulo: "Banco", valor: (p) => p.banco_ref?.nombre }, { titulo: "Moneda", valor: (p) => p.moneda },
   ]);
   const pendientes = pagos.filter((p) => p.estado === "pendiente");
@@ -283,7 +286,7 @@ const Pagos = () => {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(pago.created_at)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(pago.fecha_pago)}</TableCell>
                   <TableCell className="whitespace-nowrap">
                     <Badge variant={estadoConfig[pago.estado]?.variant || "secondary"}
                       className={pago.estado === "anulado" ? "text-muted-foreground line-through decoration-muted-foreground/50" : undefined}

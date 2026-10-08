@@ -1027,21 +1027,22 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       for (const lote of lotes(pagos, 800)) {
         await escribir(`
           insert into pagos (odoo_id, empresa_id, numero, cliente_id, banco_id, metodo, monto, monto_moneda, moneda, estado, estado_odoo,
-            referencia, es_igtf, lote_pago, fecha_verificacion, created_at, odoo_sync_at)
+            referencia, es_igtf, lote_pago, fecha_verificacion, fecha_pago, created_at, odoo_sync_at)
           select x.odoo_id, x.empresa_id, x.numero, (select c.id from clientes c where c.odoo_id = x.cliente_odoo_id),
             (select b.id from bancos b where b.odoo_id = x.banco_odoo_id), x.metodo::pago_metodo, x.monto, x.monto_moneda, x.moneda,
-            x.estado::pago_estado, x.estado_odoo, x.referencia, x.es_igtf, x.lote_pago, x.fecha::timestamptz, x.fecha::timestamptz, '${ts}'
+            x.estado::pago_estado, x.estado_odoo, x.referencia, x.es_igtf, x.lote_pago, x.fecha::timestamptz, x.fecha, x.fecha::timestamptz, '${ts}'
           from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, empresa_id uuid, numero text, cliente_odoo_id int, banco_odoo_id int,
             metodo text, monto numeric, monto_moneda numeric, moneda text, estado text, estado_odoo text, referencia text, es_igtf boolean,
             lote_pago text, fecha date)
           on conflict (odoo_id) do update set empresa_id = excluded.empresa_id, numero = excluded.numero, cliente_id = excluded.cliente_id,
             banco_id = excluded.banco_id, monto = excluded.monto, monto_moneda = excluded.monto_moneda, moneda = excluded.moneda,
             estado = excluded.estado, estado_odoo = excluded.estado_odoo, referencia = excluded.referencia, es_igtf = excluded.es_igtf,
-            lote_pago = excluded.lote_pago, fecha_verificacion = excluded.fecha_verificacion, odoo_sync_at = excluded.odoo_sync_at, updated_at = now()
+            lote_pago = excluded.lote_pago, fecha_verificacion = excluded.fecha_verificacion, fecha_pago = excluded.fecha_pago, odoo_sync_at = excluded.odoo_sync_at, updated_at = now()
           where (pagos.empresa_id, pagos.numero, pagos.cliente_id, pagos.banco_id, pagos.monto, pagos.monto_moneda, pagos.moneda, pagos.estado,
-            pagos.estado_odoo, pagos.referencia, pagos.es_igtf, pagos.lote_pago, pagos.fecha_verificacion)
+            pagos.estado_odoo, pagos.referencia, pagos.es_igtf, pagos.lote_pago, pagos.fecha_verificacion, pagos.fecha_pago)
           is distinct from (excluded.empresa_id, excluded.numero, excluded.cliente_id, excluded.banco_id, excluded.monto, excluded.monto_moneda,
-            excluded.moneda, excluded.estado, excluded.estado_odoo, excluded.referencia, excluded.es_igtf, excluded.lote_pago, excluded.fecha_verificacion)`);
+            excluded.moneda, excluded.estado, excluded.estado_odoo, excluded.referencia, excluded.es_igtf, excluded.lote_pago, excluded.fecha_verificacion,
+            excluded.fecha_pago)`);
       }
       // IGTF: cada pago de IGTF apunta al cobro que lo originó (cuando ambos existen)
       const igtf = pagos.filter((x) => x.igtf_origen_odoo_id).map((x) => ({ odoo_id: x.odoo_id, origen: x.igtf_origen_odoo_id }));

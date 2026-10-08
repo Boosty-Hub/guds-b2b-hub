@@ -36,6 +36,7 @@ import { EnvioMasivoDialog } from "@/components/estado-cuenta/EnvioMasivoDialog"
 import { RegistroEnvios } from "@/components/estado-cuenta/RegistroEnvios";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { supabase } from "@/lib/supabase";
+import { hoyCaracas, inicioDeMes } from "@/lib/fechas";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
@@ -79,6 +80,7 @@ interface PagoRow {
   estado: string;
   created_at: string;
   fecha_verificacion: string | null;
+  fecha_pago: string;
   banco?: { nombre: string } | null;
 }
 interface FacturaRow {
@@ -132,7 +134,7 @@ const Cuentas = () => {
     setLoading(true);
     const [cRes, pRes, fRes, bRes] = await Promise.all([
       supabase.from("clientes").select("id, codigo, nombre_negocio, limite_credito, credito_utilizado, dias_credito, empresa_id, vendedor_asignado_id, vendedor:usuarios!clientes_vendedor_asignado_id_fkey(nombre, apellido)"),
-      supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, estado, created_at, fecha_verificacion, banco:bancos(nombre)").order("created_at", { ascending: false }).limit(5000),
+      supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, estado, created_at, fecha_verificacion, fecha_pago, banco:bancos(nombre)").order("fecha_pago", { ascending: false }).order("created_at", { ascending: false }).limit(5000),
       supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, total_usd, saldo_usd, estado_cobro").eq("estado", "posted"),
       supabase.from("bancos").select("id, nombre, metodo_pago, metodos, moneda").eq("activo", true).order("nombre"),
     ]);
@@ -160,7 +162,7 @@ const Cuentas = () => {
     const m = new Map<string, string>();
     for (const p of pagos) {
       if (p.estado !== "verificado") continue;
-      const f = p.fecha_verificacion || p.created_at;
+      const f = p.fecha_pago;
       const prev = m.get(p.cliente_id);
       if (!prev || new Date(f) > new Date(prev)) m.set(p.cliente_id, f);
     }
@@ -175,14 +177,15 @@ const Cuentas = () => {
 
   // KPIs (data real)
   const totalPorCobrar = useMemo(() => [...deudaCliente.values()].reduce((s, d) => s + d.saldo, 0), [deudaCliente]);
-  const inicioMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+  const inicioMes = inicioDeMes(hoyCaracas());
   const cobradoMes = pagos
     .filter((p) => p.estado === "verificado")
-    .filter((p) => { const f = p.fecha_verificacion || p.created_at; return f && new Date(f).getTime() >= inicioMes; })
+    .filter((p) => p.fecha_pago >= inicioMes)
     .reduce((s, p) => s + Number(p.monto || 0), 0);
   const clientesConDeuda = deudaCliente.size;
 
-  const formatDate = (s: string | null) => (s ? new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }) : "—");
+  // Las fechas de documentos y cobros son días ('AAAA-MM-DD'): se leen como fecha local, no como medianoche UTC
+  const formatDate = (s: string | null) => (s ? new Date(s.length === 10 ? `${s}T00:00:00` : s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 
   // Estado de cuentas: clientes ordenados por deuda real desc
   const cuentasCliente = useMemo(() => clientes
@@ -193,7 +196,7 @@ const Cuentas = () => {
   const empresaCliente = useMemo(() => Object.fromEntries(clientes.map((c) => [c.id, c.empresa_id ?? null])), [clientes]);
   const movimientos = useMemo(() => [
     ...pagos.filter((p) => p.estado === "verificado").map((p) => ({
-      id: p.id, fecha: p.fecha_verificacion || p.created_at, cliente: clientesMap[p.cliente_id] || "—", empresa_id: empresaCliente[p.cliente_id] ?? null,
+      id: p.id, fecha: p.fecha_pago, cliente: clientesMap[p.cliente_id] || "—", empresa_id: empresaCliente[p.cliente_id] ?? null,
       tipo: "pago" as const, clase: "cobro" as const, monto: Number(p.monto), metodo: metodoLabel[p.metodo] || p.metodo, referencia: p.numero,
     })),
     ...facturas.filter((f) => f.tipo === "factura").map((f) => ({

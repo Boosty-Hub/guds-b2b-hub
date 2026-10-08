@@ -210,6 +210,23 @@ Secciones por empresa:
      cuando haya tasas (T2).
 5. Llenar `fecha_pago` (ver la sección de piezas comunes).
 
+**✅ Hecho (22f, 8-oct).** Reportes → Cobranza → **Lo cobrado** (`?cobranza=cobrado`, también en Ctrl+K):
+
+- **Fuente única** `cobros_unificados`: Odoo desde su arranque (`empresas.odoo_arranque` = 1-may-2026 en las dos) y, antes,
+  los **1.253 recibos de Profit** cargados del Excel (`cobros_historicos`, `scripts/importar-cobros-profit.mjs`; GUDS 553,
+  Quirutec 700; las 2 filas sin número de Profit ya están en Odoo). Los 173 anticipos de saldo inicial de 2026 anteriores al
+  arranque (`bancos.saldo_inicial`) no cuentan; desde el arranque sí (82).
+- USD = monto ÷ BCV del día (D1), con la marca P cuando la tasa sale de Profit. La caja o cuenta de Profit se lleva al
+  diario de Odoo equivalente; quedan con su nombre la tarjeta de débito (Quirutec) y la cuenta por cobrar entre empresas (GUDS).
+- Matriz diario / moneda / cliente / vendedor × mes, en USD o en moneda original; detalle; "No cuentan" (anulados,
+  borradores, por verificar, IGTF, saldos iniciales) y Excel con las hojas del libro de finanzas + Parámetros.
+- El **Resumen** de cobranza usa la misma fuente: ahora incluye ene–abr (Profit) y pasa a la BCV del día.
+- Cuadre may–sep con el Excel: de 1.099 cobros, 1.092 están en GUDS; 1.046 cuentan en los dos (USD 1.381.323 en GUDS
+  frente a 1.386.483 en el Excel: −0,4 % por la tasa del día frente a la semanal); el Excel suma además 18 anulados en
+  Odoo (USD 106.463), 26 IGTF y 2 borradores; 7 no están en GUDS; GUDS trae 90 cobros vigentes que el Excel no tiene.
+- **`fecha_pago`** llena en los 1.800 cobros de Odoo (la sincronización la escribe) y en los de GUDS (disparador);
+  Cuentas, CxC → Recibos, Pagos, el portal y el vendedor la muestran (antes los cobros de Odoo salían un día antes).
+
 ## 4. FORMATO - DMQ GS - Promedio Ventas — Ventas vs deuda
 
 **Qué trae.** Una hoja por empresa: Quirutec 1.264 clientes, GUDS 570. Por cliente:
@@ -433,6 +450,11 @@ Cada fase se cierra con el cuadre contra el Excel del equipo (es la "respuesta c
 Playwright a 1440 y 390 px en GUDS, Quirutec y «Ambas».
 
 ## Hallazgos para revisar
+
+> 8-oct (noche, 22f): **Lo cobrado** hecho (ver §3). Aviso de operación: la sincronización escribe con los disparadores
+> apagados (`session_replication_role = replica`), así que una columna obligatoria nueva en una tabla espejo se despliega
+> **primero en la sincronización** y después en la base. Por hacerlo al revés, una corrida (15:30 VE) falló y la siguiente,
+> ya con la función nueva, salió bien.
 
 > 8-oct (tarde, 22e): consignación **activa** (aprobar crea la cotización en borrador en Odoo, verificado de punta a punta
 > con un cliente de prueba sin Odoo: el envío para antes de escribir). Pendiente de datos: **46 almacenes de consignación

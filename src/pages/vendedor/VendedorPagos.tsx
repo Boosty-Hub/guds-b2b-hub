@@ -77,7 +77,7 @@ const VendedorPagos = () => {
   const fechaDe = (p: Pago) => p.fecha_pago || p.created_at;
 
   const cob = resumen?.cobros;
-  const verificadoMes = (p: Pago) => p.estado === "verificado" && !p.es_igtf && !!resumen && diaCaracas(p.created_at) >= resumen.mes_desde && diaCaracas(p.created_at) <= resumen.mes_hasta;
+  const verificadoMes = (p: Pago) => p.estado === "verificado" && !p.es_igtf && !!resumen && diaCaracas(fechaDe(p)) >= resumen.mes_desde && diaCaracas(fechaDe(p)) <= resumen.mes_hasta;
   // ---- Filtros (en la URL). ?estado=pendiente llega desde el tablero Hoy ----
   const pruebasEstado: OpcionPrueba<Pago>[] = [
     { valor: "pendiente", etiqueta: "Pendientes de verificar", prueba: (p) => p.estado === "pendiente" },

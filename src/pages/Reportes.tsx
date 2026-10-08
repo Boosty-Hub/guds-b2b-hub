@@ -18,6 +18,7 @@ import { HistoricoProfit } from "@/components/reportes/HistoricoProfit";
 import { AnalisisVentas } from "@/components/reportes/AnalisisVentas";
 import { MetasVendedores } from "@/components/reportes/MetasVendedores";
 import { CalidadDatos, useCalidadOculta } from "@/components/reportes/CalidadDatos";
+import { LoCobrado } from "@/components/reportes/cobrado/LoCobrado";
 import { InsigniaProfit, colorFuente, periodoComparacion, Variacion, fechaCorta, TEXTO_COMPARACION } from "@/components/reportes/comun";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -25,6 +26,8 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { FiltrosLista, useFiltros, opcionesTexto, opcionesPrueba, pasaPrueba, coincideTexto, type OpcionPrueba } from "@/components/datos/FiltrosLista";
 import { supabase } from "@/lib/supabase";
+import { esIso } from "@/lib/fechas";
+import { cn } from "@/lib/utils";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useEmpresa } from "@/contexts/EmpresaContext";
 import { usePermissions } from "@/contexts/PermissionsContext";
@@ -148,7 +151,7 @@ function GraficoVentas({ datos, formato }: { datos: { mes: string; odoo: number;
 
 const Reportes = () => {
   const { formatPrice } = useCurrency();
-  const { soloLectura, seleccion } = useEmpresa();
+  const { soloLectura, seleccion, empresas, empresaActiva } = useEmpresa();
   // 22a4/22e: los reportes con deuda o cobros por cliente (DSO, "Top clientes que pagaron", Calidad y cuadre) exigen reportes Y
   // cuentas (la base también lo exige)
   const { can } = usePermissions();
@@ -158,8 +161,11 @@ const Reportes = () => {
   const [tab, setTab] = useState(params.get("tab") || "ventas");
   const [periodo, setPeriodoEstado] = useState<Periodo>(esPeriodo(params.get("periodo")) ? (params.get("periodo") as Periodo) : "mes");
   const [fuente, setFuenteEstado] = useState<Fuente>((["ambas", "odoo", "profit"] as const).find((f) => f === params.get("fuente")) ?? "ambas");
-  const [desdeP, setDesdeP] = useState(iso(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
-  const [hastaP, setHastaP] = useState(iso(new Date()));
+  // Personalizado: desde/hasta también en la URL (22f), para que el enlace y la recarga conserven el período
+  const [desdeP, setDesdeP] = useState(esIso(params.get("desde")) ? params.get("desde")! : iso(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
+  const [hastaP, setHastaP] = useState(esIso(params.get("hasta")) ? params.get("hasta")! : iso(new Date()));
+  // Reportes → Cobranza: Resumen o Lo cobrado (22f, ?cobranza=cobrado)
+  const subCobranza: "resumen" | "cobrado" = params.get("cobranza") === "cobrado" ? "cobrado" : "resumen";
   const [desde, hasta] = rango(periodo, desdeP, hastaP);
   const [cargando, setCargando] = useState(true);
   const [ventas, setVentas] = useState<Record<string, FilaVenta[]>>({});
@@ -185,10 +191,25 @@ const Reportes = () => {
     setTab(t);
     if (t === "ventas") params.delete("tab"); else params.set("tab", t);
     if (t !== "inventario") ["situacion", "categoria", "rotacion"].forEach((k) => params.delete(k));
+    if (t !== "cobranza") params.delete("cobranza");
     setParams(params, { replace: true });
   };
+  const cambiarSubCobranza = (v: "resumen" | "cobrado") => enUrl("cobranza", v, "resumen");
+  // Si la URL cambia estando en la página (p. ej. un acceso de Ctrl+K), la pestaña la sigue
+  const tabUrl = params.get("tab") || "ventas";
+  useEffect(() => { if (tabUrl !== tab) setTab(tabUrl); }, [tabUrl]);   // eslint-disable-line react-hooks/exhaustive-deps
   const setDiasRot = (d: number) => enUrl("rotacion", String(d), "90");
-  const setPeriodo = (p: Periodo) => { setPeriodoEstado(p); enUrl("periodo", p, "mes"); };
+  const setPeriodo = (p: Periodo) => {
+    setPeriodoEstado(p);
+    if (p === "personalizado") { params.set("desde", desdeP); params.set("hasta", hastaP); } else { params.delete("desde"); params.delete("hasta"); }
+    enUrl("periodo", p, "mes");
+  };
+  const cambiarRango = (d: string, h: string) => {
+    setDesdeP(d); setHastaP(h);
+    if (esIso(d)) params.set("desde", d);
+    if (esIso(h)) params.set("hasta", h);
+    setParams(params, { replace: true });
+  };
   const setFuente = (f: Fuente) => { setFuenteEstado(f); enUrl("fuente", f, "ambas"); };
 
   // Carga según la pestaña (cada consulta agrega en el servidor)
@@ -196,6 +217,7 @@ const Reportes = () => {
     if (tab === "profit") { setCargando(false); return; }   // la pestaña del histórico carga lo suyo
     if (tab === "calidad" && !veDeuda) { setCargando(false); return; }   // sin permiso de Cuentas no se carga (22e)
     if (tab === "analisis" || tab === "metas" || tab === "calidad") return;   // también (e informan si están cargando)
+    if (tab === "cobranza" && subCobranza === "cobrado") { setCargando(false); return; }   // Lo cobrado carga lo suyo (22f)
     let cancelado = false;
     (async () => {
       setCargando(true);
@@ -263,7 +285,7 @@ const Reportes = () => {
     })();
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, desde, hasta, diasRot, soloLectura, seleccion, fuente, veDeuda]);
+  }, [tab, desde, hasta, diasRot, soloLectura, seleccion, fuente, veDeuda, subCobranza]);
 
   // ── Ventas ──
   const totalVentas = useMemo(() => {
@@ -387,9 +409,9 @@ const Reportes = () => {
       )}
       {periodo === "personalizado" && (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Input type="date" value={desdeP} max={hastaP} onChange={(e) => setDesdeP(e.target.value)} className="h-8 w-36 text-[13px]" aria-label="Desde" />
+          <Input type="date" value={desdeP} max={hastaP} onChange={(e) => cambiarRango(e.target.value, hastaP)} className="h-8 w-36 text-[13px]" aria-label="Desde" />
           a
-          <Input type="date" value={hastaP} min={desdeP} onChange={(e) => setHastaP(e.target.value)} className="h-8 w-36 text-[13px]" aria-label="Hasta" />
+          <Input type="date" value={hastaP} min={desdeP} onChange={(e) => cambiarRango(desdeP, e.target.value)} className="h-8 w-36 text-[13px]" aria-label="Hasta" />
         </span>
       )}
       <span className="text-xs text-muted-foreground">{desde.split("-").reverse().join("/")} – {hasta.split("-").reverse().join("/")}</span>
@@ -411,6 +433,7 @@ const Reportes = () => {
           ) : tab === "profit" || tab === "calidad" ? null : selectorPeriodo}
           acciones={cargando ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             : <span className="text-[11px] text-muted-foreground">{tab === "calidad" ? "Bandeja de trabajo · Odoo manda"
+              : tab === "cobranza" ? <>USD a la tasa BCV del día · Odoo + Profit</>
               : <>USD · neto de IVA · fuente {tab === "ventas" || tab === "analisis" ? FUENTES[fuente].replace("Solo ", "") : tab === "profit" ? "Profit (solo lectura)" : "Odoo"}</>}</span>} />
 
         <TabsContent value="ventas" className="mt-0">
@@ -558,8 +581,19 @@ const Reportes = () => {
         </TabsContent>
 
         <TabsContent value="cobranza" className="mt-0">
+          <div className="mb-2 inline-flex rounded-md border border-border bg-muted p-0.5 text-[13px]" role="tablist" aria-label="Vista de cobranza">
+            {([["resumen", "Resumen"], ["cobrado", "Lo cobrado"]] as const).map(([k, t]) => (
+              <button key={k} type="button" role="tab" aria-selected={subCobranza === k} onClick={() => cambiarSubCobranza(k)} data-testid={`cobranza-vista-${k}`}
+                className={cn("rounded-sm px-2.5 py-1 font-medium", subCobranza === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>{t}</button>
+            ))}
+          </div>
+          {subCobranza === "cobrado" ? (
+            <LoCobrado desde={desde} hasta={hasta} veDeuda={veDeuda} ambas={soloLectura} recarga={seleccion}
+              empresas={empresaActiva?.nombre_corto ?? empresas.map((e) => e.nombre_corto).join(" y ")} />
+          ) : (<>
           <KpiStrip items={[
-            { label: "Cobrado", valor: formatPrice(totalCobros.monto), detalle: textoVar(varCobros), tono: tonoVar(varCobros), titulo: "Cobros verificados (sin IGTF)" },
+            { label: "Cobrado", valor: formatPrice(totalCobros.monto), detalle: textoVar(varCobros), tono: tonoVar(varCobros),
+              titulo: "Cobros que cuentan (sin IGTF), en USD a la tasa BCV del día de cada cobro. Antes del 1-may-2026, recibos de Profit" },
             { label: "Cobros", valor: fmtN(totalCobros.cobros) },
             { label: "Clientes que pagaron", valor: fmtN(totalCobros.clientes) },
             { label: "Cobro promedio", valor: formatPrice(totalCobros.cobros ? totalCobros.monto / totalCobros.cobros : 0) },
@@ -599,6 +633,7 @@ const Reportes = () => {
           </div>
           {/* 21b (agente F2-3): DSO y mora por vendedor y por cliente. Muestra deuda por cliente: solo con el permiso de Cuentas */}
           {veDeuda && <CobranzaDso />}
+          </>)}
         </TabsContent>
 
         <TabsContent value="inventario" className="mt-0">

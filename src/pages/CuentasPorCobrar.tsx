@@ -21,6 +21,7 @@ import { urlComprobante } from "@/components/vendedor/comprobantes";
 import { AnularCobroBoton } from "@/components/cobros/AnularCobroBoton";
 import { OdooBadge } from "@/components/OdooBadge";
 import { supabase } from "@/lib/supabase";
+import { fechaDMA } from "@/lib/fechas";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { useToast } from "@/hooks/use-toast";
@@ -54,7 +55,7 @@ const TRAMOS = [
   { k: "porVencer", label: "Por vencer" }, { k: "d30", label: "1–30 días" }, { k: "d60", label: "31–60 días" },
   { k: "d90", label: "61–90 días" }, { k: "mas90", label: "+90 días" },
 ] as const;
-interface Cobro { id: string; numero: string; monto: number; monto_moneda: number; moneda: string; created_at: string; banco_id: string | null; empresa_id?: string | null; estado: string; odoo_id: number | null; es_igtf: boolean | null; cliente?: { nombre_negocio: string } | null; banco?: { nombre: string } | null; }
+interface Cobro { id: string; numero: string; monto: number; monto_moneda: number; moneda: string; created_at: string; fecha_pago: string; banco_id: string | null; empresa_id?: string | null; estado: string; odoo_id: number | null; es_igtf: boolean | null; cliente?: { nombre_negocio: string } | null; banco?: { nombre: string } | null; }
 interface PagoPendiente { id: string; numero: string; cliente_id: string; monto: number; monto_moneda: number | null; moneda: string; metodo: string; referencia: string | null; comprobante_url: string | null; banco_id: string | null; created_at: string; propuesta_estado?: string | null; registrado_por?: string | null; empresa_id?: string | null; cliente?: { nombre_negocio: string } | null; orden?: { numero: string } | null; }
 
 // Filtros propios de cada pestaña (claves distintas; se limpian al cambiar de pestaña). "empresa" vale para todas.
@@ -110,7 +111,7 @@ const CuentasPorCobrar = () => {
       supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, fecha_vencimiento, saldo_usd").eq("estado", "posted"),
       supabase.from("clientes").select("id, nombre_negocio, ciudad, empresa_id, vendedor_asignado_id, vendedor:usuarios!clientes_vendedor_asignado_id_fkey(nombre, apellido)").order("nombre_negocio"),
       supabase.from("bancos").select("id, nombre, moneda, metodo_pago, metodos").eq("activo", true).order("nombre"),
-      supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, banco_id, empresa_id, estado, odoo_id, es_igtf, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("created_at", { ascending: false }).limit(5000),
+      supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, fecha_pago, banco_id, empresa_id, estado, odoo_id, es_igtf, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("fecha_pago", { ascending: false }).order("created_at", { ascending: false }).limit(5000),
       supabase.from("pagos").select("id, numero, cliente_id, monto, monto_moneda, moneda, metodo, referencia, comprobante_url, banco_id, created_at, propuesta_estado, registrado_por, empresa_id, cliente:clientes(nombre_negocio), orden:ordenes(numero)").eq("estado", "pendiente").order("created_at", { ascending: false }),
       supabase.from("v_anticipos").select("*").order("created_at", { ascending: false }),
     ]);
@@ -216,7 +217,7 @@ const CuentasPorCobrar = () => {
     [deudores, f.firma]);
   const totalesTramo = TRAMOS.map((t) => ({ ...t, monto: deudBase.reduce((s, d) => s + d[t.k], 0) }));
   const filtrados = deudBase.filter((d) => d.nombre.toLowerCase().includes(texto));
-  const cobrosFiltrados = cobros.filter((c) => enRango(c.created_at, f.v("r_fecha")) && coincide(c.banco_id, f.v("r_banco"))
+  const cobrosFiltrados = cobros.filter((c) => enRango(c.fecha_pago, f.v("r_fecha")) && coincide(c.banco_id, f.v("r_banco"))
     && coincide(c.moneda, f.v("r_moneda")) && pasaPrueba(pruebasOrigenCobro, f.v("r_origen"), c)
     && (!empCobros || enEmpresa(c.empresa_id)) && tiene(c.numero, c.cliente?.nombre_negocio));
   const anticiposFiltrados = anticiposEmp.filter((a) => enRango(a.created_at, f.v("a_fecha")) && (!empAnt || enEmpresa(a.empresa_id))
@@ -534,7 +535,7 @@ const CuentasPorCobrar = () => {
                       <TableCell className="text-muted-foreground"><span className="block max-w-[180px] truncate" title={c.banco?.nombre || undefined}>{c.banco?.nombre || "—"}</span></TableCell>
                       <TableCell className="whitespace-nowrap text-right">{Number(c.monto_moneda).toLocaleString("es-VE")} {c.moneda}</TableCell>
                       <TableCell className="whitespace-nowrap text-right font-semibold">{formatPrice(c.monto)}</TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(c.created_at).toLocaleDateString("es-VE")}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{fechaDMA(c.fecha_pago)}</TableCell>
                       {puedeAnular && (
                         <TableCell className="whitespace-nowrap text-right">
                           <AnularCobroBoton variante={c.odoo_id ? "icono" : "boton"} onAnulado={fetchAll}

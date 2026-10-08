@@ -60,6 +60,7 @@ interface PagoDB {
   estado: string;
   notas: string | null;          // motivo del rechazo cuando el admin rechaza el pago
   created_at: string;
+  fecha_pago: string | null;
   banco_id: string | null;
   orden?: { numero: string } | null;
 }
@@ -152,8 +153,9 @@ const PortalPagos = () => {
     const [{ data: pagosData }, { data: facsData }, { data: ordsData }, { data: facOrdenes }] = await Promise.all([
       supabase
         .from("pagos")
-        .select("id, numero, monto, monto_moneda, moneda, metodo, referencia, estado, notas, created_at, banco_id, orden:ordenes(numero)")
+        .select("id, numero, monto, monto_moneda, moneda, metodo, referencia, estado, notas, created_at, fecha_pago, banco_id, orden:ordenes(numero)")
         .eq("cliente_id", cid)
+        .order("fecha_pago", { ascending: false })
         .order("created_at", { ascending: false }),
       // Facturas publicadas con saldo (positivo = por pagar; negativo = saldo a favor por notas de crédito)
       supabase
@@ -422,7 +424,7 @@ const PortalPagos = () => {
     // Método solo si hay más de uno (con uno solo no filtra nada)
     opcionesMetodo.length > 1 && { clave: "metodo", etiqueta: "Método", opciones: opcionesMetodo },
   ]);
-  const pasaFiltros = (p: PagoDB) => enRango(p.created_at, f.v("fecha")) && coincide(p.moneda || "USD", f.v("moneda")) && coincide(p.metodo, f.v("metodo"));
+  const pasaFiltros = (p: PagoDB) => enRango(p.fecha_pago ?? p.created_at, f.v("fecha")) && coincide(p.moneda || "USD", f.v("moneda")) && coincide(p.metodo, f.v("metodo"));
   // Las pestañas y la lista cuentan con los filtros; los totales de arriba no (sin filtros, lo mismo de siempre)
   const tabPendientes = pagosPendientes.filter(pasaFiltros);
   const tabVerificados = pagosVerificados.filter(pasaFiltros);
@@ -607,7 +609,7 @@ const PortalPagos = () => {
                     )}
 
                     <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground">
-                      <span>{formatDate(pago.created_at)}</span>
+                      <span>{formatDate(pago.fecha_pago ?? pago.created_at)}</span>
                       {pago.numero && <span className="font-mono">{pago.numero}</span>}
                     </div>
                   </li>

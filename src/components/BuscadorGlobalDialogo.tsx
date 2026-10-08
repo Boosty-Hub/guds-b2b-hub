@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/lib/supabase";
-import { navSections } from "@/components/layout/navegacion";
+import { navSections, accesosBuscador } from "@/components/layout/navegacion";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import type { ModuloBuscador } from "@/components/BuscadorGlobal";
 
@@ -73,7 +73,8 @@ export function BuscadorGlobalDialogo({ abierto, setAbierto, contexto = "admin",
   const modulos = useMemo(() => {
     const t = q.trim().toLowerCase();
     const todos: ModuloBuscador[] = modulosPropios
-      ?? navSections.flatMap((s) => s.items.filter((i) => i.modulo === "dashboard" || can(i.modulo, "ver")).map((i) => ({ label: i.label, path: i.path, seccion: s.title })));
+      ?? [...navSections.flatMap((s) => s.items.filter((i) => i.modulo === "dashboard" || can(i.modulo, "ver")).map((i) => ({ label: i.label, path: i.path, seccion: s.title }))),
+        ...accesosBuscador.filter((a) => a.modulos.every((m) => can(m, "ver"))).map(({ label, path, seccion }) => ({ label, path, seccion }))];
     if (!t) return [];
     return todos.filter((m) => m.label.toLowerCase().includes(t) || m.seccion.toLowerCase().includes(t)).slice(0, 5);
   }, [q, can, modulosPropios]);
