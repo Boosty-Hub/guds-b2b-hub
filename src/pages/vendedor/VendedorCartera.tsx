@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ChevronRight, CreditCard, Loader2, MessageCircle, Phone } from "lucide-react";
 import { VendedorLayout } from "@/components/vendedor/VendedorLayout";
@@ -76,6 +77,11 @@ const VendedorCartera = () => {
   const umbralRec = metricas?.alerta_recuperacion ?? 90;
   const lento = (id: string) => { const m = metricaDe.get(id); return !!m && (recuperacionAlta(m, umbralRec) || sinComprasConDeuda(m)); };
   const recCartera = useMemo(() => recuperacionGrupo([...metricaDe.values()]), [metricaDe]);
+  // 22j: notas de entrega (no fiscales) con saldo de los clientes de la cartera, solo consulta
+  const [notasNe, setNotasNe] = useState<{ cliente_id: string; saldo: number }[]>([]);
+  useEffect(() => { supabase.rpc("notas_entrega_vendedor").then(({ data }) => setNotasNe((data as { cliente_id: string; saldo: number }[]) ?? [])); }, []);
+  const neDe = useMemo(() => { const m = new Map<string, number>(); for (const n of notasNe) m.set(n.cliente_id, (m.get(n.cliente_id) ?? 0) + Number(n.saldo)); return m; }, [notasNe]);
+  const totalNe = notasNe.reduce((s, n) => s + Number(n.saldo), 0);
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get("q") || "");
   const [orden, setOrden] = useState<Orden>("prioridad");
@@ -159,6 +165,8 @@ const VendedorCartera = () => {
         { label: "Vence en 7 días", valor: formatPrice(totales.vence_7d), tono: totales.vence_7d > 0.009 ? "alerta" : "tenue",
           onClick: () => f.setVarios({ filtro: "por_vencer", tramo: "" }), activo: filtro === "por_vencer" },
         { label: "Saldo a favor", valor: formatPrice(Math.abs(totales.a_favor)), detalle: "notas de crédito", tono: "tenue" },
+        ...(totalNe > 0.009 ? [{ label: "Notas de entrega", valor: formatPrice(totalNe), detalle: `${neDe.size} clientes · no fiscales`, tono: "alerta" as const,
+          titulo: "Saldo de notas de entrega (documentos no fiscales) de tus clientes: no está en el por cobrar" }] : []),
       ]} />
       <TramosAntiguedad tramos={tramos} activo={tramo} onElegir={setTramo} className="mb-3" />
       {metricas && recCartera.deuda > 0.009 && (
@@ -215,6 +223,7 @@ const VendedorCartera = () => {
                         {c.vencido > 0.009 && <span className="font-semibold tabular-nums text-destructive">{formatPrice(c.vencido)} vencido</span>}
                         {c.por_cobrar > 0.009 && <span className="tabular-nums text-muted-foreground">de {formatPrice(c.por_cobrar)}</span>}
                         {c.cobros_pendientes > 0 && <span className="text-amber-700 dark:text-amber-300">{c.cobros_pendientes} cobro(s) por verificar</span>}
+                        {(neDe.get(c.id) ?? 0) > 0.009 && <span className="tabular-nums text-amber-800 dark:text-amber-300" data-testid="cartera-ne">N/E {formatPrice(neDe.get(c.id) ?? 0)}</span>}
                         {(() => { const m = metricaDe.get(c.id); return m && m.rec_deuda > 0.009 ? (
                           <span className={cn("inline-flex items-center gap-0.5 tabular-nums", lento(c.id) ? "font-semibold text-destructive" : "text-muted-foreground")}
                             title={formulaRecuperacion(m)}>Recuperación {textoRecuperacion(m)}<IconoTendencia t={tendenciaRecuperacion(m)} /></span>
@@ -252,6 +261,7 @@ const VendedorCartera = () => {
                         <TableCell className="whitespace-nowrap text-right tabular-nums">
                           {formatPrice(c.por_cobrar)}
                           {c.a_favor < -0.009 && <span className="block text-[11px] text-emerald-700 dark:text-emerald-400 lg:hidden">{formatPrice(Math.abs(c.a_favor))} a favor</span>}
+                          {(neDe.get(c.id) ?? 0) > 0.009 && <span className="block text-[11px] text-amber-800 dark:text-amber-300" title="Notas de entrega (no fiscales) con saldo" data-testid="cartera-ne">+ N/E {formatPrice(neDe.get(c.id) ?? 0)}</span>}
                         </TableCell>
                         {(() => { const m = metricaDe.get(c.id); return (
                           <TableCell className={cn("whitespace-nowrap text-right tabular-nums", lento(c.id) ? "font-semibold text-destructive" : "text-muted-foreground")}

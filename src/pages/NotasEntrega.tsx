@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ClipboardList, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { ClipboardList, Loader2, PackageCheck } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -16,34 +17,54 @@ import {
   contadorFiltrado, type OpcionPrueba,
 } from "@/components/datos/FiltrosLista";
 import { useEmpresa } from "@/contexts/EmpresaContext";
+import { usePermissions } from "@/contexts/PermissionsContext";
+import { EmitirNotaEntregaDialog } from "@/components/notas-entrega/EmitirNotaEntregaDialog";
 import { fmtUsd } from "@/components/estado-cuenta/formato";
 import { fechaDMA, hoyCaracas } from "@/lib/fechas";
 import { nombreArchivoExcel } from "@/lib/excel";
 import { ESTADO_NOTA, SERIE_NOTA, abierta, type NotaEntrega } from "@/components/notas-entrega/tipos";
 
-// Finanzas → Notas de entrega (22g · NE1): las notas de entrega NO fiscales, deuda interna que no está en Odoo. Solo
-// consulta por ahora (las históricas del Excel de finanzas); emitir, abonar y convertir llegan en NE2–NE3.
+// Finanzas → Notas de entrega (22g · NE1, 22j · NE2–NE3): las notas de entrega NO fiscales, deuda interna que no está en
+// Odoo. Se emiten desde un pedido de Odoo entregado y sin facturar ("Emitir nota de entrega", también con ?emitir=1 desde la
+// torre de control); en el detalle se abonan (con el cobro de Odoo), pasan a factura o se anulan. Filtros "por pasar a
+// factura" (Odoo ya facturó su pedido) y "vencidas" para la torre de control.
+
+interface AlertasNE { por_emitir: number; por_convertir: number; vencidas: number; por_convertir_ids: string[] }
 
 const NotasEntrega = () => {
   const navigate = useNavigate();
   const { empresas, empresaActiva, soloLectura } = useEmpresa();
+  const { can } = usePermissions();
+  const [params, setParams] = useSearchParams();
   const [notas, setNotas] = useState<NotaEntrega[]>([]);
+  const [alertas, setAlertas] = useState<AlertasNE | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const puedeEmitir = can("notas_entrega", "crear");
+  const emitirAbierto = params.get("emitir") === "1";
+  const setEmitir = (o: boolean) => setParams((p) => { const x = new URLSearchParams(p); if (o) x.set("emitir", "1"); else x.delete("emitir"); return x; }, { replace: true });
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const { data, error: e } = await supabase.from("v_notas_entrega").select("*").order("fecha_emision", { ascending: false }).limit(10000);
-      if (e) setError(e.message);
-      setNotas((data as NotaEntrega[]) ?? []);
-      setLoading(false);
-    })();
-  }, [empresaActiva?.id, soloLectura]);
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const [{ data, error: e }, a] = await Promise.all([
+      supabase.from("v_notas_entrega").select("*").order("fecha_emision", { ascending: false }).limit(10000),
+      supabase.rpc("alertas_notas_entrega"),
+    ]);
+    if (e) setError(e.message);
+    setNotas((data as NotaEntrega[]) ?? []);
+    setAlertas((a.data as AlertasNE) ?? null);
+    setLoading(false);
+  }, []);
+  useEffect(() => { cargar(); }, [cargar, empresaActiva?.id, soloLectura]);
+  const porConvertir = useMemo(() => new Set(alertas?.por_convertir_ids ?? []), [alertas]);
+  const hoy = hoyCaracas();
 
   const pruebasEstado: OpcionPrueba<NotaEntrega>[] = [
     { valor: "abiertas", etiqueta: "Con saldo", prueba: abierta },
+    { valor: "vencidas", etiqueta: "Con saldo · vencidas (deuda activa)", prueba: (x) => abierta(x) && x.clasificacion === "activa" && x.fecha_vencimiento < hoy },
+    { valor: "por_convertir", etiqueta: "Por pasar a factura (Odoo ya facturó su pedido)", prueba: (x) => porConvertir.has(x.id) },
+    { valor: "sin_facturar", etiqueta: "Con parte sin facturar", prueba: (x) => x.estado !== "anulada" && Number(x.sin_facturar) > 0.009 },
     { valor: "activas", etiqueta: "Con saldo · deuda activa", prueba: (x) => abierta(x) && x.clasificacion === "activa" },
     { valor: "incobrables", etiqueta: "Con saldo · incobrables", prueba: (x) => abierta(x) && x.clasificacion === "incobrable" },
     { valor: "cerradas", etiqueta: "Pagadas, facturadas o devueltas", prueba: (x) => ["pagada", "facturada", "devuelta"].includes(x.estado) },
@@ -109,7 +130,10 @@ const NotasEntrega = () => {
         { titulo: "Emisión", valor: (x: NotaEntrega) => x.fecha_emision, tipo: "fecha" as const },
         { titulo: "Total USD (sin IVA)", valor: (x: NotaEntrega) => Number(x.total_usd), tipo: "usd" as const },
         { titulo: "Abonado USD", valor: (x: NotaEntrega) => Number(x.abonado), tipo: "usd" as const },
+        { titulo: "Pasó a factura USD", valor: (x: NotaEntrega) => Number(x.facturado), tipo: "usd" as const },
         { titulo: "Saldo USD", valor: (x: NotaEntrega) => Number(x.saldo_usd), tipo: "usd" as const },
+        { titulo: "Pedido de Odoo", valor: (x: NotaEntrega) => x.pedido_odoo ?? "" },
+        { titulo: "Vence", valor: (x: NotaEntrega) => x.fecha_vencimiento, tipo: "fecha" as const },
         { titulo: "Clasificación", valor: (x: NotaEntrega) => (x.clasificacion === "incobrable" ? "Incobrable" : "Deuda activa"), ancho: 13 },
         { titulo: "Estado", valor: (x: NotaEntrega) => ESTADO_NOTA[x.estado].texto, ancho: 11 },
         { titulo: "Observación", valor: (x: NotaEntrega) => x.observacion ?? "", ancho: 50, ajustar: true },
@@ -127,10 +151,12 @@ const NotasEntrega = () => {
         { label: "Sin ficha en GUDS", valor: kpi.sinFicha.toLocaleString("es-VE"), tono: kpi.sinFicha ? "alerta" : "tenue",
           titulo: "Clientes que no existen en Odoo: se guarda solo su nombre (crear el cliente lo crearía en Odoo)" },
         { label: "Emitidas en el mes", valor: kpi.mes.toLocaleString("es-VE"), tono: "tenue" },
+        ...(alertas ? [{ label: "Pedidos por emitir", valor: alertas.por_emitir.toLocaleString("es-VE"), tono: alertas.por_emitir ? "alerta" as const : "tenue" as const,
+          titulo: "Pedidos de Odoo con el albarán validado y sin factura ni nota de entrega", onClick: puedeEmitir ? () => setEmitir(true) : undefined }] : []),
       ]} />
       <p className="-mt-1 mb-2 text-xs text-muted-foreground" data-testid="ne-aviso">
-        Documentos no fiscales: deuda interna que no está en Odoo ni en el estado de cuenta del cliente. Por ahora solo consulta:
-        las históricas se cargaron del Excel de finanzas; emitir, abonar y convertir en factura llegarán con la definición de finanzas.
+        Documentos no fiscales (sin IVA): deuda interna que no está en Odoo. Nacen de un pedido de Odoo entregado y sin facturar; los abonos se
+        enlazan al cobro de Odoo y pueden pasar a factura o quedar pagadas sin ella. Cuentan como venta por lo no facturado y, si se marca, salen en el estado de cuenta.
       </p>
 
       <BarraLista
@@ -139,7 +165,15 @@ const NotasEntrega = () => {
         placeholder="Buscar por número, cliente o vendedor..."
         filtros={<FiltrosLista filtros={f} resultados={filtradas.length} />}
         contador={loading ? undefined : contadorFiltrado(filtradas.length, notas.length, f.activos || !!search)}
-        acciones={<BotonExcel libro={libro} disabled={loading || !ordenadas.length} size="sm" className="h-8 gap-1.5" data-testid="ne-excel" />}
+        acciones={<>
+          {puedeEmitir && (
+            <Button size="sm" className="h-8 gap-1.5" onClick={() => setEmitir(true)} disabled={soloLectura}
+              title={soloLectura ? "Elige GUDS o Quirutec en el menú superior para emitir" : undefined} data-testid="ne-btn-emitir">
+              <PackageCheck className="h-4 w-4" /> Emitir nota de entrega
+            </Button>
+          )}
+          <BotonExcel libro={libro} disabled={loading || !ordenadas.length} size="sm" className="h-8 gap-1.5" data-testid="ne-excel" />
+        </>}
       />
 
       <div className="rounded-lg border border-border bg-card">
@@ -199,6 +233,9 @@ const NotasEntrega = () => {
         )}
         {!loading && !error && <DataTablePagination pagination={pagination} />}
       </div>
+      {puedeEmitir && (
+        <EmitirNotaEntregaDialog open={emitirAbierto} onOpenChange={setEmitir} onEmitida={(id) => navigate(`/admin/notas-entrega/${id}`)} />
+      )}
     </MainLayout>
   );
 };

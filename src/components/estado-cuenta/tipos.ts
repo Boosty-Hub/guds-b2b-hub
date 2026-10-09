@@ -35,7 +35,8 @@ export interface ClienteEstadoCuenta {
   estado?: string | null;
 }
 
-export type TipoDocumentoAbierto = "factura" | "nota_debito" | "nota_credito";
+/** 22j: nota_entrega = nota de entrega no fiscal (solo si se marcó "incluir notas de entrega"). */
+export type TipoDocumentoAbierto = "factura" | "nota_debito" | "nota_credito" | "nota_entrega";
 
 /** Estatus del formato de finanzas (22c): Pendiente por cobrar · Pendiente comprobante de retención · NC a favor · Saldo a favor. */
 export type EstatusDocumento = "pendiente" | "retencion" | "nc_favor" | "a_favor";
@@ -70,6 +71,10 @@ export interface ComentarioDocumento { id?: string; texto: string; fecha: string
 /** Documento con saldo (lo que se debe, o una nota de crédito a favor), con el cruce de la fase 21b. */
 export interface DocumentoAbierto {
   factura_id?: string;
+  /** 22j: id de la nota de entrega (no viaja en el enlace público). */
+  nota_entrega_id?: string;
+  /** 22j: documento no fiscal (nota de entrega): sin IVA ni número de control. */
+  no_fiscal?: boolean;
   numero: string;
   tipo: TipoDocumentoAbierto;
   /** Nº de control fiscal (de Odoo). */
@@ -117,7 +122,9 @@ export type MovimientoEstadoCuenta = Omit<Movimiento, "factura_id"> & { factura_
 export interface EstadoCuentaCompleto extends Omit<EstadoCuenta, "empresa" | "cliente" | "movimientos" | "resumen"> {
   empresa: EmpresaEstadoCuenta | null;
   cliente: ClienteEstadoCuenta;
-  resumen: EstadoCuenta["resumen"] & { notas_debito_abiertas?: number; notas_debito_saldo?: number };
+  resumen: EstadoCuenta["resumen"] & { notas_debito_abiertas?: number; notas_debito_saldo?: number; notas_entrega_abiertas?: number; notas_entrega_saldo?: number };
+  /** 22j: el estado de cuenta incluye las notas de entrega (check del detalle de la cuenta o marca del enlace). */
+  incluye_ne?: boolean;
   /** Libro de movimientos (21b): vacío cuando se pide con p_movimientos = false (22c). */
   movimientos: MovimientoEstadoCuenta[];
   /** Fecha de corte (22c): los saldos, los días y los abonos son a esta fecha. Hoy en el enlace público y el portal. */

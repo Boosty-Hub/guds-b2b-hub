@@ -167,7 +167,7 @@ export function Antiguedad({ ambas, empresas, recarga }: {
           detalle: nIncobrables ? `${nIncobrables} clientes` : undefined, titulo: "Casos con abogados o cobranza externa (gestión de cobranza). No baja el saldo",
           onClick: () => enUrl("clasif", clasif === "incobrable" ? null : "incobrable"), activo: clasif === "incobrable" },
         ...(datos?.ne && nNe > 0 ? [{ label: "Notas de entrega", valor: cargando ? "…" : fmtUsd(kpi.ne), detalle: `${nNe} · no fiscal`, tono: "tenue" as const,
-          titulo: "Deuda interna de notas de entrega no fiscales (no está en Odoo ni en el estado de cuenta del cliente)" }] : []),
+          titulo: "Deuda interna de notas de entrega no fiscales (no está en Odoo; en el estado de cuenta, solo si se marca «Incluir notas de entrega»)" }] : []),
       ]} />
       <div className="-mt-1 mb-3 space-y-0.5 text-xs text-muted-foreground" data-testid="antiguedad-notas">
         <p>Saldos al {fechaDMA(corte)}{cortePasado ? " (lo aplicado después del corte vuelve al saldo)" : ""}, los mismos del estado de cuenta. Días desde el {base === "vencimiento" ? "vencimiento" : "la emisión"}; el año es el de emisión.

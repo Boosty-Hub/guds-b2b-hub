@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { TRAMOS, condicionPagoTexto } from "@/hooks/useFinanzasPortal";
 import {
   ESTATUS, ORIGEN_TASA, anioMes, conceptoAbono, corteDe, estatusDe, fechaLarga, fechaNumerica, fmtBs, fmtTasa, fmtUsd, formatoRif,
-  leyendaTasas, origenTasaTexto, textoActualizado, tipoYNumero, totalesDocumentos,
+  leyendaNotasEntrega, leyendaTasas, origenTasaTexto, textoActualizado, tipoYNumero, totalesDocumentos,
 } from "./formato";
 import type { AbonoDocumento, DocumentoAbierto, EstadoCuentaCompleto, EstatusDocumento } from "./tipos";
 
@@ -205,6 +205,7 @@ export function EstadoCuenta({
                           <td className="whitespace-nowrap px-2 py-1.5">
                             {numero(d)}
                             {d.moneda === "VES" && <span className="ml-1 text-[10px] text-muted-foreground">Bs</span>}
+                            {d.tipo === "nota_entrega" && <MarcaNoFiscal />}
                           </td>
                           <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-muted-foreground" data-testid="ec-control">{d.nro_control ?? "—"}</td>
                           <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-muted-foreground">{fechaNumerica(d.emision)}</td>
@@ -259,7 +260,7 @@ export function EstadoCuenta({
                   <li key={k} className="px-3 py-2.5" data-testid="ec-documento-movil" data-tipo={d.tipo} data-estatus={estatusDe(d)}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm">{numero(d)}{d.moneda === "VES" && <span className="ml-1 text-[10px] text-muted-foreground">Bs</span>}</p>
+                        <p className="truncate text-sm">{numero(d)}{d.moneda === "VES" && <span className="ml-1 text-[10px] text-muted-foreground">Bs</span>}{d.tipo === "nota_entrega" && <MarcaNoFiscal />}</p>
                         <p className="truncate text-[11px] text-muted-foreground">Control {d.nro_control ?? "—"} · emitida {fechaNumerica(d.emision)}</p>
                         <p className={cn("text-[11px]", claseDias(d))}>Vence {fechaNumerica(d.vence ?? d.emision)} · {d.saldo < 0 ? `${d.dias} días` : textoDiasCorto(d)}</p>
                       </div>
@@ -297,7 +298,8 @@ export function EstadoCuenta({
           Montos en dólares (US$); las notas de crédito a favor van en negativo y los documentos en bolívares se expresan en US$ a la tasa
           de cada documento. Días transcurridos = corte − vencimiento (negativo = por vencer). Tasa de emisión: en bolívares, la del documento;
           en dólares, la BCV del día de emisión; en una nota de crédito, la de la factura que afecta.
-          {leyendaTasas(docs) && <span data-testid="ec-leyenda-tasas"> {leyendaTasas(docs)}.</span>} Toca un documento para ver sus abonos y comentarios.
+          {leyendaTasas(docs) && <span data-testid="ec-leyenda-tasas"> {leyendaTasas(docs)}.</span>}
+          {leyendaNotasEntrega(docs) && <span data-testid="ec-leyenda-ne"> {leyendaNotasEntrega(docs)}; se incluye en el saldo.</span>} Toca un documento para ver sus abonos y comentarios.
         </p>
         <p>
           «Qué falta» es una sugerencia automática (tolerancia {fmtUsd(datos.tolerancia ?? 0.05)}); los comentarios los escribe nuestro equipo.
@@ -307,6 +309,11 @@ export function EstadoCuenta({
       </footer>
     </section>
   );
+}
+
+/** Marca de documento no fiscal (nota de entrega, 22j). */
+function MarcaNoFiscal() {
+  return <span className="ml-1 rounded bg-muted px-1 py-px text-[10px] text-muted-foreground" title="Nota de entrega: documento no fiscal, sin IVA">no fiscal</span>;
 }
 
 /** Barra de antigüedad del saldo por cobrar (por vencer y tramos de vencido) con su leyenda. */

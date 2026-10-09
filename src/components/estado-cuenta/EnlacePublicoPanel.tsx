@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
   AlertDialogTitle,
@@ -30,14 +31,18 @@ export interface EnlaceEstadoCuenta {
   revocado_motivo: "revocado" | "reemplazado" | "vencido" | null;
   ultimo_acceso_at: string | null;
   accesos: number;
+  /** El enlace muestra también las notas de entrega del cliente (22j). */
+  incluir_ne?: boolean;
 }
 
 const MOTIVO: Record<string, string> = { revocado: "Revocado", reemplazado: "Reemplazado", vencido: "Vencido" };
 
 
-export function EnlacePublicoPanel({ clienteId, puedeEditar, onEnlace, recargarSenal = 0 }: {
+export function EnlacePublicoPanel({ clienteId, puedeEditar, onEnlace, recargarSenal = 0, notasEntrega = false }: {
   clienteId: string;
   puedeEditar: boolean;
+  /** 22j: el cliente tiene notas de entrega y el usuario las ve: se puede marcar que el enlace las muestre */
+  notasEntrega?: boolean;
   /** Avisa la URL del enlace activo (o null) para el pie del PDF y el correo. */
   onEnlace?: (url: string | null) => void;
   /** Cambia este número para recargar (p. ej. tras enviar un correo, que puede crear el enlace). */
@@ -104,6 +109,15 @@ export function EnlacePublicoPanel({ clienteId, puedeEditar, onEnlace, recargarS
 
   const hoy = hoyCaracas();
 
+  const marcarNe = async (v: boolean) => {
+    setTrabajando(true);
+    const { error: err } = await supabase.rpc("estado_cuenta_enlace_ne", { p_cliente_id: clienteId, p_ne: v });
+    setTrabajando(false);
+    if (err) { toast({ title: "No se pudo cambiar el enlace", description: err.message, variant: "destructive" }); return; }
+    toast({ title: v ? "El enlace muestra las notas de entrega" : "El enlace ya no muestra las notas de entrega" });
+    await cargar();
+  };
+
   return (
     <div className="rounded-lg border border-border bg-card" data-testid="ec-enlace">
       <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
@@ -144,6 +158,12 @@ export function EnlacePublicoPanel({ clienteId, puedeEditar, onEnlace, recargarS
               <dt className="text-muted-foreground">Último acceso</dt><dd className="text-right">{activo.ultimo_acceso_at ? fechaHora(activo.ultimo_acceso_at) : "Aún no se abre"}</dd>
               <dt className="text-muted-foreground">Vence</dt><dd className="text-right">{activo.vence_at ? fechaLarga(new Date(new Date(activo.vence_at).getTime() - 1).toISOString()) : "Sin vencimiento"}</dd>
             </dl>
+            {(notasEntrega || activo.incluir_ne) && (
+              <label className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-xs" data-testid="ec-enlace-ne">
+                <span>Muestra las notas de entrega <span className="text-muted-foreground">(no fiscales)</span></span>
+                <Switch checked={!!activo.incluir_ne} onCheckedChange={marcarNe} disabled={!puedeEditar || !notasEntrega || trabajando} aria-label="El enlace muestra las notas de entrega" />
+              </label>
+            )}
             {puedeEditar && (
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setConfirmar("nuevo")} disabled={trabajando} data-testid="ec-enlace-nuevo">

@@ -10,6 +10,43 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-09 · Notas de entrega completas (22j · NE2–NE3) y clasificación de todos los clientes en Odoo (22i)
+
+- **Pedido del usuario:** respondió las 9 preguntas de finanzas sobre notas de entrega: las dos empresas las emiten; descargan
+  inventario pero no son factura oficial; la mercancía sale por pedido y albarán de Odoo; se cobran por un banco de Odoo; pueden
+  terminar en factura o no; sin IVA; serie NE; incobrable por documento; check en el estado de cuenta para incluirlas.
+  Además: **las notas de entrega cuentan como venta**, **clasificar el resto de los clientes y enviarlos a Odoo**, **no tocar
+  la contabilidad de Odoo** y la consignación se queda como está (los 46 almacenes sin cliente se asignan a mano).
+- **22i · Clasificación:**
+  - Se clasificaron los 139 clientes con actividad que no tenían tipo (por nombre, RIF, lo que compran, Profit y datos de Odoo; p. ej.
+    dos operadoras con el correo de un circuito de cines van a "Cines") y se corrigieron 5 propuestas de Profit que ponían "Particular" a empresas.
+  - "Cines" (canal Otro, categoría Cadena Moderno) y "E-commerce" (Moderno, Independiente / Distribuidor) quedaron completos.
+  - Catálogo creado en Odoo (Industria, Canal y Segmento de contacto) y **394 clientes enviados y confirmados** (210 GUDS, 184 Quirutec).
+  - Ajuste del escritor (`odoo.js`, `escribir-clasificacion.js`): un cliente sin padre de tipo "factura" es el propio cliente, y un
+    rechazo ya no frena a todo su grupo (se reintenta uno por uno). Solo escribe Industria/Canal/Segmento; nada contable.
+- **22j · Notas de entrega** (migraciones `20261009_fase22j1_pedidos_entregado_facturado.sql` y `…22j2_notas_entrega.sql`):
+  - La sincronización trae de Odoo lo entregado y lo facturado por línea de pedido, el estado de facturación y la fecha del albarán.
+  - **Emitir** (Finanzas → Notas de entrega, "Emitir nota de entrega" o `?emitir=1`): se elige un pedido de Odoo entregado y sin
+    facturar (hoy 88 en GUDS por USD 39.234 y 3 en Quirutec), sus líneas y cantidades, fecha del albarán y vencimiento por los días de
+    crédito. Serie NE correlativa por empresa. GUDS no escribe nada en Odoo.
+  - **Abonos** enlazados al cobro de Odoo por el que entró el dinero: ese cobro deja de contar como saldo a favor (v_anticipos,
+    antigüedad, estado de cuenta). Sin cobro de Odoo solo con referencia (clientes sin ficha).
+  - **Pasar a factura** con sugerencia (lo que Odoo facturó de sus líneas después de emitirla); lo abonado de más vuelve a ser
+    anticipo para aplicarlo en Odoo. Descuento, devolución y ajuste. **Anular** y quitar movimientos van a la Papelera.
+  - PDF "NOTA DE ENTREGA — DOCUMENTO NO FISCAL" con firma de recibido.
+  - **Cuentan como venta** por lo no facturado (`ventas_con_iva` con el interruptor): Ventas vs deuda, promedio y días de recuperación.
+  - **Check "Incluir notas de entrega"** en el estado de cuenta del detalle de la cuenta (`?ne=1`) y de la ficha del vendedor: salen
+    como un documento más ("N/E … no fiscal"), en el PDF, el Excel y el correo; el enlace público las muestra si se marca.
+  - Torre de control: pedidos entregados sin factura ni N/E, notas por pasar a factura y vencidas. Cartera del vendedor con sus N/E.
+  - `ne_saldos` es la fuente única del saldo de una nota; la carga del Excel ya no pisa las notas trabajadas en GUDS.
+- **Verificación:**
+  - Al aplicar, partidas, anticipos, ventas y días de recuperación quedaron idénticos; con el interruptor, Quirutec suma las 2 N/E de
+    sep-2025 (USD 22.416) y su venta de 12 meses al 30-abr pasa a −0,6 % del Excel (lo que falta son N/E ya pagadas de Profit).
+  - Suites: 22j 38/38 (emitir, abonos, conversión, papelera, estado de cuenta, enlace, correo, torre, permisos) y 22d ajustada a la
+    clasificación ya enviada (45/45); las demás sin cambios.
+  - Playwright: 53/53 en GUDS, Quirutec y «Ambas» × 1440/390 (flujo completo con limpieza al final: la nota de prueba se borra y el
+    correlativo NE vuelve a cero).
+
 ## 2026-10-08 (noche) · Ventas vs deuda y días de recuperación oficiales en toda la plataforma (22h · R4)
 
 - **Pedido del usuario:** "sigue" con el plan de reportes de finanzas (R4: Ventas vs deuda y días de recuperación, D6).

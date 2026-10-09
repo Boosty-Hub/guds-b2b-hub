@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { FileQuestion, HandCoins, Archive, type LucideIcon } from "lucide-react";
+import { FileQuestion, HandCoins, Archive, ClipboardList, type LucideIcon } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FichaCampos, Panel } from "@/components/datos/FichaCampos";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -166,6 +166,24 @@ export const TIPOS_PAPELERA: Record<string, TipoPapelera> = {
     icono: Archive,
     enlace: (i) => (i.cliente_id ? { ruta: `/admin/clientes/${i.cliente_id}`, texto: "Ver cliente" } : null),
     Detalle: DetalleCuentaManual,
+  },
+  // 22j: notas de entrega anuladas y movimientos quitados de una nota (abono, paso a factura, devolución, descuento, ajuste)
+  nota_entrega: {
+    etiqueta: "Nota de entrega",
+    plural: "Notas de entrega",
+    icono: ClipboardList,
+    restaurarTexto: () => "La nota vuelve a estar vigente con su saldo (si lo de su pedido no se emitió en otra nota ni se facturó).",
+    enlace: (i) => (i.registro_id ? { ruta: `/admin/notas-entrega/${i.registro_id}`, texto: "Ver la nota de entrega" } : null),
+  },
+  movimiento_nota_entrega: {
+    etiqueta: "Movimiento de nota de entrega",
+    plural: "Movimientos de notas de entrega",
+    icono: ClipboardList,
+    restaurarTexto: () => "El movimiento vuelve a la nota (un abono, solo si su cobro de Odoo aún tiene saldo sin aplicar).",
+    enlace: (i) => {
+      const id = (i.datos as { movimiento?: { nota_id?: string } } | null)?.movimiento?.nota_id;
+      return id ? { ruta: `/admin/notas-entrega/${id}`, texto: "Ver la nota de entrega" } : null;
+    },
   },
 };
 

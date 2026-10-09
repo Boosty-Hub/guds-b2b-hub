@@ -131,8 +131,8 @@ export function VentasDeuda({ ambas, empresas, recarga }: { ambas: boolean; empr
         </Select>
         {datos?.ve_ne && (
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Switch checked={conNe} onCheckedChange={(v) => enUrl("ne", v ? null : "0")} aria-label="Incluir notas de entrega en la deuda" data-testid="vd-ne" />
-            Notas de entrega en la deuda
+            <Switch checked={conNe} onCheckedChange={(v) => enUrl("ne", v ? null : "0")} aria-label="Incluir notas de entrega en la deuda y en la venta" data-testid="vd-ne" />
+            Notas de entrega (deuda y venta)
           </label>
         )}
       </div>
@@ -153,7 +153,7 @@ export function VentasDeuda({ ambas, empresas, recarga }: { ambas: boolean; empr
       ]} />
       <div className="-mt-1 mb-3 space-y-0.5 text-xs text-muted-foreground" data-testid="vd-regla">
         <p><span className="font-semibold text-foreground">Días de recuperación</span> = deuda neta al {datos ? fechaDMA(datos.corte) : "corte"} ÷ venta promedio mensual de los últimos 12 meses (con IVA, Profit + Odoo) × 30.
-          Deuda neta = facturas y ND − NC a favor − anticipos{datos?.ne ? " + notas de entrega" : ""}. Cliente nuevo: los meses desde su primera compra. Las notas de entrega nunca cuentan como venta.</p>
+          Deuda neta = facturas y ND − NC a favor − anticipos{datos?.ne ? " + notas de entrega" : ""}. Cliente nuevo: los meses desde su primera compra. {datos?.ne ? "Las notas de entrega cuentan como venta (sin IVA) por lo que no pasó a factura." : "Sin notas de entrega: ni en la deuda ni en la venta."}</p>
         {!cargando && <p data-testid="vd-formula-total">Total: {formulaTotal(total)}.</p>}
       </div>
 

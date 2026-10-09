@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Receipt, UserPlus, Boxes, FileMinus2, ListChecks, Package, UserX, CalendarX, CalendarClock, Truck, Landmark,
-  ClipboardCheck, Gauge, CreditCard, CloudOff,
+  ClipboardCheck, Gauge, CreditCard, CloudOff, PackageCheck, FileText,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -30,7 +30,7 @@ export function usePendingActions() {
     const [
       pagosRes, registrosRes, consignacionRes, retencionesRes,
       extractoLineasRes, stockBajoRes, sinVendedorRes, vencidosRes, porVencerRes, despachosRes, porIdentificarRes, porAprobarRes,
-      cobranzaRes, errorEnvioRes,
+      cobranzaRes, errorEnvioRes, notasRes,
     ] = await Promise.all([
       supabase.from("pagos").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
       supabase.from("registros_clientes").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
@@ -50,7 +50,11 @@ export function usePendingActions() {
       // (mismo filtro que "Error al enviar a Odoo" en Órdenes)
       supabase.from("ordenes").select("id", { count: "exact", head: true }).eq("aprobacion", "aprobada").is("odoo_id", null)
         .not("odoo_envio_error", "is", null),
+      // Notas de entrega (22j): pedidos de Odoo entregados sin factura ni N/E, notas cuyo pedido ya se facturó y vencidas
+      // (0 si no hay permiso de notas de entrega)
+      supabase.rpc("alertas_notas_entrega"),
     ]);
+    const notas = (notasRes.data as { por_emitir: number; por_convertir: number; vencidas: number } | null) ?? { por_emitir: 0, por_convertir: 0, vencidas: 0 };
     // 22h (D6): días de recuperación (deuda neta ÷ venta promedio mensual de 12 meses × 30) sobre el umbral, y con deuda sin compras
     const cobranza = (cobranzaRes.data as { umbral: number; dso_alto: number; sobre_limite: number; umbral_recuperacion?: number; recuperacion_alta?: number; sin_compras?: number } | null)
       ?? { umbral: 60, dso_alto: 0, sobre_limite: 0 };
@@ -66,6 +70,9 @@ export function usePendingActions() {
       { clave: "recuperacion-alta", label: `Clientes con más de ${cobranza.umbral_recuperacion ?? 90} días de recuperación`, count: cobranza.recuperacion_alta || 0, link: "/admin/cuentas?cobranza=recuperacion_alta", icono: Gauge },
       { clave: "sin-compras", label: "Clientes con deuda y sin compras en 12 meses", count: cobranza.sin_compras || 0, link: "/admin/cuentas?cobranza=sin_compras", icono: Gauge },
       { clave: "sobre-limite", label: "Clientes sobre su límite de crédito", count: cobranza.sobre_limite || 0, link: "/admin/cuentas?situacion=excedido", icono: CreditCard },
+      { clave: "ne-por-emitir", label: "Pedidos entregados sin factura ni nota de entrega", count: notas.por_emitir || 0, link: "/admin/notas-entrega?emitir=1", icono: PackageCheck },
+      { clave: "ne-por-convertir", label: "Notas de entrega por pasar a factura", count: notas.por_convertir || 0, link: "/admin/notas-entrega?estado=por_convertir", icono: FileText },
+      { clave: "ne-vencidas", label: "Notas de entrega vencidas", count: notas.vencidas || 0, link: "/admin/notas-entrega?estado=vencidas", icono: CalendarX },
       { clave: "stock", label: "Productos con stock bajo", count: stockBajoRes.count || 0, link: "/admin/inventario", icono: Package },
       { clave: "sin-vendedor", label: "Clientes sin vendedor asignado", count: sinVendedorRes.count || 0, link: "/admin/vendedores", icono: UserX },
       { clave: "lotes-vencidos", label: "Lotes vencidos con existencia", count: vencidosRes.count || 0, link: "/admin/inventario?tab=lotes&lotes=vencidos", icono: CalendarX },

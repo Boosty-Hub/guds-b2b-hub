@@ -197,15 +197,20 @@ const r = await sql(`
         fecha_emision = excluded.fecha_emision, fecha_vencimiento = excluded.fecha_vencimiento, total_usd = excluded.total_usd,
         estado = excluded.estado, clasificacion = excluded.clasificacion, observacion = excluded.observacion, archivo = excluded.archivo,
         updated_at = now()
-    where notas_entrega.origen = 'excel';
+    -- 22j: las que ya se trabajan en GUDS (abonos, conversión, anulación) no se pisan con el Excel
+    where notas_entrega.origen = 'excel' and notas_entrega.estado <> 'anulada'
+      and not exists (select 1 from nota_entrega_movimientos g where g.nota_id = notas_entrega.id and g.origen = 'guds');
 
   delete from nota_entrega_movimientos m using notas_entrega n
-   where n.id = m.nota_id and n.empresa_id = '${empresas.Quirutec}' and n.serie = 'HIST' and m.origen = 'excel';
+   where n.id = m.nota_id and n.empresa_id = '${empresas.Quirutec}' and n.serie = 'HIST' and m.origen = 'excel'
+     and not exists (select 1 from nota_entrega_movimientos g where g.nota_id = n.id and g.origen = 'guds');
   with n as (select * from jsonb_to_recordset(${jsonbLit(filasNE.filter((x) => x.abonos.length))}) as n(empresa_id uuid, numero text, abonos jsonb))
   insert into nota_entrega_movimientos (nota_id, empresa_id, tipo, fecha, monto_usd, nota, origen)
   select e.id, e.empresa_id, 'abono', null, a.v::numeric, 'Abono restado en el Excel de finanzas (sin fecha)', 'excel'
     from n join notas_entrega e on e.empresa_id = n.empresa_id and e.serie = 'HIST' and e.numero = n.numero
-    cross join lateral jsonb_array_elements_text(n.abonos) a(v);
+    cross join lateral jsonb_array_elements_text(n.abonos) a(v)
+   where not exists (select 1 from nota_entrega_movimientos x where x.nota_id = e.id and x.origen = 'excel');
+  select public.ne_recalcular_estado(id) from notas_entrega where empresa_id = '${empresas.Quirutec}' and serie = 'HIST';
   commit;
   select (select count(*) from cobranza_gestion where origen = 'excel') marcas,
          (select count(*) from notas_entrega where serie = 'HIST') notas,

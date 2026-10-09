@@ -156,4 +156,5 @@ export const formulaTotal = (t: { deuda: number; promedio: number; dias: number 
     : `Deuda neta ${usd(t.deuda)} ÷ venta promedio mensual ${usd(t.promedio)} × 30 = ${t.dias} días`;
 export const REGLA = "Días de recuperación = deuda neta al corte ÷ venta promedio mensual de los últimos 12 meses (con IVA, Profit + Odoo) × 30. "
   + "Deuda neta = facturas y notas de débito con saldo − notas de crédito a favor − anticipos sin aplicar (+ notas de entrega con saldo, si se incluyen). "
-  + "Cliente nuevo: el promedio se divide entre los meses desde su primera compra. Las notas de entrega nunca cuentan como venta.";
+  + "Cliente nuevo: el promedio se divide entre los meses desde su primera compra. Con las notas de entrega incluidas, su parte sin facturar "
+  + "cuenta como venta (sin IVA); lo que pasa a factura cuenta en la factura.";

@@ -23,7 +23,7 @@ export function libroVentasDeuda(d: DatosLibroVentasDeuda): LibroExcel {
   const anios = [...new Set(meses.map((m) => m.slice(0, 4)))];
   const encabezado = (titulo: string, empresa?: string) => [
     titulo, `Empresas: ${empresa ?? d.empresas}`,
-    `Deuda al ${fechaDMA(datos.corte)} · venta con IVA de ${etiquetaMes(meses[0]).toLowerCase()} a ${etiquetaMes(meses[meses.length - 1]).toLowerCase()} · montos en USD${datos.ne ? " · la deuda incluye notas de entrega" : ""}`,
+    `Deuda al ${fechaDMA(datos.corte)} · venta con IVA de ${etiquetaMes(meses[0]).toLowerCase()} a ${etiquetaMes(meses[meses.length - 1]).toLowerCase()} · montos en USD${datos.ne ? " · la deuda y la venta incluyen notas de entrega" : ""}`,
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const hojas: HojaExcel<any>[] = [];
@@ -119,7 +119,7 @@ export function libroVentasDeuda(d: DatosLibroVentasDeuda): LibroExcel {
       p("Activo / inactivo", `Activo = compró en los últimos ${d.activoMeses} meses. En recuperación = debe y no compró en 12 meses.`),
       p("Recuperación lenta", `Más de ${datos.umbral} días (configurable en cobranza_recuperacion_alerta_dias). No se cuentan los clientes marcados como incobrables.`),
       p("Notas de entrega", datos.ne ? "Incluidas en la deuda (no fiscal). Nunca cuentan como venta." : "No incluidas en la deuda. Nunca cuentan como venta."),
-      p("Diferencias con el Excel de finanzas", "El Excel de Quirutec suma como venta también las notas de entrega de Profit (no fiscales), que GUDS no tiene ni cuenta como venta; el promedio de los clientes que compran con notas de entrega sale más bajo. El Excel agrupa a mano algunos clientes de Profit (hoja LISTADO); GUDS los muestra con su ficha. El Excel divide siempre entre 12; GUDS, entre los meses desde la primera compra si el cliente es nuevo."),
+      p("Diferencias con el Excel de finanzas", "El Excel de Quirutec suma como venta todas las notas de entrega de Profit (no fiscales); GUDS cuenta como venta las notas de entrega que tiene (las abiertas del Excel y las emitidas en GUDS), pero no las ya pagadas de Profit, que no están en GUDS. El Excel agrupa a mano algunos clientes de Profit (hoja LISTADO); GUDS los muestra con su ficha. El Excel divide siempre entre 12; GUDS, entre los meses desde la primera compra si el cliente es nuevo."),
       p("Empresas", d.empresas),
       p("Generado", fechaDMA(hoyCaracas())),
     ],

@@ -39,7 +39,9 @@ async function llamar(body: Record<string, unknown>, empresa: string): Promise<R
   return { error: error.message || "No se pudo contactar el servicio de correo" };
 }
 
-export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos, onEnviado }: {
+export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos, onEnviado, incluirNe = false }: {
+  /** 22j: el check "incluir notas de entrega" del estado de cuenta (van en el cuerpo, el PDF y el enlace) */
+  incluirNe?: boolean;
   open: boolean;
   onOpenChange: (o: boolean) => void;
   clienteId: string;
@@ -77,7 +79,7 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
     setError(null); setErrorDestino(null); setMensaje(""); setNuevo(""); setHtml(null);
     setAgregarAbierto(false); setCorreoNuevo(""); setNombreContacto(""); setModoCorreo("cliente"); setSugeridos(null);
     setCargando(true);
-    llamar({ modo: "vista_previa", cliente_id: clienteId }, empresa).then((r) => {
+    llamar({ modo: "vista_previa", cliente_id: clienteId, ne: incluirNe }, empresa).then((r) => {
       setCargando(false);
       if (r.error) { setError(r.error); return; }
       setDestinos((r.destinatarios ?? []).slice(0, MAX));
@@ -87,7 +89,7 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
       setAsunto(r.asunto ?? "");
       setHtml(r.html ?? null);
     });
-  }, [open, clienteId, empresa]);
+  }, [open, clienteId, empresa, incluirNe]);
 
   // Vista previa al cambiar el mensaje o el asunto (con pausa, para no pedirla por cada tecla)
   useEffect(() => {
@@ -96,7 +98,7 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
     if (clave === ultimaVista.current) return;
     const t = setTimeout(() => {
       ultimaVista.current = clave;
-      llamar({ modo: "vista_previa", cliente_id: clienteId, mensaje, asunto }, empresa).then((r) => { if (!r.error) setHtml(r.html ?? null); });
+      llamar({ modo: "vista_previa", cliente_id: clienteId, mensaje, asunto, ne: incluirNe }, empresa).then((r) => { if (!r.error) setHtml(r.html ?? null); });
     }, 700);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -140,7 +142,7 @@ export function EnviarEstadoCuentaDialog({ open, onOpenChange, clienteId, datos,
       const pdf = await pdfEstadoCuentaBase64(hoyDatos, { enlace: token ? urlEstadoCuenta(token) : null });
       // 3) Envío
       setEnviando("correo");
-      const r = await llamar({ modo: "enviar", cliente_id: clienteId, destinatarios: lista, asunto, mensaje, pdf_base64: pdf.base64 }, empresa);
+      const r = await llamar({ modo: "enviar", cliente_id: clienteId, destinatarios: lista, asunto, mensaje, pdf_base64: pdf.base64, ne: incluirNe }, empresa);
       if (r.error) throw new Error(r.error);
       toast({ title: "Estado de cuenta enviado", description: `A ${lista.join(", ")} con el PDF adjunto.` });
       onEnviado?.();

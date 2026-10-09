@@ -166,10 +166,10 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
         ['product_id', 'location_id', 'lot_id', 'quantity', 'reserved_quantity', 'in_date', 'write_date'], { empresa: cid });
       d.ordenes = await odoo.leerTodo('sale.order', [['company_id', '=', cid]],
         ['name', 'partner_id', 'state', 'delivery_status', 'date_order', 'amount_untaxed', 'amount_tax', 'amount_total',
-          'currency_id', 'ref_currency_id', 'amount_total_ref', 'user_id', 'note', 'write_date'], { empresa: cid });
+          'currency_id', 'ref_currency_id', 'amount_total_ref', 'user_id', 'note', 'invoice_status', 'effective_date', 'write_date'], { empresa: cid });
       d.lineas = await odoo.leerTodo('sale.order.line', [['company_id', '=', cid], ['display_type', '=', false]],
         ['order_id', 'product_id', 'name', 'product_uom_qty', 'discount', 'price_unit', 'price_subtotal',
-          'price_unit_ref', 'price_subtotal_ref', 'tax_id', 'write_date'], { empresa: cid });
+          'price_unit_ref', 'price_subtotal_ref', 'tax_id', 'qty_delivered', 'qty_invoiced', 'write_date'], { empresa: cid });
       d.facturas = await odoo.leerTodo('account.move',
         [['move_type', 'in', ['out_invoice', 'out_refund']], ['state', 'in', ['posted', 'cancel']], ['company_id', '=', cid]],
         ['name', 'move_type', 'state', 'invoice_date', 'invoice_date_due', 'commercial_partner_id', 'currency_id',
@@ -461,6 +461,8 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           estado: estadoOrden(o.state, o.delivery_status), estado_odoo: o.state, moneda_original: m2oNombre(o.currency_id),
           fecha_pedido: fechaOdoo(o.date_order), vendedor_odoo: m2oNombre(o.user_id),
           vendedor_id: vendedorGuds.get(m2oId(o.user_id)) ?? null, notas: stripHtml(o.note),
+          // 22j: para las notas de entrega (pedido entregado y aún sin factura)
+          estado_facturacion: o.invoice_status || null, despacho: fechaOdoo(o.effective_date),
         });
       }
       const ordenPorId = new Map(d.ordenes.map((o) => [o.id, o]));
@@ -477,6 +479,7 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
           // IVA de la línea en Odoo (el que se aplicó al vender, aunque el producto cambie después)
           impuesto_pct: round2((l.tax_id || []).map((id) => impuestoPorId.get(id)).filter((t) => t && t.amount_type === 'percent')
             .reduce((a, t) => a + (Number(t.amount) || 0), 0)),
+          entregada: Math.round((Number(l.qty_delivered) || 0) * 1000) / 1000, facturada: Math.round((Number(l.qty_invoiced) || 0) * 1000) / 1000,
         };
       });
       marcas.push(marca('ordenes', E, d.ordenes));
@@ -925,23 +928,25 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       for (const lote of lotes(ordenes, 500)) {
         await escribir(`
           insert into ordenes (odoo_id, empresa_id, numero, cliente_id, subtotal, impuesto, total, estado, estado_odoo, moneda_original,
-            fecha_pedido, created_at, vendedor_odoo, vendedor_id, notas, pagado, stock_descontado, odoo_sync_at)
+            fecha_pedido, created_at, vendedor_odoo, vendedor_id, notas, pagado, stock_descontado, odoo_sync_at, estado_facturacion, fecha_despacho)
           select x.odoo_id, x.empresa_id, x.numero, (select c.id from clientes c where c.odoo_id = x.cliente_odoo_id), x.subtotal, x.impuesto,
             x.total, x.estado::orden_estado, x.estado_odoo, x.moneda_original, x.fecha_pedido, coalesce(x.fecha_pedido, now()), x.vendedor_odoo,
-            x.vendedor_id, x.notas, false, true, '${ts}'
+            x.vendedor_id, x.notas, false, true, '${ts}', x.estado_facturacion, (x.despacho at time zone 'America/Caracas')::date
           from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, empresa_id uuid, numero text, cliente_odoo_id int, subtotal numeric,
             impuesto numeric, total numeric, estado text, estado_odoo text, moneda_original text, fecha_pedido timestamptz, vendedor_odoo text,
-            vendedor_id uuid, notas text)
+            vendedor_id uuid, notas text, estado_facturacion text, despacho timestamptz)
           on conflict (odoo_id) do update set empresa_id = excluded.empresa_id, numero = excluded.numero, cliente_id = excluded.cliente_id,
             subtotal = excluded.subtotal, impuesto = excluded.impuesto, total = excluded.total, estado = excluded.estado,
             estado_odoo = excluded.estado_odoo, moneda_original = excluded.moneda_original, fecha_pedido = excluded.fecha_pedido,
             vendedor_odoo = excluded.vendedor_odoo, vendedor_id = coalesce(excluded.vendedor_id, ordenes.vendedor_id), notas = excluded.notas,
+            estado_facturacion = excluded.estado_facturacion, fecha_despacho = excluded.fecha_despacho,
             odoo_sync_at = excluded.odoo_sync_at, updated_at = now()
           where (ordenes.empresa_id, ordenes.numero, ordenes.cliente_id, ordenes.subtotal, ordenes.impuesto, ordenes.total, ordenes.estado,
-            ordenes.estado_odoo, ordenes.moneda_original, ordenes.fecha_pedido, ordenes.vendedor_odoo, ordenes.vendedor_id, ordenes.notas)
+            ordenes.estado_odoo, ordenes.moneda_original, ordenes.fecha_pedido, ordenes.vendedor_odoo, ordenes.vendedor_id, ordenes.notas,
+            ordenes.estado_facturacion, ordenes.fecha_despacho)
           is distinct from (excluded.empresa_id, excluded.numero, excluded.cliente_id, excluded.subtotal, excluded.impuesto, excluded.total,
             excluded.estado, excluded.estado_odoo, excluded.moneda_original, excluded.fecha_pedido, excluded.vendedor_odoo,
-            coalesce(excluded.vendedor_id, ordenes.vendedor_id), excluded.notas)`);
+            coalesce(excluded.vendedor_id, ordenes.vendedor_id), excluded.notas, excluded.estado_facturacion, excluded.fecha_despacho)`);
       }
       // Órdenes borradas en Odoo (Odoo solo deja borrar borradores o canceladas): en GUDS no se borran (trazabilidad),
       // quedan canceladas con estado_odoo 'eliminada' (20u). Tope de seguridad: si faltan demasiadas, la lectura pudo quedar
@@ -962,20 +967,25 @@ export async function importarOdoo({ odoo, sql, aplicar = false, log = console.l
       for (const lote of lotes(lineas, 1000)) {
         await escribir(`
           insert into orden_items (odoo_id, empresa_id, orden_id, producto_id, nombre_producto, sku_producto, cantidad, precio_unitario, descuento, subtotal,
-            impuesto_pct, impuesto)
+            impuesto_pct, impuesto, cantidad_entregada, cantidad_facturada)
           select x.odoo_id, x.empresa_id, o.id, (select p.id from productos p where p.odoo_id = x.tmpl), x.nombre_producto, x.sku_producto,
-            x.cantidad, x.precio_unitario, x.descuento, x.subtotal, x.impuesto_pct, round(x.subtotal * x.impuesto_pct / 100.0, 2)
+            x.cantidad, x.precio_unitario, x.descuento, x.subtotal, x.impuesto_pct, round(x.subtotal * x.impuesto_pct / 100.0, 2),
+            x.entregada, x.facturada
           from jsonb_to_recordset(${jsonbLit(lote)}) as x(odoo_id int, empresa_id uuid, orden_odoo_id int, tmpl int, nombre_producto text,
-            sku_producto text, cantidad int, precio_unitario numeric, descuento numeric, subtotal numeric, impuesto_pct numeric)
+            sku_producto text, cantidad int, precio_unitario numeric, descuento numeric, subtotal numeric, impuesto_pct numeric,
+            entregada numeric, facturada numeric)
           join ordenes o on o.odoo_id = x.orden_odoo_id
           on conflict (odoo_id) do update set empresa_id = excluded.empresa_id, orden_id = excluded.orden_id, producto_id = excluded.producto_id,
             nombre_producto = excluded.nombre_producto, sku_producto = excluded.sku_producto, cantidad = excluded.cantidad,
             precio_unitario = excluded.precio_unitario, descuento = excluded.descuento, subtotal = excluded.subtotal,
-            impuesto_pct = excluded.impuesto_pct, impuesto = excluded.impuesto
+            impuesto_pct = excluded.impuesto_pct, impuesto = excluded.impuesto,
+            cantidad_entregada = excluded.cantidad_entregada, cantidad_facturada = excluded.cantidad_facturada
           where (orden_items.empresa_id, orden_items.orden_id, orden_items.producto_id, orden_items.nombre_producto, orden_items.sku_producto,
-            orden_items.cantidad, orden_items.precio_unitario, orden_items.descuento, orden_items.subtotal, orden_items.impuesto_pct, orden_items.impuesto)
+            orden_items.cantidad, orden_items.precio_unitario, orden_items.descuento, orden_items.subtotal, orden_items.impuesto_pct, orden_items.impuesto,
+            orden_items.cantidad_entregada, orden_items.cantidad_facturada)
           is distinct from (excluded.empresa_id, excluded.orden_id, excluded.producto_id, excluded.nombre_producto, excluded.sku_producto,
-            excluded.cantidad, excluded.precio_unitario, excluded.descuento, excluded.subtotal, excluded.impuesto_pct, excluded.impuesto)`);
+            excluded.cantidad, excluded.precio_unitario, excluded.descuento, excluded.subtotal, excluded.impuesto_pct, excluded.impuesto,
+            excluded.cantidad_entregada, excluded.cantidad_facturada)`);
       }
       await escribir(`
         delete from orden_items oi using ordenes o

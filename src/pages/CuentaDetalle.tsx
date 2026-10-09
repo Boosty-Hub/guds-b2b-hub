@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
+import { Checkbox } from "@/components/ui/checkbox";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -114,6 +115,10 @@ const CuentaDetalle = () => {
 
   // El estado de cuenta (misma fuente que el portal, el enlace público y la ficha del vendedor), a la fecha de corte
   const [corte, setCorte, cortePasado] = useCorteUrl();
+  // 22j: check "incluir notas de entrega" (?ne=1): salen en el mismo estado de cuenta, el PDF, el Excel y el correo
+  const [params, setParams] = useSearchParams();
+  const incluirNe = veNotasEntrega && params.get("ne") === "1";
+  const setIncluirNe = (v: boolean) => setParams((p) => { const x = new URLSearchParams(p); if (v) x.set("ne", "1"); else x.delete("ne"); return x; }, { replace: true });
   const [tab, setTab] = useState("estado");
   const [comentando, setComentando] = useState<DocumentoAbierto | null>(null);
   const [ec, setEc] = useState<EstadoCuentaCompleto | null>(null);
@@ -164,7 +169,7 @@ const CuentaDetalle = () => {
     let activo = true;
     setEcCargando(true);
     rpcConReintento(() => supabase.rpc("estado_cuenta_cliente", {
-      p_cliente_id: clienteId, p_movimientos: false, p_corte: cortePasado ? corte : null,
+      p_cliente_id: clienteId, p_movimientos: false, p_corte: cortePasado ? corte : null, p_ne: incluirNe,
     })).then(({ data, error }) => {
       if (!activo) return;
       // Si falla un cambio de corte se conserva lo que ya estaba en pantalla (con el aviso y "Reintentar")
@@ -172,7 +177,7 @@ const CuentaDetalle = () => {
       setEcCargando(false);
     });
     return () => { activo = false; };
-  }, [clienteId, corte, cortePasado, ecIntento]);
+  }, [clienteId, corte, cortePasado, ecIntento, incluirNe]);
 
   // Notas de entrega no fiscales del cliente (22g · NE1)
   useEffect(() => {
@@ -235,8 +240,10 @@ const CuentaDetalle = () => {
 
   const iniciales = cliente.nombre_negocio.split(" ").map((w) => w[0]).join("").slice(0, 2);
   const r = ec?.resumen;
-  // Mismo número que la lista de Cuentas: facturas y notas de débito con saldo menos notas de crédito a favor (al corte)
+  // Mismo número que la lista de Cuentas: facturas y notas de débito con saldo menos notas de crédito a favor (al corte);
+  // con el check, también las notas de entrega (22j)
   const saldoDeudor = r ? r.saldo - r.nc_a_favor : facturas.reduce((s, f) => s + Number(f.saldo_usd || 0), 0);
+  const conNe = !!ec?.incluye_ne;
   const tabActivos = [reintegros.length > 0, retenciones.length > 0];
   // Deuda interna = saldo deudor del estado de cuenta + notas de entrega con saldo (no fiscal)
   const saldoNe = notasNe.filter(abierta).reduce((s, n) => s + Number(n.saldo_usd), 0);
@@ -258,8 +265,8 @@ const CuentaDetalle = () => {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="sm:text-right">
             <p className={`text-lg font-semibold tabular-nums ${saldoDeudor > 0.009 ? "text-destructive" : ""}`} data-testid="cd-saldo">{fmtUsd(saldoDeudor)}</p>
-            <p className="text-sm text-muted-foreground">Saldo deudor{cortePasado ? ` al ${fechaNumerica(corte)}` : ""}</p>
-            {saldoNe > 0.009 && (
+            <p className="text-sm text-muted-foreground">Saldo deudor{conNe ? " con notas de entrega" : ""}{cortePasado ? ` al ${fechaNumerica(corte)}` : ""}</p>
+            {saldoNe > 0.009 && !conNe && (
               <p className="text-xs text-muted-foreground" data-testid="cd-deuda-interna" title="Saldo deudor + notas de entrega no fiscales con saldo (hoy)">
                 Deuda interna con notas de entrega: <span className="font-semibold text-foreground">{fmtUsd(saldoDeudor + saldoNe)}</span>
               </p>
@@ -307,9 +314,17 @@ const CuentaDetalle = () => {
             </div>
           ) : (
             <EstadoCuenta datos={ec} modo="admin" cargando={ecCargando} sinEmpresa={false}
-              enlaceDocumento={(d) => (d.factura_id ? `/admin/facturas/${d.factura_id}` : null)}
+              enlaceDocumento={(d) => (d.factura_id ? `/admin/facturas/${d.factura_id}` : d.nota_entrega_id ? `/admin/notas-entrega/${d.nota_entrega_id}` : null)}
               onComentar={(d) => setComentando(d)}
-              acciones={<SelectorCorte valor={corte} onCambio={setCorte} />}
+              acciones={<>
+                {veNotasEntrega && (saldoNe > 0.009 || incluirNe) && (
+                  <label className="flex items-center gap-1.5 text-xs" data-testid="ec-incluir-ne">
+                    <Checkbox checked={incluirNe} onCheckedChange={(v) => setIncluirNe(v === true)} aria-label="Incluir notas de entrega en el estado de cuenta" />
+                    Incluir notas de entrega
+                  </label>
+                )}
+                <SelectorCorte valor={corte} onCambio={setCorte} />
+              </>}
               testId="cd-estado-cuenta" />
           )}
         </TabsContent>
@@ -510,7 +525,7 @@ const CuentaDetalle = () => {
           <TabsContent value="no-fiscal" className="mt-2">
             <div className="rounded-lg border border-border bg-card" data-testid="cd-no-fiscal">
               <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
-                Notas de entrega no fiscales: deuda interna que no está en Odoo ni en el estado de cuenta del cliente.
+                Notas de entrega no fiscales: deuda interna que no está en Odoo. Salen en el estado de cuenta si se marca «Incluir notas de entrega».
                 Saldo: <span className="font-semibold text-foreground">{fmtUsd(saldoNe)}</span>
               </p>
               <Table>
@@ -544,7 +559,7 @@ const CuentaDetalle = () => {
         <div className="space-y-3 min-w-0">
           <GestionCobranzaPanel clienteId={cliente.id} puedeEditar={puedeEditar && !soloLectura}
             documentos={(ec?.abiertos ?? []).map((x) => ({ factura_id: x.factura_id ?? null, numero: x.numero, tipo: x.tipo, saldo: Number(x.saldo) }))} />
-          <EnlacePublicoPanel clienteId={cliente.id} puedeEditar={puedeEditar} onEnlace={alEnlace} recargarSenal={senal} />
+          <EnlacePublicoPanel clienteId={cliente.id} puedeEditar={puedeEditar} onEnlace={alEnlace} recargarSenal={senal} notasEntrega={veNotasEntrega && saldoNe > 0.009} />
           <div className="rounded-lg border border-border bg-card" data-testid="ec-envios">
             <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
               <div className="flex items-center gap-2">
@@ -579,7 +594,7 @@ const CuentaDetalle = () => {
         </div>
       </div>
 
-      <EnviarEstadoCuentaDialog open={correoAbierto} onOpenChange={setCorreoAbierto} clienteId={cliente.id} datos={ec} onEnviado={alEnviar} />
+      <EnviarEstadoCuentaDialog open={correoAbierto} onOpenChange={setCorreoAbierto} clienteId={cliente.id} datos={ec} onEnviado={alEnviar} incluirNe={conNe} />
       <ComentariosFacturaDialog facturaId={comentando?.factura_id ?? null} numero={comentando?.numero} open={!!comentando}
         onOpenChange={(o) => { if (!o) setComentando(null); }} puedeEditar={puedeEditar} onCambio={() => setEcIntento((n) => n + 1)} />
     </MainLayout>

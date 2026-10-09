@@ -4,7 +4,7 @@ import logoGuds from "@/assets/guds-logo.png";
 import { TRAMOS, condicionPagoTexto } from "@/hooks/useFinanzasPortal";
 import {
   ESTATUS, ORIGEN_TASA, anioMes, colorEmpresa, conceptoAbono, corteDe, direccionTexto, estatusDe, fechaHora, fechaLarga, fechaNumerica, fmtBs,
-  fmtTasa, fmtUsd, formatoRif, leyendaTasas, nombreArchivoEstadoCuenta, tipoYNumero, totalesDocumentos,
+  fmtTasa, fmtUsd, formatoRif, leyendaNotasEntrega, leyendaTasas, nombreArchivoEstadoCuenta, tipoYNumero, totalesDocumentos,
 } from "./formato";
 import type { EmpresaEstadoCuenta, EstadoCuentaCompleto } from "./tipos";
 
@@ -43,14 +43,15 @@ const TRAMO_COLOR: Record<string, RGB> = {
   por_vencer: [14, 165, 233], d1_30: [251, 191, 36], d31_60: [249, 115, 22], d61_90: [239, 68, 68], mas_90: [153, 27, 27],
 };
 
-const hexARgb = (hex: string): RGB => {
+export const hexARgb = (hex: string): RGB => {
   const n = parseInt(hex.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 };
-const mezclar = (c: RGB, con: RGB, t: number): RGB => c.map((v, i) => Math.round(v + (con[i] - v) * t)) as RGB;
+export const mezclar = (c: RGB, con: RGB, t: number): RGB => c.map((v, i) => Math.round(v + (con[i] - v) * t)) as RGB;
 
 // ── Letra (se descarga una vez por sesión) ──
-const FUENTES = [
+// Exportados para el PDF de la nota de entrega (22j): misma letra y mismo logo
+export const FUENTES = [
   { archivo: "plus-jakarta-sans-pdf-400-v1.ttf", familia: "PJS", estilo: "normal" },
   { archivo: "plus-jakarta-sans-pdf-700-v1.ttf", familia: "PJS", estilo: "bold" },
   { archivo: "plus-jakarta-sans-pdf-600-v1.ttf", familia: "PJSS", estilo: "normal" },
@@ -64,7 +65,7 @@ const aBase64 = (buf: ArrayBuffer) => {
   return btoa(bin);
 };
 
-const cargarFuentes = () => {
+export const cargarFuentes = () => {
   fuentesCache ??= Promise.all(FUENTES.map(async (f) => {
     const r = await fetch(`/fonts/pdf/${f.archivo}`);
     if (!r.ok) throw new Error("No se pudo cargar la letra del PDF");
@@ -98,7 +99,7 @@ const lienzo = (img: HTMLImageElement, px: number, color?: string) => {
   return c.toDataURL("image/png");
 };
 
-async function logoDe(e: EmpresaEstadoCuenta | null): Promise<string | null> {
+export async function logoDe(e: EmpresaEstadoCuenta | null): Promise<string | null> {
   try {
     if (e?.logo_url) return lienzo(await cargarImagen(e.logo_url, true), 320);
     if (!e || (e.prefijo ?? e.nombre_corto ?? "").toUpperCase() === "GUDS") return lienzo(await cargarImagen(logoGuds), 320, colorEmpresa(e));
@@ -381,6 +382,7 @@ export async function generarPdfEstadoCuenta(datos: EstadoCuentaCompleto, opcion
     "Días transcurridos = fecha de corte − vencimiento (negativo = por vencer). Tasa de emisión: en bolívares, la del documento; en dólares, la BCV del día de emisión (o la última publicada antes); en una nota de crédito, la de la factura que afecta."
       + (leyendaTasas(docsPdf) ? ` ${leyendaTasas(docsPdf)}.` : ""),
     "Refleja lo registrado a la fecha de corte; los pagos declarados quedan pendientes hasta su verificación. «Qué falta» es una sugerencia automática según la base, el IVA y lo abonado; los comentarios los escribe nuestro equipo.",
+    ...(leyendaNotasEntrega(docsPdf) ? [`${leyendaNotasEntrega(docsPdf)}; se incluye en el saldo.`] : []),
   ];
   asegurar(notas.length * 3.6 + 3);
   letra(6.9, "normal", TENUE);

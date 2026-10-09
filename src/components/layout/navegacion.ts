@@ -121,4 +121,5 @@ export const accesosBuscador: AccesoBuscador[] = [
   { label: "Ventas vs deuda (días de recuperación)", path: "/admin/reportes?tab=cobranza&cobranza=ventas-deuda", seccion: "Reportes · Cobranza", modulos: ["reportes", "cuentas"] },
   { label: "Cobranza (resumen)", path: "/admin/reportes?tab=cobranza", seccion: "Reportes", modulos: ["reportes"] },
   { label: "Calidad y cuadre", path: "/admin/reportes?tab=calidad", seccion: "Reportes", modulos: ["reportes", "cuentas"] },
+  { label: "Emitir nota de entrega (desde un pedido de Odoo)", path: "/admin/notas-entrega?emitir=1", seccion: "Finanzas · Notas de entrega", modulos: ["notas_entrega"] },
 ];

@@ -15,7 +15,7 @@ export interface DatosCorreo {
   };
   resumen: {
     saldo: number; vencido: number; por_vencer: number; a_favor: number; neto: number; facturas_vencidas: number; facturas_abiertas: number;
-    d1_30?: number; d31_60?: number; d61_90?: number; mas_90?: number; notas_debito_saldo?: number; notas_debito_abiertas?: number;
+    d1_30?: number; d31_60?: number; d61_90?: number; mas_90?: number; notas_debito_saldo?: number; notas_debito_abiertas?: number; notas_entrega_saldo?: number;
   };
   documentos?: DocumentoCorreo[];
   url: string;
@@ -30,7 +30,7 @@ export interface DocumentoCorreo {
   nro_control?: string | null; emision?: string | null; tasa?: number | null; base?: number | null; iva?: number | null; estatus?: string | null;
 }
 
-const TIPO_CORTO: Record<string, string> = { factura: "FACT", nota_credito: "NC", nota_debito: "ND" };
+const TIPO_CORTO: Record<string, string> = { factura: "FACT", nota_credito: "NC", nota_debito: "ND", nota_entrega: "N/E" };
 const ESTATUS: Record<string, string> = {
   pendiente: "Pendiente por cobrar", retencion: "Pendiente comprobante de retención", nc_favor: "NC a favor", a_favor: "Saldo a favor",
 };
@@ -83,6 +83,8 @@ export function armarCorreo(d: DatosCorreo) {
     ["Por vencer", fmtUsd(r.por_vencer), undefined],
     ["A favor (notas de crédito y anticipos)", fmtUsd(-Number(r.a_favor || 0)), Number(r.a_favor) > 0.004 ? "#047857" : undefined],
     ...(Number(r.notas_debito_saldo) > 0.004 ? [["Notas de débito (incluidas en el saldo)", fmtUsd(r.notas_debito_saldo), "#6b7280", true] as Fila] : []),
+    // 22j: con el check del estado de cuenta, las notas de entrega (no fiscales) van incluidas en el saldo
+    ...(Number(r.notas_entrega_saldo) > 0.004 ? [["Notas de entrega, no fiscales (incluidas en el saldo)", fmtUsd(r.notas_entrega_saldo), "#6b7280", true] as Fila] : []),
   ];
   const docs = d.documentos ?? [];
   const docsVisibles = docs.slice(0, MAX_DOCS);

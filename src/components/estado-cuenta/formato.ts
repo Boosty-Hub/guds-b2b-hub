@@ -41,6 +41,7 @@ export const TIPO_DOCUMENTO: Record<TipoDocumentoAbierto, string> = {
   factura: "Factura",
   nota_debito: "Nota de débito",
   nota_credito: "Nota de crédito",
+  nota_entrega: "Nota de entrega",
 };
 
 /** "Vencida hace 12 días" / "Vence hoy" / "Vence en 5 días" / "A favor". */
@@ -98,6 +99,10 @@ export const conceptoAbono = (a: { tipo: string; clase?: string | null; metodo?:
     case "aplicada": return a.documento_tipo === "nota_debito" ? "Aplicada a la nota de débito" : "Aplicada a la factura";
     case "retencion": return a.clase === "iva" ? "Retención de IVA" : a.clase === "municipal" ? "Retención municipal" : "Retención";
     case "reintegro": return "Reintegro";
+    // 22j: movimientos de una nota de entrega
+    case "facturada": return "Pasó a factura";
+    case "devolucion": return "Devolución";
+    case "descuento": return "Descuento";
     default: return "Ajuste";
   }
 };
@@ -109,7 +114,11 @@ export const columnaAbono = (tipo: string): "pagos" | "nc" | "retenciones" | "ot
 // ── Formato de finanzas (22c): las columnas del Excel "FORMATO EDC" del equipo, comunes a la pantalla, el PDF y el Excel ──
 
 /** FACT · NC · ND, como en el Excel del equipo. */
-export const TIPO_CORTO: Record<TipoDocumentoAbierto, string> = { factura: "FACT", nota_credito: "NC", nota_debito: "ND" };
+export const TIPO_CORTO: Record<TipoDocumentoAbierto, string> = { factura: "FACT", nota_credito: "NC", nota_debito: "ND", nota_entrega: "N/E" };
+
+/** Leyenda cuando el estado de cuenta incluye notas de entrega (22j), o null. */
+export const leyendaNotasEntrega = (docs: Pick<DocumentoAbierto, "tipo">[]): string | null =>
+  docs.some((d) => d.tipo === "nota_entrega") ? "N/E = nota de entrega: documento no fiscal, sin IVA ni número de control" : null;
 
 /** "FACT 10256", "NC 1023", "ND 1297". */
 export const tipoYNumero = (d: Pick<DocumentoAbierto, "tipo" | "numero">) => `${TIPO_CORTO[d.tipo] ?? ""} ${d.numero}`.trim();

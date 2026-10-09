@@ -22,7 +22,7 @@ GS = GUDS).
 | D1 | Cobros en Bs a USD con la **tasa BCV del día del cobro** | ✅ decidido |
 | D2 | Antigüedad con **selector emisión / vencimiento; arranca en vencimiento** | ✅ decidido |
 | D3 | La **fuente de verdad de los cobros es Odoo**. Lo que no esté en Odoo (cobros de Profit ene–abr 2026) se carga desde el Excel, marcado como origen Profit | ✅ decidido |
-| D4 | Notas de entrega no fiscales: **módulo propio**, que permita crear nuevas. Se diseña ahora y se confirma con finanzas | 🟡 diseño abajo, preguntas abiertas |
+| D4 | Notas de entrega no fiscales: **módulo propio**. Respuestas del 9-oct: nacen de un pedido de Odoo entregado y sin facturar, sin IVA, serie NE, abonos por banco de Odoo, pueden terminar en factura o no, **cuentan como venta** y van en el estado de cuenta con un check | ✅ decidido 9-oct (fase 22j) |
 | D5 | Clasificación de clientes: **opción A**. La de finanzas es la oficial y se guarda en Odoo (Industria, Canal y Segmento de contacto); GUDS la edita y la escribe por la cola, en modo prueba → activo | ✅ decidido 8-oct (fase 22d) |
 | D6 | **Días de recuperación con la fórmula del equipo**, con la **explicación visible** de cómo se calcula | ✅ decidido |
 | D7 | **Un solo estado de cuenta**, con el formato de finanzas. El detalle de la cuenta, el enlace público, el PDF, el Excel, el portal, la ficha del vendedor y el correo muestran el mismo. Facturas, NC, Pagos y Retenciones quedan como listas de consulta | ✅ decidido 8-oct (fase 22c) |
@@ -443,7 +443,19 @@ Por eso `clientes.tipo_cliente`, `canal` y `segmento` están vacíos en GUDS: la
   - columna N/E en Cuentas y en la cartera del vendedor;
   - alertas en la torre de control.
 
-### Preguntas para finanzas (con propuesta)
+### Respuestas de finanzas (9-oct, del dueño)
+
+1. Las dos empresas emiten notas de entrega.
+2. La N/E descarga inventario, pero no es una factura oficial en Odoo → nace del pedido de Odoo con su albarán validado.
+3. La mercancía sale por pedido y albarán en Odoo (sin factura). Investigado: es el pedido confirmado con el albarán validado
+   y sin factura (`invoice_status = to invoice`); el 9-oct había 88 en GUDS (USD 39.234) y 3 en Quirutec.
+4. El dinero entra por un banco de Odoo → el abono se enlaza a ese cobro (anticipo en Odoo).
+5. Puede terminar en factura o no → "pagada" sin factura o "facturada" (total o en parte).
+6. Sin IVA. 7. Serie NE. 8. Incobrable por documento.
+9. Check en el estado de cuenta para incluir las notas de entrega (salen en el mismo).
+- Además: las notas de entrega **cuentan como venta**; **no se toca la contabilidad de Odoo** ni se escribe la N/E en Odoo.
+
+### Preguntas que se hicieron a finanzas (con propuesta, 8-oct)
 
 1. ¿Se siguen emitiendo N/E y en qué empresas? → un módulo para las dos, activable por empresa; empezar por Quirutec.
 2. ¿La N/E acompaña mercancía en tránsito? **Validar con el asesor fiscal**: si funciona como guía de despacho podría
@@ -463,8 +475,8 @@ Por eso `clientes.tipo_cliente`, `canal` y `segmento` están vacíos en GUDS: la
 | Fase | Contenido |
 |---|---|
 | NE1 | Tablas, carga de las 29, lista y detalle de solo lectura, bloque "no fiscal" en la antigüedad y en la deuda interna (lo que necesita R3) — ✅ 22g: Finanzas → Notas de entrega; 29 HIST (USD 44.004,91), 5 clientes con ficha; pestaña "No fiscal" en la cuenta |
-| NE2 | Emitir, PDF, abonos y anular |
-| NE3 | Conversión con sugerencias, enlace con pedidos de Odoo, alertas y cartera del vendedor |
+| NE2 | Emitir, PDF, abonos y anular — ✅ 22j: desde el pedido de Odoo, abonos enlazados al cobro de Odoo, PDF no fiscal, anular y quitar a la Papelera |
+| NE3 | Conversión con sugerencias, enlace con pedidos de Odoo, alertas y cartera del vendedor — ✅ 22j: sugerencia por lo que Odoo facturó del pedido, torre de control, cartera del vendedor, check en el estado de cuenta y N/E como venta |
 
 ---
 
@@ -487,12 +499,17 @@ Por eso `clientes.tipo_cliente`, `canal` y `segmento` están vacíos en GUDS: la
 | R2 | Lo cobrado + carga de cobros de Profit ene–abr | R0 |
 | R3 | T5, T6, Antigüedad y NE1 (+ T1 si ya se decidió D5) — ✅ 22g | R0, NE1 |
 | R4 | Ventas vs deuda y días de recuperación nuevos, con su explicación — ✅ 22h | R3 |
-| NE2–NE3 | Emitir, abonos y conversión de N/E | respuestas de finanzas |
+| NE2–NE3 | Emitir, abonos y conversión de N/E — ✅ 22j | respuestas de finanzas (9-oct) |
 
 Cada fase se cierra con el cuadre contra el Excel del equipo (es la "respuesta correcta"), conteos de UI contra SQL y
 Playwright a 1440 y 390 px en GUDS, Quirutec y «Ambas».
 
 ## Hallazgos para revisar
+
+> 9-oct (22i y 22j): **notas de entrega completas** y **clasificación de los 394 clientes con actividad enviada a Odoo**. Queda: el
+> histórico de notas de entrega YA PAGADAS de Profit no está en GUDS (el informe de ventas de Profit cargado no las trae): para que la
+> venta de Quirutec cuadre con su Excel (hoy −0,6 % a 12 meses al 30-abr) hace falta un reporte de Profit con las notas de entrega.
+> La venta de los reportes generales (Reportes → Ventas) sigue siendo la fiscal (Odoo + Profit), sin notas de entrega.
 
 > 8-oct (noche, 22h): **Ventas vs deuda** hecha (ver §4). Para decidir con finanzas: el Excel de Quirutec cuenta como venta las
 > notas de entrega de Profit; el plan (D4) dice que nunca son venta y GUDS solo tiene las 29 abiertas, así que los clientes que

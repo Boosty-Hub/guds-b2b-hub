@@ -126,8 +126,9 @@ Deno.serve(async (req) => {
   if (errUsuario || !usuario?.user) return responder(401, { error: "Tu sesión venció: vuelve a iniciar sesión" });
 
   // Permiso, datos del correo y (al enviar) el enlace público, con el JWT del usuario
+  // 22j: con el check del estado de cuenta, las notas de entrega van en el correo y el enlace queda marcado para mostrarlas
   const { data: d, error: errDatos } = await comoUsuario.rpc("datos_correo_estado_cuenta", {
-    p_cliente_id: clienteId, p_asegurar_enlace: modo === "enviar",
+    p_cliente_id: clienteId, p_asegurar_enlace: modo === "enviar", p_ne: body?.ne === true,
   });
   if (errDatos || !d) {
     return responder(errDatos?.code === "42501" ? 403 : 400, { error: errDatos?.message ?? "No se pudo preparar el correo" });

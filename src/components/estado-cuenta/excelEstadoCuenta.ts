@@ -1,7 +1,7 @@
 import { nombreArchivoExcel, type LibroExcel } from "@/lib/excel";
 import { TRAMOS } from "@/hooks/useFinanzasPortal";
 import {
-  ESTATUS, anioMes, conceptoAbono, corteDe, estatusDe, fechaNumerica, formatoRif, origenTasaTexto, textoActualizado, tipoYNumero,
+  ESTATUS, anioMes, conceptoAbono, corteDe, estatusDe, fechaNumerica, formatoRif, leyendaNotasEntrega, origenTasaTexto, textoActualizado, tipoYNumero,
 } from "./formato";
 import type { AbonoDocumento, DocumentoAbierto, EstadoCuentaCompleto } from "./tipos";
 
@@ -60,6 +60,7 @@ export function libroEstadoCuenta(datos: EstadoCuentaCompleto): LibroExcel {
           "Días transcurridos = fecha de corte − fecha de vencimiento (negativo = por vencer).",
           "Tasa de emisión: en los documentos en bolívares, la del documento; en los documentos en dólares, la tasa BCV del día de emisión (o la última publicada antes); en las notas de crédito, la de la factura que afectan. La columna «Origen de la tasa» dice de dónde sale cada una (las tomadas de Profit son de días sin tasa BCV en Odoo).",
           "«Qué falta» es una sugerencia automática según la base, el IVA y lo abonado; los comentarios los escribe nuestro equipo.",
+          ...(leyendaNotasEntrega(docs) ? [`${leyendaNotasEntrega(docs)}; se incluye en el saldo.`] : []),
         ],
       },
       {
@@ -84,7 +85,8 @@ export function libroEstadoCuenta(datos: EstadoCuentaCompleto): LibroExcel {
         encabezado,
         autofiltro: false,
         filas: [
-          ["Saldo por cobrar (facturas y notas de débito)", r.saldo],
+          [Number(r.notas_entrega_saldo ?? 0) > 0.004 ? "Saldo por cobrar (facturas, notas de débito y notas de entrega)" : "Saldo por cobrar (facturas y notas de débito)", r.saldo],
+          ...(Number(r.notas_entrega_saldo ?? 0) > 0.004 ? [["  de ello, notas de entrega (no fiscales)", Number(r.notas_entrega_saldo)] as [string, number]] : []),
           ["  Por vencer", r.por_vencer],
           ...TRAMOS.filter((t) => t.k !== "por_vencer").map((t) => [`  Vencido ${t.etiqueta.toLowerCase()}`, Number(r[t.k])] as [string, number]),
           ["Vencido (total)", r.vencido],

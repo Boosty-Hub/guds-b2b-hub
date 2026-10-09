@@ -23,6 +23,7 @@ const authLibre = (await sql(`select a.id from auth.users a where not exists (se
 const lit = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
 async function como({ uid = admin, empresa = guds.id, previo = '' }, cuerpo) {
+  previo = `${typeof PREP_PROPUESTAS === 'string' ? PREP_PROPUESTAS : ''}${previo}`;
   const claims = JSON.stringify({ sub: uid, role: 'authenticated' });
   const headers = JSON.stringify(empresa ? { 'x-empresa-id': empresa } : {});
   const q = `do $bloque$
@@ -64,8 +65,13 @@ const tPartG = await tipo(guds.id, 'Particular');
 const tPartQ = await tipo(qrt.id, 'Particular');
 const tCines = await tipo(guds.id, 'Cines');
 const propG = (await sql(`select cc.cliente_id from clasificacion_clientes cc join clientes c on c.id = cc.cliente_id
-  where cc.empresa_id = '${guds.id}' and cc.estado = 'propuesta' and cc.tipo_id is not null and c.odoo_id is not null
+  where cc.empresa_id = '${guds.id}' and cc.tipo_id is not null and c.odoo_id is not null and cc.origen in ('excel', 'profit')
     and not exists (select 1 from clasificacion_tipos t where t.id = cc.tipo_id and t.por_confirmar) order by c.nombre_negocio limit 30`)).map((x) => x.cliente_id);
+// Desde el 9-oct (22i) los clientes con actividad ya están clasificados en Odoo: en cada bloque (se deshace) estos 30 vuelven a
+// "propuesta" y sin valores de Odoo, como estaban al cargar la propuesta
+const PREP_PROPUESTAS = `update public.clasificacion_clientes set estado = 'propuesta', revisado_at = null, revisado_por = null, escritura_id = null,
+    envio_estado = null where cliente_id = any (array[${propG.map((x) => `'${x}'`).join(',')}]::uuid[]);
+  update public.clientes set tipo_cliente = null, canal = null, segmento = null where id = any (array[${propG.map((x) => `'${x}'`).join(',')}]::uuid[]);`;
 // Un tipo de GUDS distinto del que propone el Excel para propG[0] (para probar la asignación manual)
 const tOtroG = (await sql(`select t.id from clasificacion_tipos t where t.empresa_id = '${guds.id}' and t.activo and not t.por_confirmar
   and t.id is distinct from (select tipo_id from clasificacion_clientes where cliente_id = '${propG[0]}') order by t.orden limit 1`))[0].id;
@@ -81,9 +87,9 @@ await caso('Cola: odoo_escrituras acepta el tipo clasificacion (y conserva los a
 const modoClasif = (await sql(`select valor from configuracion where clave = 'odoo_escritura_clasificacion'`))[0]?.valor;
 casos.push({ ok: ['simular', 'activo'].includes(modoClasif) ? '✓' : '✗',
   caso: 'Modo de escritura de la clasificación: "simular" (prueba) o "activo" (autorizado el 8-oct)', resultado: modoClasif });
-await caso('Catálogo sembrado: 18 tipos en GUDS (2 por confirmar) y 12 en Quirutec', (r) => r.g === 18 && r.q === 12 && r.pc === 2,
+await caso('Catálogo: 18 tipos en GUDS y 12 en Quirutec; solo los "por confirmar" van sin categoría', (r) => r.g === 18 && r.q === 12 && r.pc_mal === 0,
   como({ empresa: 'todas' }, j(`select count(*) filter (where empresa_id = '${guds.id}') g, count(*) filter (where empresa_id = '${qrt.id}') q,
-    count(*) filter (where por_confirmar) pc from clasificacion_tipos`)));
+    count(*) filter (where (categoria_cobranza is null) <> por_confirmar) pc_mal from clasificacion_tipos`)));
 
 // ── 2. Lectura por empresa y permisos ──
 await caso('Lista en GUDS: solo clientes de GUDS', (r) => r.n > 200 && r.otras === 0,
@@ -146,7 +152,9 @@ await caso('Reenviar lo que está en curso: no duplica (motivo en_curso)', (r) =
 if (cliCines) {
   await caso('Tipo "por confirmar" (Cines): no se envía a Odoo', (r) => r.omitidos.tipo_por_confirmar === 1,
     pasos(guds.id, `perform public.confirmar_clasificacion(${arr([cliCines])});
-      return (select public.enviar_clasificacion_odoo(${arr([cliCines])}))::text;`));
+      return (select public.enviar_clasificacion_odoo(${arr([cliCines])}))::text;`,
+      `update public.clasificacion_tipos set por_confirmar = true where id = '${tCines}';
+       update public.clientes set tipo_cliente = null, canal = null, segmento = null where id = '${cliCines}';`));
 }
 await caso('Catálogo: no se duplica un tipo (sin distinguir tildes/mayúsculas)', 'Ya existe',
   como({ empresa: guds.id }, j(`select public.guardar_clasificacion_tipo(null, 'PARTICULAR ', null, 'Otro', 'Resto') id`)));
@@ -203,7 +211,13 @@ if (!SIN_ODOO) {
   // En la prueba se toma la propuesta como si finanzas ya la hubiera confirmado (solo en memoria; la base no cambia)
   const sqlPrueba = async (q) => {
     const r = await sql(q);
-    if (/from clientes c join empresas e on e\.id = c\.empresa_id/.test(q)) for (const x of r) if (x.tipo_id) x.estado = 'asignada';
+    if (/from clientes c join empresas e on e\.id = c\.empresa_id/.test(q)) {
+      for (const x of r) if (x.tipo_id) x.estado = 'asignada';
+      // Desde el 9-oct la muestra ya está clasificada en Odoo: se rota el tipo entre los 3 (todos del catálogo) para que cambie
+      const t = r.filter((x) => x.tipo_id), campos = ['tipo_id', 'tipo', 'canal', 'categoria_cobranza', 'activo', 'por_confirmar'];
+      const copia = t.map((x) => Object.fromEntries(campos.map((k) => [k, x[k]])));
+      t.forEach((x, i) => Object.assign(x, copia[(i + 1) % t.length]));
+    }
     if (/^\s*(update|insert|delete)/i.test(q)) throw new Error('PRUEBA: el escritor no debe cambiar la base en modo prueba');
     return r;
   };
