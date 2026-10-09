@@ -1,8 +1,9 @@
 // Piezas comunes de las pestañas de Reportes (Ventas, Análisis, Histórico Profit)
 
-// Colores por fuente (paleta validada para daltonismo en claro y oscuro): Odoo rojo, Profit azul
-const COLOR_FUENTE = { odoo: ["#e34948", "#e66767"], profit: ["#2a78d6", "#3987e5"] } as const;
-export const colorFuente = (f: "odoo" | "profit") => {
+// Colores por fuente (paleta validada para daltonismo en claro y oscuro): Odoo rojo, Profit azul, notas de entrega ámbar
+// (mucho más claro que el rojo, para que se distingan también sin ver el tono)
+const COLOR_FUENTE = { odoo: ["#e34948", "#e66767"], profit: ["#2a78d6", "#3987e5"], ne: ["#d9a20b", "#e8b73d"] } as const;
+export const colorFuente = (f: "odoo" | "profit" | "ne") => {
   const oscuro = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
   return COLOR_FUENTE[f][oscuro ? 1 : 0];
 };
@@ -16,6 +17,19 @@ export function InsigniaProfit({ className }: { className?: string }) {
     </span>
   );
 }
+
+/** Insignia de los números que incluyen notas de entrega (22k: cuentan como venta, aparte de la venta fiscal) */
+export function InsigniaNE({ className }: { className?: string }) {
+  return (
+    <span title="Incluye notas de entrega (no fiscales, sin IVA): lo que no pasó a factura" data-testid="insignia-ne"
+      className={`inline-flex h-4 shrink-0 items-center gap-1 rounded border border-border px-1 text-[10px] font-medium leading-none text-muted-foreground ${className ?? ""}`}>
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: colorFuente("ne") }} aria-hidden />N/E
+    </span>
+  );
+}
+
+/** Texto de cómo cuentan las notas de entrega en la venta (Reportes → Ventas, Análisis y Metas) */
+export const TEXTO_NE_VENTA = "Notas de entrega: cuentan como venta por lo que no pasó a factura al cierre del período (sin IVA); lo que pasó a factura cuenta en su factura.";
 
 // ── Períodos de comparación (misma regla que periodo_comparacion() en la base, migración 20q) ──
 const isoFecha = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

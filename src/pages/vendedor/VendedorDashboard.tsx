@@ -107,8 +107,9 @@ const VendedorDashboard = () => {
             <KpiStrip items={[
               { label: "Por cobrar", valor: formatPrice(r.cartera.por_cobrar), detalle: r.cartera.vencido > 0.009 ? `${formatPrice(r.cartera.vencido)} vencido` : "nada vencido",
                 tono: r.cartera.vencido > 0.009 ? "negativo" : "normal", onClick: () => navigate("/vendedor/cartera") },
-              { label: `Ventas de ${mesDe(r)}`, valor: formatPrice(venta), detalle: `${r.ventas_mes.facturas} facturas · neto de IVA`, tono: "positivo", onClick: () => navigate("/vendedor/metas"),
-                titulo: "Facturado a tus clientes en el mes (neto de IVA y de notas de crédito)" },
+              { label: `Ventas de ${mesDe(r)}`, valor: formatPrice(venta), tono: "positivo", onClick: () => navigate("/vendedor/metas"),
+                detalle: Number(r.ventas_mes.notas_entrega ?? 0) > 0.004 ? `${r.ventas_mes.facturas} facturas · ${formatPrice(Number(r.ventas_mes.notas_entrega))} en notas de entrega` : `${r.ventas_mes.facturas} facturas · neto de IVA`,
+                titulo: "Facturado a tus clientes en el mes (neto de IVA y de notas de crédito), más lo que no pasó a factura de sus notas de entrega" },
               { label: "Pedidos en curso", valor: r.pedidos.abiertos, detalle: r.pedidos.por_aprobar ? `${r.pedidos.por_aprobar} por aprobar` : undefined, onClick: () => navigate("/vendedor/pedidos?filtro=abiertos") },
               { label: "Cobros por verificar", valor: r.cobros.pendientes_n, detalle: formatPrice(r.cobros.pendientes_monto), tono: r.cobros.pendientes_n ? "alerta" : "normal",
                 onClick: () => navigate("/vendedor/pagos?estado=pendiente") },

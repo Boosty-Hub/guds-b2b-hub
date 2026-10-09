@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, Fi
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { Panel } from "@/components/datos/FichaCampos";
 import { exportarCSV } from "@/components/datos/tabla";
-import { InsigniaProfit, TEXTO_COMPARACION, Variacion, desplazamientoMeses, fechaCorta, periodoComparacion, variacionPct, type Comparacion } from "@/components/reportes/comun";
+import { InsigniaNE, InsigniaProfit, TEXTO_COMPARACION, TEXTO_NE_VENTA, Variacion, desplazamientoMeses, fechaCorta, periodoComparacion, variacionPct, type Comparacion } from "@/components/reportes/comun";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -19,9 +19,9 @@ import { useToast } from "@/hooks/use-toast";
 // ── Motor reporte_ventas_cubo (migración 20j): agrupa por hasta 4 niveles con subtotales y, opcionalmente, una columna ──
 export type FuenteCubo = "ambas" | "odoo" | "profit";
 type Dim = "empresa" | "anio" | "mes" | "anio_mes" | "vendedor" | "cliente" | "tipo_cliente" | "canal" | "segmento"
-  | "categoria" | "linea" | "sublinea" | "marca" | "producto" | "categoria_profit" | "linea_profit" | "sublinea_profit";
+  | "categoria" | "linea" | "sublinea" | "marca" | "producto" | "categoria_profit" | "linea_profit" | "sublinea_profit" | "fuente";
 type Columna = "" | "anio" | "mes" | "anio_mes" | "empresa";
-type Medida = "venta" | "unidades" | "precio" | "margen_pct" | "margen_usd" | "costo" | "documentos" | "clientes" | "nc" | "financieras" | "participacion";
+type Medida = "venta" | "unidades" | "precio" | "margen_pct" | "margen_usd" | "costo" | "documentos" | "clientes" | "nc" | "financieras" | "ne" | "participacion";
 
 interface FilaCubo {
   nivel: number; k1: string | null; k2: string | null; k3: string | null; k4: string | null; col: string | null;
@@ -31,6 +31,8 @@ interface FilaCubo {
   precio_promedio: number | null; financieras_usd: number | null; profit_usd: number | null;
   costo_usd: number | null; venta_con_costo_usd: number | null; margen_usd: number | null; margen_pct: number | null; cobertura_costo_pct: number | null;
   fuente: "odoo" | "profit" | "ambas"; ve_costo: boolean;
+  /** 22k: parte de notas de entrega (ya incluida en venta_usd) */
+  ne_usd: number | null;
 }
 interface Nodo { id: string; nivel: number; clave: string; etiqueta: string; detalle: string | null; fila: FilaCubo; celdas: Map<string, FilaCubo>; hijos: Nodo[] }
 interface ValorFiltro { k: string; e: string }
@@ -53,6 +55,7 @@ const DIMS: Record<Dim, { titulo: string; tiempo?: boolean; profit?: boolean; mi
   linea_profit: { titulo: "Línea Profit", profit: true },
   sublinea_profit: { titulo: "Sub-línea Profit", profit: true },
   empresa: { titulo: "Empresa" },
+  fuente: { titulo: "Origen" },   // 22k: Facturas de Odoo, Profit (histórico) o Notas de entrega
   anio: { titulo: "Año", tiempo: true },
   mes: { titulo: "Mes", tiempo: true },
   anio_mes: { titulo: "Año-mes", tiempo: true },
@@ -61,16 +64,17 @@ const LISTA_DIMS = Object.keys(DIMS) as Dim[];
 const COLUMNAS: [Columna, string][] = [["", "Sin columnas"], ["mes", "Mes"], ["anio", "Año"], ["anio_mes", "Año-mes"], ["empresa", "Empresa"]];
 
 const MEDIDAS: Record<Medida, { titulo: string; costo?: boolean; conteo?: boolean; ayuda?: string }> = {
-  venta: { titulo: "Venta neta", ayuda: "Facturas − notas de crédito y devoluciones, en USD sin IVA" },
+  venta: { titulo: "Venta neta", ayuda: "Facturas − notas de crédito y devoluciones, en USD sin IVA (con notas de entrega: también lo que no pasó a factura)" },
   unidades: { titulo: "Unidades" },
   precio: { titulo: "Precio prom.", ayuda: "Precio promedio ponderado: venta neta ÷ unidades" },
   margen_pct: { titulo: "Margen %", costo: true, ayuda: "(Venta con costo − costo) ÷ venta con costo. * = parte de la venta sin costo" },
   margen_usd: { titulo: "Utilidad bruta", costo: true, ayuda: "Venta con costo − costo" },
   costo: { titulo: "Costo", costo: true, ayuda: "Odoo: costo promedio actual · Profit: último costo del Excel" },
   documentos: { titulo: "Facturas", conteo: true },
-  clientes: { titulo: "Clientes", conteo: true, ayuda: "Clientes con factura" },
+  clientes: { titulo: "Clientes", conteo: true, ayuda: "Clientes con factura o nota de entrega" },
   nc: { titulo: "NC y devol.", ayuda: "Notas de crédito de Odoo y devoluciones de Profit (ya restadas en la venta)" },
   financieras: { titulo: "NC financieras", ayuda: "Notas financieras de Profit (descuentos, ajustes): aparte, no restan en la venta neta" },
+  ne: { titulo: "N/E", ayuda: "Notas de entrega: lo que no pasó a factura al cierre del período, sin IVA (ya incluido en la venta neta)" },
   participacion: { titulo: "% del total" },
 };
 const LISTA_MEDIDAS = Object.keys(MEDIDAS) as Medida[];
@@ -187,7 +191,7 @@ function construirArbol(filas: FilaCubo[]) {
   return { raiz, total, columnas: cols, cantidad: nodos.size };
 }
 
-export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: string; hasta: string; fuente: FuenteCubo; onCargando?: (v: boolean) => void }) {
+export function AnalisisVentas({ desde, hasta, fuente, ne = false, onCargando }: { desde: string; hasta: string; fuente: FuenteCubo; ne?: boolean; onCargando?: (v: boolean) => void }) {
   const { formatPrice } = useCurrency();
   const { soloLectura, seleccion } = useEmpresa();
   const { toast } = useToast();
@@ -220,7 +224,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
   const medidas = (matriz ? [config.matriz] : config.medidas).filter((m) => veCosto || !MEDIDAS[m].costo);
   const conteos = medidas.some((m) => MEDIDAS[m].conteo);
   const filtrosRpc = useMemo(() => Object.fromEntries(Object.entries(filtros).filter(([, v]) => v && v.length).map(([d, v]) => [d, v!.map((x) => x.k)])), [filtros]);
-  const claveConsulta = JSON.stringify([desde, hasta, fuente, niveles, columna, filtrosRpc, conteos, soloLectura, seleccion]);
+  const claveConsulta = JSON.stringify([desde, hasta, fuente, ne, niveles, columna, filtrosRpc, conteos, soloLectura, seleccion]);
 
   // Consulta
   useEffect(() => {
@@ -228,7 +232,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
     (async () => {
       setCargando(true); onCargando?.(true); setError(null);
       try {
-        const r = await consultarCubo({ p_desde: desde, p_hasta: hasta, p_niveles: niveles, p_fuente: fuente, p_filtros: filtrosRpc, p_columna: columna || null, p_conteos: conteos });
+        const r = await consultarCubo({ p_desde: desde, p_hasta: hasta, p_niveles: niveles, p_fuente: fuente, p_filtros: filtrosRpc, p_columna: columna || null, p_conteos: conteos, p_ne: ne });
         if (cancelado) return;
         setFilas(r.filas); setVeCosto(r.veCosto);
       } catch (e) {
@@ -243,14 +247,14 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
   }, [claveConsulta]);
 
   // Consulta del período comparado (mismos niveles y filtros; solo la venta): las filas se alinean por clave
-  const claveComp = JSON.stringify([comparar, cDesde, cHasta, fuente, niveles, filtrosRpc, soloLectura, seleccion]);
+  const claveComp = JSON.stringify([comparar, cDesde, cHasta, fuente, ne, niveles, filtrosRpc, soloLectura, seleccion]);
   useEffect(() => {
     if (!comparar) { setComparadas(null); return; }
     let cancelado = false;
     (async () => {
       setCargandoComp(true);
       try {
-        const r = await consultarCubo({ p_desde: cDesde, p_hasta: cHasta, p_niveles: niveles, p_fuente: fuente, p_filtros: filtrosRpc, p_columna: null, p_conteos: false });
+        const r = await consultarCubo({ p_desde: cDesde, p_hasta: cHasta, p_niveles: niveles, p_fuente: fuente, p_filtros: filtrosRpc, p_columna: null, p_conteos: false, p_ne: ne });
         if (cancelado) return;
         const meses = desplazamientoMeses(desde, hasta, comparar);
         const m = new Map<string, FilaCubo>();
@@ -276,6 +280,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
   const comparada = (n: Nodo | null | undefined) => (n && comparadas ? comparadas.get(n.nivel === 0 ? ID_TOTAL : n.id) : undefined);
   const compTotal = total ? comparada(total) : undefined;
   const compConProfit = !!compTotal && compTotal.fuente !== "odoo" && Math.abs(num(compTotal.profit_usd) ?? 0) > 0.004;
+  const compConNe = !!compTotal && Math.abs(num(compTotal.ne_usd) ?? 0) > 0.004;
 
   // Orden de cada nivel: tiempo por clave; el resto por la medida elegida (o el total de la fila en la matriz), de mayor a menor
   const valor = (f: FilaCubo | undefined, m: Medida): number | null => {
@@ -291,6 +296,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
       case "clientes": return num(f.clientes);
       case "nc": return num(f.nc_usd);
       case "financieras": return num(f.financieras_usd);
+      case "ne": return num(f.ne_usd);
       case "participacion": { const t = num(total?.fila.venta_usd); return t ? (num(f.venta_usd) ?? 0) / t * 100 : null; }
     }
   };
@@ -341,7 +347,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
   };
 
   // ── Celdas ──
-  const dinero = new Set<Medida>(["venta", "margen_usd", "costo", "nc", "financieras", "precio"]);
+  const dinero = new Set<Medida>(["venta", "margen_usd", "costo", "nc", "financieras", "ne", "precio"]);
   const celda = (f: FilaCubo | undefined, m: Medida): ReactNode => {
     if (!f) return <span className="text-muted-foreground/60">—</span>;
     if (m === "margen_pct") {
@@ -366,12 +372,18 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
   const t = total?.fila;
   const conProfit = !!t && t.fuente !== "odoo" && Math.abs(num(t.profit_usd) ?? 0) > 0.004;
   const insigniaPorFila = !!t && t.fuente === "ambas";
+  // 22k: notas de entrega en el total; la insignia por fila solo si el total mezcla N/E con facturas
+  const totalNe = num(t?.ne_usd) ?? 0;
+  const conNe = Math.abs(totalNe) > 0.004;
+  const insigniaNePorFila = conNe && Math.abs((num(t?.venta_usd) ?? 0) - totalNe) > 0.004;
   const kpis = t ? [
-    { label: "Venta neta", valor: formatPrice(num(t.venta_usd) ?? 0), detalle: conProfit ? <span className="inline-flex items-center gap-1"><InsigniaProfit />{formatPrice(num(t.profit_usd) ?? 0)} de Profit</span> : undefined, titulo: MEDIDAS.venta.ayuda },
+    { label: "Venta neta", valor: formatPrice(num(t.venta_usd) ?? 0),
+      detalle: conProfit || conNe ? <span className="inline-flex flex-wrap items-center gap-1">{conProfit && <><InsigniaProfit />{formatPrice(num(t.profit_usd) ?? 0)} de Profit</>}{conNe && <><InsigniaNE />{formatPrice(totalNe)} de N/E</>}</span> : undefined,
+      titulo: MEDIDAS.venta.ayuda },
     ...(comparar && comparadas ? [{
       label: comparar === "anterior" ? "Vs período anterior" : "Vs año anterior",
       valor: <Variacion soloPct actual={num(t.venta_usd) ?? 0} previo={num(compTotal?.venta_usd) ?? 0} formato={formatPrice} />,
-      detalle: <span className="inline-flex items-center gap-1">{compConProfit && <InsigniaProfit />}{formatPrice(num(compTotal?.venta_usd) ?? 0)} · {fechaCorta(cDesde)} – {fechaCorta(cHasta)}</span>,
+      detalle: <span className="inline-flex items-center gap-1">{compConProfit && <InsigniaProfit />}{compConNe && <InsigniaNE />}{formatPrice(num(compTotal?.venta_usd) ?? 0)} · {fechaCorta(cDesde)} – {fechaCorta(cHasta)}</span>,
       titulo: `${TEXTO_COMPARACION[comparar]}: ${fechaCorta(cDesde)} – ${fechaCorta(cHasta)}. Variación: ${formatPrice((num(t.venta_usd) ?? 0) - (num(compTotal?.venta_usd) ?? 0))}`,
     }] : []),
     { label: "Unidades", valor: fmtN(num(t.unidades)) },
@@ -418,6 +430,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
         { titulo: "Variación %", valor: (x: (typeof filasCsv)[number]) => { const v = variacionPct(num(x.nodo.fila.venta_usd) ?? 0, num(comparada(x.nodo)?.venta_usd) ?? 0); return v === null ? null : Math.round(v * 100) / 100; } },
       ] : []),
       { titulo: "Incluye Profit", valor: (x) => (x.nodo.fila.fuente === "odoo" ? "No" : "Sí") },
+      ...(ne ? [{ titulo: "Notas de entrega (USD)", valor: (x: (typeof filasCsv)[number]) => r2(num(x.nodo.fila.ne_usd) ?? 0) }] : []),
     ];
     exportarCSV(`analisis-${niveles.join("-")}${columna ? `-x-${columna}` : ""}${comparar ? `-vs-${comparar}` : ""}_${desde}_${hasta}`, filasCsv, cols);
   };
@@ -437,8 +450,8 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
     try {
       for (const [i, [a, b]] of tramos.entries()) {
         setExportando(`${i + 1}/${tramos.length}`);
-        let r = await supabase.rpc("reporte_ventas_lineas", { p_desde: a, p_hasta: b, p_fuente: fuente, p_filtros: filtrosRpc });
-        if (r.error && r.error.code === "57014") r = await supabase.rpc("reporte_ventas_lineas", { p_desde: a, p_hasta: b, p_fuente: fuente, p_filtros: filtrosRpc });
+        let r = await supabase.rpc("reporte_ventas_lineas", { p_desde: a, p_hasta: b, p_fuente: fuente, p_filtros: filtrosRpc, p_ne: ne });
+        if (r.error && r.error.code === "57014") r = await supabase.rpc("reporte_ventas_lineas", { p_desde: a, p_hasta: b, p_fuente: fuente, p_filtros: filtrosRpc, p_ne: ne });
         if (r.error) throw r.error;
         lineas.push(...((r.data ?? []) as Record<string, unknown>[]));
       }
@@ -566,7 +579,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
               </button>
             </span>
           ))}
-          <NuevoFiltro desde={desde} hasta={hasta} fuente={fuente} filtros={filtros} formatPrice={formatPrice}
+          <NuevoFiltro desde={desde} hasta={hasta} fuente={fuente} ne={ne} filtros={filtros} formatPrice={formatPrice}
             onAplicar={(d, v) => { const f = { ...filtros }; if (v.length) f[d] = v; else delete f[d]; cambiar({ filtros: f }, false); setAbiertos(EN_BLANCO); }} />
           {chipsFiltro.length > 0 && (
             <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => cambiar({ filtros: {} }, false)}>Quitar filtros</Button>
@@ -580,6 +593,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
         titulo={<span className="flex min-w-0 flex-wrap items-center gap-x-2">
           <span className="truncate">{niveles.map((d) => DIMS[d].titulo).join(" › ")}{matriz ? ` × ${COLUMNAS.find(([k]) => k === columna)?.[1]}` : ""}</span>
           {conProfit && <InsigniaProfit />}
+          {conNe && <InsigniaNE />}
           <span className="font-normal text-muted-foreground">· {cantidad.toLocaleString("es-VE")} filas</span>
         </span>}
         acciones={<>
@@ -619,7 +633,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
                   {comparar && (
                     <>
                       <TableHead className="whitespace-nowrap border-l border-border text-right" title={`Venta neta ${TEXTO_COMPARACION[comparar].toLowerCase()}: ${fechaCorta(cDesde)} – ${fechaCorta(cHasta)}`}>
-                        <span className="inline-flex items-center gap-1">{comparar === "anterior" ? "Venta anterior" : "Venta año ant."}{compConProfit && <InsigniaProfit />}</span>
+                        <span className="inline-flex items-center gap-1">{comparar === "anterior" ? "Venta anterior" : "Venta año ant."}{compConProfit && <InsigniaProfit />}{compConNe && <InsigniaNE />}</span>
                       </TableHead>
                       <TableHead className="whitespace-nowrap text-right" title="Venta neta actual − comparada (USD y %)">Variación</TableHead>
                     </>
@@ -642,6 +656,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
                           <span className="truncate" title={n.detalle ? `${n.etiqueta} · ${n.detalle}` : n.etiqueta}>{n.etiqueta}</span>
                           {n.detalle && <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground xl:inline">{n.detalle}</span>}
                           {insigniaPorFila && n.fila.fuente !== "odoo" && <InsigniaProfit />}
+                          {insigniaNePorFila && Math.abs(num(n.fila.ne_usd) ?? 0) > 0.004 && <InsigniaNE />}
                         </span>
                       </TableCell>
                       {matriz ? (
@@ -659,7 +674,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
                 <TableFooter className="sticky bottom-0 z-10 bg-muted">
                   <TableRow>
                     <TableCell className="sticky left-0 z-[1] bg-muted py-1 font-semibold">
-                      <span className="flex items-center gap-1.5">Total general{conProfit && <InsigniaProfit />}</span>
+                      <span className="flex items-center gap-1.5">Total general{conProfit && <InsigniaProfit />}{conNe && <InsigniaNE />}</span>
                     </TableCell>
                     {matriz ? (
                       <>
@@ -679,6 +694,7 @@ export function AnalisisVentas({ desde, hasta, fuente, onCargando }: { desde: st
                 </Button>
               )}
               <span>Venta neta en USD sin IVA: facturas − NC y devoluciones; sin saldos iniciales, ND ni facturas anuladas por completo.</span>
+              {ne && <span data-testid="analisis-nota-ne">{TEXTO_NE_VENTA} El nivel «Origen» las separa de las facturas.</span>}
               {veCosto && medidas.includes("margen_pct") && <span>Margen sobre las líneas con costo (Odoo: costo promedio actual; Profit: último costo). * = parte de la venta sin costo.</span>}
               {niveles.some((d) => DIMS[d].mixta) && <span>Marca, tipo de cliente, canal y categoría de cobranza: los de Odoo (marca del producto; Industria, Canal y Segmento del contacto, donde vive la clasificación de finanzas) y, si Odoo no los tiene, los de Profit.</span>}
               {niveles.some((d) => DIMS[d].profit) && <span>La clasificación de Profit (como en el Excel) solo existe en las ventas de Profit.</span>}
@@ -708,8 +724,8 @@ function CeldasComparacion({ actual, previa, listo, formatPrice, negrita }: { ac
 }
 
 /** Botón "Agregar filtro": elige la dimensión y sus valores (con la venta de cada uno en el período y los demás filtros) */
-function NuevoFiltro({ desde, hasta, fuente, filtros, onAplicar, formatPrice }: {
-  desde: string; hasta: string; fuente: FuenteCubo; filtros: Filtros; formatPrice: (v: number) => string;
+function NuevoFiltro({ desde, hasta, fuente, ne, filtros, onAplicar, formatPrice }: {
+  desde: string; hasta: string; fuente: FuenteCubo; ne: boolean; filtros: Filtros; formatPrice: (v: number) => string;
   onAplicar: (d: Dim, valores: ValorFiltro[]) => void;
 }) {
   const [abierto, setAbierto] = useState(false);
@@ -726,7 +742,7 @@ function NuevoFiltro({ desde, hasta, fuente, filtros, onAplicar, formatPrice }: 
     const otros = Object.fromEntries(Object.entries(filtros).filter(([d, v]) => d !== dim && v?.length).map(([d, v]) => [d, v!.map((x) => x.k)]));
     const id = ++pedido.current;
     setCargando(true);
-    consultarCubo({ p_desde: desde, p_hasta: hasta, p_niveles: [dim], p_fuente: fuente, p_filtros: otros, p_columna: null, p_conteos: false })
+    consultarCubo({ p_desde: desde, p_hasta: hasta, p_niveles: [dim], p_fuente: fuente, p_filtros: otros, p_columna: null, p_conteos: false, p_ne: ne })
       .then(({ filas }) => filas.filter((f) => f.nivel === 1).map((f) => ({ k: f.k1 ?? "", e: f.etiqueta ?? "—", d: f.detalle, venta: Number(f.venta_usd ?? 0) })))
       .catch(() => [] as { k: string; e: string; d: string | null; venta: number }[])
       .then((lista) => {

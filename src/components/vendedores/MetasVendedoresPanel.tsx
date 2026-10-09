@@ -16,7 +16,8 @@ import { useToast } from "@/hooks/use-toast";
 // La meta se guarda en la empresa activa (guardar_meta_vendedor); la venta real tiene la misma definición que el portal del
 // vendedor (resumen_vendedor): documentos de venta netos de IVA de sus clientes en el mes, en las empresas visibles.
 
-interface FilaMeta { id: string; nombre: string; email: string; activo: boolean; clientes: number; meta: number; meta_empresa: number | null; venta: number; facturas: number }
+// 22k: ne = notas de entrega (lo no facturado) de sus clientes, ya incluidas en venta (solo con permiso de verlas)
+interface FilaMeta { id: string; nombre: string; email: string; activo: boolean; clientes: number; meta: number; meta_empresa: number | null; venta: number; facturas: number; ne: number }
 
 const mesActual = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" }).slice(0, 7);
 const moverMes = (m: string, d: number) => { const [a, n] = m.split("-").map(Number); const x = new Date(a, n - 1 + d, 1); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`; };
@@ -41,7 +42,7 @@ export function MetasVendedoresPanel({ pestanas }: { pestanas: ReactNode }) {
     else {
       setError(null);
       setFilas(((data as { vendedores: FilaMeta[] } | null)?.vendedores ?? []).map((f) => ({
-        ...f, meta: Number(f.meta), venta: Number(f.venta), meta_empresa: f.meta_empresa == null ? null : Number(f.meta_empresa),
+        ...f, meta: Number(f.meta), venta: Number(f.venta), ne: Number(f.ne ?? 0), meta_empresa: f.meta_empresa == null ? null : Number(f.meta_empresa),
       })));
     }
     setCambios({});
@@ -51,7 +52,7 @@ export function MetasVendedoresPanel({ pestanas }: { pestanas: ReactNode }) {
 
   const texto = q.trim().toLowerCase();
   const visibles = filas.filter((f) => !texto || f.nombre.toLowerCase().includes(texto) || f.email.toLowerCase().includes(texto));
-  const totales = useMemo(() => ({ meta: filas.reduce((s, f) => s + f.meta, 0), venta: filas.reduce((s, f) => s + f.venta, 0) }), [filas]);
+  const totales = useMemo(() => ({ meta: filas.reduce((s, f) => s + f.meta, 0), venta: filas.reduce((s, f) => s + f.venta, 0), ne: filas.reduce((s, f) => s + f.ne, 0) }), [filas]);
   const pendientes = Object.entries(cambios).filter(([id, v]) => {
     const f = filas.find((x) => x.id === id);
     const n = v.trim() === "" ? 0 : Number(v.replace(",", "."));
@@ -95,7 +96,8 @@ export function MetasVendedoresPanel({ pestanas }: { pestanas: ReactNode }) {
 
       <KpiStrip items={[
         { label: `Meta de ${nombreMes}`, valor: formatPrice(totales.meta), tono: "primario" },
-        { label: "Venta real", valor: formatPrice(totales.venta), detalle: "neto de IVA · como el portal del vendedor", tono: "positivo" },
+        { label: "Venta real", valor: formatPrice(totales.venta), tono: "positivo",
+          detalle: totales.ne > 0.004 ? `neto de IVA · incluye ${formatPrice(totales.ne)} de notas de entrega` : "neto de IVA · como el portal del vendedor" },
         { label: "Avance", valor: totales.meta > 0 ? `${avanceTotal}%` : "—", tono: avanceTotal >= 100 ? "positivo" : "normal" },
       ]} />
 
@@ -137,7 +139,7 @@ export function MetasVendedoresPanel({ pestanas }: { pestanas: ReactNode }) {
                         )}
                         {!soloLectura && f.meta > (f.meta_empresa ?? 0) + 0.004 && <span className="mt-0.5 block text-[10px] text-muted-foreground">Total empresas {formatPrice(f.meta)}</span>}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{formatPrice(f.venta)}<span className="block text-[10px] text-muted-foreground">{f.facturas} facturas</span></TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">{formatPrice(f.venta)}<span className="block text-[10px] text-muted-foreground">{f.facturas} facturas{f.ne > 0.004 ? ` · ${formatPrice(f.ne)} N/E` : ""}</span></TableCell>
                       <TableCell>
                         {metaMostrada > 0 ? (
                           <div className="flex items-center gap-2">

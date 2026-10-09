@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
@@ -21,7 +22,7 @@ import { CalidadDatos, useCalidadOculta } from "@/components/reportes/CalidadDat
 import { LoCobrado } from "@/components/reportes/cobrado/LoCobrado";
 import { Antiguedad } from "@/components/reportes/antiguedad/Antiguedad";
 import { VentasDeuda } from "@/components/reportes/ventas-deuda/VentasDeuda";
-import { InsigniaProfit, colorFuente, periodoComparacion, Variacion, fechaCorta, TEXTO_COMPARACION } from "@/components/reportes/comun";
+import { InsigniaProfit, InsigniaNE, TEXTO_NE_VENTA, colorFuente, periodoComparacion, Variacion, fechaCorta, TEXTO_COMPARACION } from "@/components/reportes/comun";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { usePagination } from "@/hooks/use-pagination";
@@ -37,7 +38,8 @@ import { useToast } from "@/hooks/use-toast";
 
 // ── Tipos de las funciones de reporte (migraciones 18u y 20g: Odoo + histórico de Profit) ──
 type FuenteFila = "odoo" | "profit" | "ambas";
-interface FilaVenta { clave: string; etiqueta: string; detalle: string | null; documentos: number | null; clientes: number | null; cantidad: number | null; bruto_usd: number; nc_usd: number; neto_usd: number; profit_usd: number; financieras_usd: number; fuente: FuenteFila }
+// 22k: ne_usd = parte de notas de entrega (ya incluida en neto_usd) y ne_documentos = N/E del grupo
+interface FilaVenta { clave: string; etiqueta: string; detalle: string | null; documentos: number | null; clientes: number | null; cantidad: number | null; bruto_usd: number; nc_usd: number; neto_usd: number; profit_usd: number; financieras_usd: number; fuente: FuenteFila; ne_usd: number; ne_documentos: number | null }
 interface FilaCobro { clave: string; etiqueta: string; detalle: string | null; cobros: number; clientes: number; monto_usd: number }
 interface FilaReverso { empresa: string; cliente: string; factura: string; factura_fecha: string; nota: string; nota_fecha: string; neto_usd: number; motivo: string | null; fuente: FuenteFila }
 // reporte_ventas_comparativo (20q): la venta del período, del anterior y del mismo período del año anterior
@@ -45,7 +47,7 @@ interface FilaComparativo { clave: string; etiqueta: string; detalle: string | n
   var_anterior_usd: number; var_anterior_pct: number | null; var_anio_usd: number; var_anio_pct: number | null;
   facturas_actual: number | null; facturas_anterior: number | null; facturas_anio_anterior: number | null;
   profit_actual_usd: number; profit_anterior_usd: number; profit_anio_anterior_usd: number; fuente: FuenteFila;
-  anterior_desde: string; anterior_hasta: string; anio_desde: string; anio_hasta: string }
+  anterior_desde: string; anterior_hasta: string; anio_desde: string; anio_hasta: string; ne_actual_usd: number; ne_anterior_usd: number; ne_anio_anterior_usd: number }
 interface FilaInv { producto_id: string; sku: string; nombre: string; categoria: string; existencia: number; comprometido: number; disponible: number; vendido_unidades: number; vendido_usd: number; ultima_venta: string | null; cobertura_dias: number | null }
 
 const num = (v: unknown) => Number(v ?? 0);
@@ -60,10 +62,10 @@ const HISTORIAL_DESDE = "2020-12-01";
 const textoFuente = (f: FuenteFila) => (f === "ambas" ? "Odoo + Profit" : f === "profit" ? "Profit" : "Odoo");
 
 // Sub-vistas de Reportes → Cobranza (?cobranza=). La Antigüedad y Ventas vs deuda guardan en la URL su corte y sus filtros
-// (se limpian al cambiar de sub-vista).
+// (se limpian al cambiar de sub-vista). "ne=0" (sin notas de entrega) no se limpia: vale para todo Reportes (22k).
 type SubCobranza = "resumen" | "cobrado" | "antiguedad" | "ventas-deuda";
 const SUB_COBRANZA: [SubCobranza, string][] = [["resumen", "Resumen"], ["cobrado", "Lo cobrado"], ["antiguedad", "Antigüedad"], ["ventas-deuda", "Ventas vs deuda"]];
-const PARAMS_SUBVISTA = ["corte", "base", "ne", "clasif", "agrupar", "columnas", "meses", "activo", "estado", "vista", "orden"];
+const PARAMS_SUBVISTA = ["corte", "base", "clasif", "agrupar", "columnas", "meses", "activo", "estado", "vista", "orden"];
 
 type Periodo = "mes" | "mes_anterior" | "trimestre" | "anio" | "12m" | "24m" | "todo" | "personalizado" | `a${number}`;
 const ANIO_ACTUAL = new Date().getFullYear();
@@ -118,12 +120,14 @@ function GraficoMeses({ datos, formato }: { datos: { mes: string; valor: number 
   );
 }
 
-// Venta neta por mes, apilada por fuente (Odoo / Profit). Con una sola fuente no hay leyenda: el título la nombra.
-function GraficoVentas({ datos, formato }: { datos: { mes: string; odoo: number; profit: number }[]; formato: (v: number) => string }) {
+// Venta neta por mes, apilada por fuente (Odoo / Profit / notas de entrega). Con una sola fuente no hay leyenda: el título la nombra.
+function GraficoVentas({ datos, formato }: { datos: { mes: string; odoo: number; profit: number; ne: number }[]; formato: (v: number) => string }) {
   const hayOdoo = datos.some((d) => Math.abs(d.odoo) > 0.004), hayProfit = datos.some((d) => Math.abs(d.profit) > 0.004);
+  const hayNe = datos.some((d) => Math.abs(d.ne) > 0.004);
   const series = [
     ...(hayProfit ? [{ clave: "profit" as const, nombre: "Profit (histórico)" }] : []),
-    ...(hayOdoo || !hayProfit ? [{ clave: "odoo" as const, nombre: "Odoo" }] : []),
+    ...(hayOdoo || (!hayProfit && !hayNe) ? [{ clave: "odoo" as const, nombre: "Odoo" }] : []),
+    ...(hayNe ? [{ clave: "ne" as const, nombre: "Notas de entrega" }] : []),
   ];
   const superficie = "hsl(var(--card))";
   return (
@@ -164,6 +168,8 @@ const Reportes = () => {
   // cuentas (la base también lo exige)
   const { can } = usePermissions();
   const veDeuda = can("cuentas", "ver");
+  // 22k: las notas de entrega cuentan como venta, aparte (?ne=0 las quita). Solo con permiso de verlas (la base también lo exige)
+  const veNe = can("notas_entrega", "ver");
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState(params.get("tab") || "ventas");
@@ -174,6 +180,7 @@ const Reportes = () => {
   const [hastaP, setHastaP] = useState(esIso(params.get("hasta")) ? params.get("hasta")! : iso(new Date()));
   // Reportes → Cobranza: Resumen, Lo cobrado (22f, ?cobranza=cobrado) o Antigüedad (22g, ?cobranza=antiguedad)
   const subCobranza: SubCobranza = SUB_COBRANZA.find(([k]) => k === params.get("cobranza"))?.[0] ?? "resumen";
+  const conNe = veNe && params.get("ne") !== "0";
   const [desde, hasta] = rango(periodo, desdeP, hastaP);
   const [cargando, setCargando] = useState(true);
   const [ventas, setVentas] = useState<Record<string, FilaVenta[]>>({});
@@ -224,6 +231,7 @@ const Reportes = () => {
     setParams(params, { replace: true });
   };
   const setFuente = (f: Fuente) => { setFuenteEstado(f); enUrl("fuente", f, "ambas"); };
+  const setConNe = (v: boolean) => enUrl("ne", v ? "1" : "0", "1");
 
   // Carga según la pestaña (cada consulta agrega en el servidor)
   useEffect(() => {
@@ -250,16 +258,16 @@ const Reportes = () => {
           // Con el histórico de Profit un período largo pesa y la base tiene pocos núcleos: las consultas por documento van en
           // 2 carriles y las de líneas (categoría y producto, las más pesadas) en un tercero, una tras otra. Si una tabla
           // falla, las demás se muestran igual.
-          const venta = (g: string, d: string, h: string) => () => rpc<FilaVenta>("reporte_ventas", { p_desde: d, p_hasta: h, p_agrupar: g, p_fuente: fuente });
+          const venta = (g: string, d: string, h: string) => () => rpc<FilaVenta>("reporte_ventas", { p_desde: d, p_hasta: h, p_agrupar: g, p_fuente: fuente, p_ne: conNe });
           // Comparativos (20q): período anterior y mismo período del año anterior, con las cifras de reporte_ventas
-          const comparar = (g: string) => () => rpc<FilaComparativo>("reporte_ventas_comparativo", { p_desde: desde, p_hasta: hasta, p_agrupar: g, p_fuente: fuente });
+          const comparar = (g: string) => () => rpc<FilaComparativo>("reporte_ventas_comparativo", { p_desde: desde, p_hasta: hasta, p_agrupar: g, p_fuente: fuente, p_ne: conNe });
           const livianas: [string, () => Promise<unknown[]>][] = [
             ["empresa", venta("empresa", desde, hasta)], ["mes", venta("mes", ini12, hasta)], ["comp_empresa", comparar("empresa")],
             ["vendedor", venta("vendedor", desde, hasta)], ["cliente", venta("cliente", desde, hasta)], ["comp_vendedor", comparar("vendedor")],
             ["reversos", () => rpc<FilaReverso>("reporte_reversos", { p_desde: desde, p_hasta: hasta, p_fuente: fuente })],
           ];
           // Por categoría y producto la página solo muestra unidades y venta: sin conteos de documentos ni clientes (mucho más rápido)
-          const lineas = (g: string) => () => rpc<FilaVenta>("reporte_ventas", { p_desde: desde, p_hasta: hasta, p_agrupar: g, p_fuente: fuente, p_conteos: false });
+          const lineas = (g: string) => () => rpc<FilaVenta>("reporte_ventas", { p_desde: desde, p_hasta: hasta, p_agrupar: g, p_fuente: fuente, p_conteos: false, p_ne: conNe });
           const pesadas: [string, () => Promise<unknown[]>][] = [["categoria", lineas("categoria")], ["producto", lineas("producto")]];
           const out: Record<string, unknown[]> = {};
           const fallas: string[] = [];
@@ -298,18 +306,20 @@ const Reportes = () => {
     })();
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, desde, hasta, diasRot, soloLectura, seleccion, fuente, veDeuda, subCobranza]);
+  }, [tab, desde, hasta, diasRot, soloLectura, seleccion, fuente, veDeuda, subCobranza, conNe]);
 
   // ── Ventas ──
   const totalVentas = useMemo(() => {
     const porEmpresa = ventas.empresa ?? [];
     const suma = (c: (f: FilaVenta) => unknown) => porEmpresa.reduce((s, f) => s + num(c(f)), 0);
-    const [neto, bruto, nc, docs, profit, financieras] = [suma((f) => f.neto_usd), suma((f) => f.bruto_usd), suma((f) => f.nc_usd),
-      suma((f) => f.documentos), suma((f) => f.profit_usd), suma((f) => f.financieras_usd)];
-    const clientes = (ventas.cliente ?? []).filter((f) => num(f.bruto_usd) > 0).length;
+    const [neto, bruto, nc, docs, profit, financieras, ne, neDocs] = [suma((f) => f.neto_usd), suma((f) => f.bruto_usd), suma((f) => f.nc_usd),
+      suma((f) => f.documentos), suma((f) => f.profit_usd), suma((f) => f.financieras_usd), suma((f) => f.ne_usd), suma((f) => f.ne_documentos)];
+    // Clientes con compra: con factura o con nota de entrega
+    const clientes = (ventas.cliente ?? []).filter((f) => num(f.bruto_usd) > 0 || num(f.ne_usd) > 0.004).length;
     const clientesProfit = (ventas.cliente ?? []).some((f) => num(f.bruto_usd) > 0 && f.fuente !== "odoo");
+    const clientesNe = (ventas.cliente ?? []).some((f) => num(f.ne_usd) > 0.004);
     return { neto, bruto, nc, docs, clientes, ticket: docs ? bruto / docs : 0, profit, financieras,
-      conProfit: porEmpresa.some((f) => f.fuente !== "odoo"), clientesProfit };
+      conProfit: porEmpresa.some((f) => f.fuente !== "odoo"), clientesProfit, ne, neDocs, conNe: Math.abs(ne) > 0.004, clientesNe };
   }, [ventas]);
   // Comparativo del total (suma de las empresas visibles)
   const comp = useMemo(() => {
@@ -320,6 +330,7 @@ const Reportes = () => {
       actual: s((f) => f.actual_usd), anterior: s((f) => f.anterior_usd), anio: s((f) => f.anio_anterior_usd),
       facturas: [s((f) => f.facturas_actual), s((f) => f.facturas_anterior), s((f) => f.facturas_anio_anterior)],
       profit: [s((f) => f.profit_actual_usd), s((f) => f.profit_anterior_usd), s((f) => f.profit_anio_anterior_usd)],
+      ne: [s((f) => f.ne_actual_usd), s((f) => f.ne_anterior_usd), s((f) => f.ne_anio_anterior_usd)],
       periodos: [[desde, hasta], [filas[0]?.anterior_desde ?? ad, filas[0]?.anterior_hasta ?? ah], [filas[0]?.anio_desde ?? yd, filas[0]?.anio_hasta ?? yh]] as [string, string][],
     };
   }, [comparativo, desde, hasta]);
@@ -328,14 +339,18 @@ const Reportes = () => {
   const varVentas = variacion(totalVentas.neto, netoPrev);
   const varAnio = variacion(totalVentas.neto, comp.anio);
   const [pdesde, phasta] = anterior(desde, hasta);
-  // Primera columna de las tablas de ventas: etiqueta + insignia cuando la fila incluye Profit
+  // Primera columna de las tablas de ventas: etiqueta + insignia cuando la fila incluye Profit o notas de entrega
   const conInsignia = (texto: string, f: FilaVenta) => (
-    <span className="inline-flex max-w-full items-center gap-1.5"><span className="truncate">{texto}</span>{f.fuente !== "odoo" && <InsigniaProfit />}</span>
+    <span className="inline-flex max-w-full items-center gap-1.5"><span className="truncate">{texto}</span>{f.fuente !== "odoo" && <InsigniaProfit />}{Math.abs(num(f.ne_usd)) > 0.004 && <InsigniaNE />}</span>
   );
   const columnasFuente = [
     { clave: "fuente", titulo: "Fuente", valor: (f: FilaVenta) => textoFuente(f.fuente), soloExportar: true },
     { clave: "profit", titulo: "Parte de Profit (USD)", valor: (f: FilaVenta) => num(f.profit_usd), soloExportar: true },
+    ...(conNe ? [{ clave: "ne_usd", titulo: "Parte de notas de entrega (USD)", valor: (f: FilaVenta) => num(f.ne_usd), soloExportar: true }] : []),
   ];
+  // Columna visible "N/E" (lo no facturado de las notas de entrega, ya dentro de la venta neta) cuando el período tiene N/E
+  const columnaNe = totalVentas.conNe ? [{ clave: "ne", titulo: "N/E", valor: (f: FilaVenta) => num(f.ne_usd),
+    render: (f: FilaVenta) => (Math.abs(num(f.ne_usd)) > 0.004 ? formatPrice(num(f.ne_usd)) : <span className="text-muted-foreground">—</span>), derecha: true, ocultarMovil: true }] : [];
 
   // ── Cobranza ──
   const totalCobros = useMemo(() => {
@@ -420,6 +435,12 @@ const Reportes = () => {
           <SelectContent>{(Object.keys(FUENTES) as Fuente[]).map((k) => <SelectItem key={k} value={k}>{FUENTES[k]}</SelectItem>)}</SelectContent>
         </Select>
       )}
+      {veNe && (tab === "ventas" || tab === "analisis" || tab === "metas") && (
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title={TEXTO_NE_VENTA}>
+          <Switch checked={conNe} onCheckedChange={setConNe} aria-label="Incluir notas de entrega en la venta" data-testid="reportes-ne" />
+          <span className="whitespace-nowrap">Notas de entrega</span>
+        </label>
+      )}
       {periodo === "personalizado" && (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <Input type="date" value={desdeP} max={hastaP} onChange={(e) => cambiarRango(e.target.value, hastaP)} className="h-8 w-36 text-[13px]" aria-label="Desde" />
@@ -448,18 +469,21 @@ const Reportes = () => {
             : <span className="text-[11px] text-muted-foreground">{tab === "calidad" ? "Bandeja de trabajo · Odoo manda"
               : tab === "cobranza" ? (subCobranza === "antiguedad" ? <>Saldos al corte · Odoo + notas de entrega</>
                 : subCobranza === "ventas-deuda" ? <>Venta con IVA · Odoo + Profit · deuda neta al corte</> : <>USD a la tasa BCV del día · Odoo + Profit</>)
-              : <>USD · neto de IVA · fuente {tab === "ventas" || tab === "analisis" ? FUENTES[fuente].replace("Solo ", "") : tab === "profit" ? "Profit (solo lectura)" : "Odoo"}</>}</span>} />
+              : <>USD · neto de IVA · fuente {tab === "ventas" || tab === "analisis" ? FUENTES[fuente].replace("Solo ", "") + (conNe ? " + N/E" : "") : tab === "profit" ? "Profit (solo lectura)" : tab === "metas" && conNe ? "Odoo + N/E" : "Odoo"}</>}</span>} />
 
         <TabsContent value="ventas" className="mt-0">
           <KpiStrip items={[
             { label: "Venta neta", valor: formatPrice(totalVentas.neto),
-              detalle: <span className="inline-flex items-center gap-1">{totalVentas.conProfit && <InsigniaProfit />}{textoVar(varVentas)}{!totalVentas.conProfit && prevConProfit ? " (con Profit)" : ""}</span>,
+              detalle: <span className="inline-flex items-center gap-1">{totalVentas.conProfit && <InsigniaProfit />}{totalVentas.conNe && <InsigniaNE />}{textoVar(varVentas)}{!totalVentas.conProfit && prevConProfit ? " (con Profit)" : ""}</span>,
               tono: tonoVar(varVentas),
-              titulo: `Facturas − notas de crédito, sin IVA ni saldos iniciales. Comparado con ${pdesde.split("-").reverse().join("/")} – ${phasta.split("-").reverse().join("/")} (${textoVar(varVentas)}) y con ${fechaCorta(comp.periodos[2][0])} – ${fechaCorta(comp.periodos[2][1])} (${textoVarAnio(varAnio)})` },
+              titulo: `Facturas − notas de crédito${conNe ? " + notas de entrega (lo no facturado)" : ""}, sin IVA ni saldos iniciales. Comparado con ${pdesde.split("-").reverse().join("/")} – ${phasta.split("-").reverse().join("/")} (${textoVar(varVentas)}) y con ${fechaCorta(comp.periodos[2][0])} – ${fechaCorta(comp.periodos[2][1])} (${textoVarAnio(varAnio)})` },
             { label: "Facturado", valor: formatPrice(totalVentas.bruto), detalle: <span className="inline-flex items-center gap-1">{totalVentas.conProfit && <InsigniaProfit />}{fmtN(totalVentas.docs)} facturas</span> },
             { label: "Notas de crédito", valor: formatPrice(totalVentas.nc), tono: totalVentas.nc < 0 ? "negativo" : "normal",
               detalle: totalVentas.conProfit ? <span className="inline-flex items-center gap-1"><InsigniaProfit />con devoluciones</span> : undefined },
-            { label: "Clientes con compra", valor: fmtN(totalVentas.clientes), detalle: totalVentas.clientesProfit ? <InsigniaProfit /> : undefined },
+            ...(conNe ? [{ label: "Notas de entrega", valor: formatPrice(totalVentas.ne), tono: "tenue" as const, titulo: TEXTO_NE_VENTA,
+              detalle: <span className="inline-flex items-center gap-1" data-testid="kpi-ne-detalle"><InsigniaNE />{totalVentas.conNe ? `${fmtN(totalVentas.neDocs)} sin facturar · dentro de la venta` : "sin N/E en el período"}</span> }] : []),
+            { label: "Clientes con compra", valor: fmtN(totalVentas.clientes),
+              detalle: totalVentas.clientesProfit || totalVentas.clientesNe ? <span className="inline-flex items-center gap-1">{totalVentas.clientesProfit && <InsigniaProfit />}{totalVentas.clientesNe && <InsigniaNE />}</span> : undefined },
             { label: "Ticket promedio", valor: formatPrice(totalVentas.ticket), detalle: <span className="inline-flex items-center gap-1">{totalVentas.conProfit && <InsigniaProfit />}por factura</span> },
             ...(Math.abs(totalVentas.financieras) > 0.004 ? [{ label: "Notas financieras", valor: formatPrice(totalVentas.financieras),
               detalle: <span className="inline-flex items-center gap-1"><InsigniaProfit />aparte de la venta</span>, tono: "tenue" as const,
@@ -472,6 +496,13 @@ const Reportes = () => {
               financieras de Profit van aparte y las facturas anuladas con devolución total no cuentan.
             </p>
           )}
+          {totalVentas.conNe && (
+            <p className="-mt-1 mb-2 text-xs text-muted-foreground" data-testid="ventas-nota-ne">
+              <InsigniaNE className="mr-1 align-[-2px]" />
+              Incluye {formatPrice(totalVentas.ne)} de {fmtN(totalVentas.neDocs)} notas de entrega (no fiscales, sin IVA): lo que no pasó a factura al
+              cierre del período; lo que pasó a factura cuenta en su factura. Facturado, facturas y ticket promedio son solo fiscales.
+            </p>
+          )}
           {reversos.length > 0 && (
             <p className="-mt-1 mb-3 text-xs text-muted-foreground">
               No se cuentan {fmtN(reversos.length)} facturas anuladas por completo con su nota de crédito o devolución ({formatPrice(reversos.reduce((s, r) => s + num(r.neto_usd), 0))}).
@@ -480,7 +511,7 @@ const Reportes = () => {
           )}
           <Panel sinPadding className="mb-3" titulo={<>Venta neta por mes <span className="font-normal text-muted-foreground">
             · {meses.length ? `${etiquetaMes(meses[0].clave)} – ${etiquetaMes(meses[meses.length - 1].clave)}` : "sin datos"}</span></>}>
-            <GraficoVentas datos={meses.map((f) => ({ mes: f.clave, odoo: num(f.neto_usd) - num(f.profit_usd), profit: num(f.profit_usd) }))} formato={formatPrice} />
+            <GraficoVentas datos={meses.map((f) => ({ mes: f.clave, odoo: num(f.neto_usd) - num(f.profit_usd) - num(f.ne_usd), profit: num(f.profit_usd), ne: num(f.ne_usd) }))} formato={formatPrice} />
           </Panel>
           <div className="grid gap-3 xl:grid-cols-2">
             <Panel sinPadding titulo={<>Comparativo <span className="font-normal text-muted-foreground">· venta neta</span></>}>
@@ -498,6 +529,7 @@ const Reportes = () => {
                         <span className="flex flex-wrap items-center gap-x-1.5">
                           <span className={i === 0 ? "font-medium" : ""}>{nombre}</span>
                           {Math.abs(comp.profit[i]) > 0.004 && <InsigniaProfit />}
+                          {Math.abs(comp.ne[i]) > 0.004 && <InsigniaNE />}
                         </span>
                         <span className="block text-[11px] text-muted-foreground">{fechaCorta(comp.periodos[i][0])} – {fechaCorta(comp.periodos[i][1])}</span>
                       </TableCell>
@@ -508,12 +540,13 @@ const Reportes = () => {
                   ))}
                 </TableBody>
               </Table>
-              <p className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">Variación = actual − período comparado (USD y %), con la misma definición de venta neta en los tres períodos. Las cifras con la insignia incluyen el histórico de Profit.</p>
+              <p className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">Variación = actual − período comparado (USD y %), con la misma definición de venta neta en los tres períodos. Las cifras con la insignia incluyen el histórico de Profit o notas de entrega.</p>
             </Panel>
             <TablaReporte titulo={<>Comparativo por vendedor <span className="font-normal text-muted-foreground">· vs anterior y año anterior</span></>}
               filas={comparativo.vendedor} exportar="ventas-comparativo-vendedor" limite={8} columnas={[
                 { clave: "etiqueta", titulo: "Vendedor", valor: (f) => f.etiqueta,
-                  render: (f) => <span className="inline-flex max-w-full items-center gap-1.5"><span className="truncate">{f.etiqueta}</span>{f.fuente !== "odoo" && <InsigniaProfit />}</span> },
+                  render: (f) => <span className="inline-flex max-w-full items-center gap-1.5"><span className="truncate">{f.etiqueta}</span>{f.fuente !== "odoo" && <InsigniaProfit />}
+                    {Math.abs(num(f.ne_actual_usd)) + Math.abs(num(f.ne_anterior_usd)) + Math.abs(num(f.ne_anio_anterior_usd)) > 0.004 && <InsigniaNE />}</span> },
                 { clave: "actual", titulo: "Actual", valor: (f) => num(f.actual_usd), render: (f) => formatPrice(num(f.actual_usd)), derecha: true },
                 { clave: "anterior", titulo: "Anterior", valor: (f) => num(f.anterior_usd), render: (f) => formatPrice(num(f.anterior_usd)), derecha: true, ocultarMovil: true },
                 { clave: "var_ant", titulo: "Var. %", valor: (f) => f.var_anterior_pct, render: (f) => <Variacion soloPct actual={num(f.actual_usd)} previo={num(f.anterior_usd)} formato={formatPrice} />, derecha: true },
@@ -522,6 +555,9 @@ const Reportes = () => {
                 { clave: "var_ant_usd", titulo: "Variación vs anterior (USD)", valor: (f) => num(f.var_anterior_usd), soloExportar: true },
                 { clave: "var_anio_usd", titulo: "Variación vs año anterior (USD)", valor: (f) => num(f.var_anio_usd), soloExportar: true },
                 { clave: "fuente", titulo: "Fuente", valor: (f) => textoFuente(f.fuente), soloExportar: true },
+                ...(conNe ? [{ clave: "ne_actual", titulo: "Notas de entrega actual (USD)", valor: (f: FilaComparativo) => num(f.ne_actual_usd), soloExportar: true },
+                  { clave: "ne_anterior", titulo: "Notas de entrega anterior (USD)", valor: (f: FilaComparativo) => num(f.ne_anterior_usd), soloExportar: true },
+                  { clave: "ne_anio", titulo: "Notas de entrega año anterior (USD)", valor: (f: FilaComparativo) => num(f.ne_anio_anterior_usd), soloExportar: true }] : []),
               ]} />
           </div>
           <div className="grid gap-3 xl:grid-cols-2">
@@ -529,6 +565,7 @@ const Reportes = () => {
               <TablaReporte titulo="Por empresa" filas={ventas.empresa ?? []} exportar="ventas-por-empresa" metrica={(f) => num(f.neto_usd)} columnas={[
                 { clave: "etiqueta", titulo: "Empresa", valor: (f) => f.etiqueta, render: (f) => conInsignia(f.etiqueta, f) },
                 { clave: "documentos", titulo: "Facturas", valor: (f) => num(f.documentos), derecha: true },
+                ...columnaNe,
                 { clave: "neto", titulo: "Venta neta", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
                 ...columnasFuente,
                 { clave: "financieras", titulo: "Notas financieras Profit (aparte)", valor: (f) => num(f.financieras_usd), soloExportar: true },
@@ -539,6 +576,7 @@ const Reportes = () => {
               { clave: "documentos", titulo: "Facturas", valor: (f) => num(f.documentos), derecha: true },
               { clave: "clientes", titulo: "Clientes", valor: (f) => num(f.clientes), derecha: true, secundaria: true },
               { clave: "nc", titulo: "NC", valor: (f) => num(f.nc_usd), render: (f) => formatPrice(num(f.nc_usd)), derecha: true, ocultarMovil: true },
+              ...columnaNe,
               { clave: "neto", titulo: "Venta neta", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
               ...columnasFuente,
               { clave: "financieras", titulo: "Notas financieras Profit (aparte)", valor: (f) => num(f.financieras_usd), soloExportar: true },
@@ -554,6 +592,7 @@ const Reportes = () => {
               { clave: "etiqueta", titulo: "Cliente", valor: (f) => f.etiqueta, render: (f) => conInsignia(f.etiqueta, f) },
               { clave: "detalle", titulo: "RIF · ciudad", valor: (f) => f.detalle, secundaria: true },
               { clave: "documentos", titulo: "Facturas", valor: (f) => num(f.documentos), derecha: true },
+              ...columnaNe,
               { clave: "neto", titulo: "Venta neta", valor: (f) => num(f.neto_usd), render: (f) => formatPrice(num(f.neto_usd)), derecha: true },
               ...columnasFuente,
               { clave: "financieras", titulo: "Notas financieras Profit (aparte)", valor: (f) => num(f.financieras_usd), soloExportar: true },
@@ -587,11 +626,11 @@ const Reportes = () => {
         </TabsContent>
 
         <TabsContent value="analisis" className="mt-0">
-          {tab === "analisis" && <AnalisisVentas desde={desde} hasta={hasta} fuente={fuente} onCargando={setCargando} />}
+          {tab === "analisis" && <AnalisisVentas desde={desde} hasta={hasta} fuente={fuente} ne={conNe} onCargando={setCargando} />}
         </TabsContent>
 
         <TabsContent value="metas" className="mt-0">
-          {tab === "metas" && <MetasVendedores desde={desde} hasta={hasta} onCargando={setCargando} />}
+          {tab === "metas" && <MetasVendedores desde={desde} hasta={hasta} ne={conNe} onCargando={setCargando} />}
         </TabsContent>
 
         <TabsContent value="cobranza" className="mt-0">

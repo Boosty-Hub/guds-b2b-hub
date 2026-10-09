@@ -3,6 +3,7 @@ import { KpiStrip } from "@/components/datos/KpiStrip";
 import { Panel } from "@/components/datos/FichaCampos";
 import { TablaReporte } from "@/components/reportes/TablaReporte";
 import { exportarCSV, BotonExportar } from "@/components/datos/tabla";
+import { InsigniaNE } from "@/components/reportes/comun";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -15,9 +16,11 @@ interface FilaMeta {
   vendedor_id: string; vendedor: string; email: string | null; activo: boolean; clientes: number; anio: number; mes: number; desde: string; hasta: string;
   meta_usd: number; venta_usd: number; facturas: number; cumplimiento_pct: number | null; brecha_usd: number | null;
   en_curso: boolean; dias_habiles: number; dias_transcurridos: number; proyeccion_usd: number | null; proyeccion_pct: number | null;
+  /** 22k: parte de notas de entrega (ya incluida en venta_usd) */
+  ne_usd: number;
 }
 interface Vendedor {
-  id: string; nombre: string; activo: boolean; clientes: number; meta: number; venta: number; facturas: number;
+  id: string; nombre: string; activo: boolean; clientes: number; meta: number; venta: number; facturas: number; ne: number;
   cumplimiento: number | null; brecha: number | null; mesCurso: FilaMeta | null; meses: Map<string, FilaMeta>;
 }
 
@@ -40,7 +43,7 @@ function BarraCumplimiento({ valor }: { valor: number | null }) {
 }
 
 /** Pestaña Metas de Reportes: meta de cada vendedor por mes contra su venta real, cumplimiento y proyección del mes en curso. */
-export function MetasVendedores({ desde, hasta, onCargando }: { desde: string; hasta: string; onCargando?: (v: boolean) => void }) {
+export function MetasVendedores({ desde, hasta, ne = false, onCargando }: { desde: string; hasta: string; ne?: boolean; onCargando?: (v: boolean) => void }) {
   const { formatPrice } = useCurrency();
   const { soloLectura, seleccion } = useEmpresa();
   const { toast } = useToast();
@@ -52,7 +55,7 @@ export function MetasVendedores({ desde, hasta, onCargando }: { desde: string; h
     let cancelado = false;
     (async () => {
       setCargando(true); onCargando?.(true); setError(null);
-      const { data, error: e } = await supabase.rpc("reporte_metas_vendedores", { p_desde: desde, p_hasta: hasta });
+      const { data, error: e } = await supabase.rpc("reporte_metas_vendedores", { p_desde: desde, p_hasta: hasta, p_ne: ne });
       if (cancelado) return;
       if (e) {
         setFilas([]); setError(e.message);
@@ -62,7 +65,7 @@ export function MetasVendedores({ desde, hasta, onCargando }: { desde: string; h
     })();
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desde, hasta, soloLectura, seleccion]);
+  }, [desde, hasta, ne, soloLectura, seleccion]);
 
   // Meses del período y vendedores con sus totales
   const { meses, vendedores, total } = useMemo(() => {
@@ -70,8 +73,8 @@ export function MetasVendedores({ desde, hasta, onCargando }: { desde: string; h
       .sort((a, b) => a.clave.localeCompare(b.clave));
     const porId = new Map<string, Vendedor>();
     for (const f of filas) {
-      const v = porId.get(f.vendedor_id) ?? { id: f.vendedor_id, nombre: f.vendedor || f.email || "—", activo: f.activo, clientes: n(f.clientes), meta: 0, venta: 0, facturas: 0, cumplimiento: null, brecha: null, mesCurso: null, meses: new Map() };
-      v.meta += n(f.meta_usd); v.venta += n(f.venta_usd); v.facturas += n(f.facturas);
+      const v = porId.get(f.vendedor_id) ?? { id: f.vendedor_id, nombre: f.vendedor || f.email || "—", activo: f.activo, clientes: n(f.clientes), meta: 0, venta: 0, facturas: 0, ne: 0, cumplimiento: null, brecha: null, mesCurso: null, meses: new Map() };
+      v.meta += n(f.meta_usd); v.venta += n(f.venta_usd); v.facturas += n(f.facturas); v.ne += n(f.ne_usd);
       if (f.en_curso) v.mesCurso = f;
       v.meses.set(f.desde, f);
       porId.set(f.vendedor_id, v);
@@ -85,6 +88,7 @@ export function MetasVendedores({ desde, hasta, onCargando }: { desde: string; h
       meta: conMeta.reduce((s, v) => s + v.meta, 0),
       ventaConMeta: conMeta.reduce((s, v) => s + v.venta, 0),
       venta: vendedores.reduce((s, v) => s + v.venta, 0),
+      ne: vendedores.reduce((s, v) => s + v.ne, 0),
       conMeta: conMeta.length,
       alcanzadas: conMeta.filter((v) => v.venta >= v.meta).length,
       hayCurso: curso.length > 0,
@@ -107,8 +111,9 @@ export function MetasVendedores({ desde, hasta, onCargando }: { desde: string; h
       <KpiStrip items={[
         { label: "Meta del período", valor: total.meta > 0 ? formatPrice(total.meta) : "Sin metas", detalle: `${total.conMeta} vendedor${total.conMeta === 1 ? "" : "es"} con meta`, tono: "primario" },
         { label: "Venta real", valor: formatPrice(total.conMeta ? total.ventaConMeta : total.venta),
-          detalle: !total.conMeta ? "de todos los vendedores" : total.venta !== total.ventaConMeta ? `${formatPrice(total.venta)} con los que no tienen meta` : "de los vendedores con meta",
-          titulo: "Documentos de venta de Odoo netos de IVA de los clientes asignados a cada vendedor (la misma cifra del portal del vendedor)" },
+          detalle: <span className="inline-flex flex-wrap items-center gap-1">{Math.abs(total.ne) > 0.004 && <><InsigniaNE />{formatPrice(total.ne)} de N/E ·</>}
+            {!total.conMeta ? "de todos los vendedores" : total.venta !== total.ventaConMeta ? `${formatPrice(total.venta)} con los que no tienen meta` : "de los vendedores con meta"}</span>,
+          titulo: `Documentos de venta de Odoo netos de IVA${ne ? " y notas de entrega (lo no facturado)" : ""} de los clientes asignados a cada vendedor (la misma cifra del portal del vendedor)` },
         { label: "Cumplimiento", valor: pct(cumplTotal), tono: cumplTotal === null ? "tenue" : cumplTotal >= 100 ? "positivo" : cumplTotal >= 80 ? "alerta" : "negativo",
           detalle: total.conMeta ? `${total.alcanzadas} de ${total.conMeta} alcanzaron la meta` : undefined },
         ...(total.hayCurso ? [{ label: "Proyección del mes", valor: formatPrice(total.proyeccion),
@@ -127,7 +132,8 @@ export function MetasVendedores({ desde, hasta, onCargando }: { desde: string; h
           { clave: "nombre", titulo: "Vendedor", valor: (v) => v.nombre,
             render: (v) => <span className={cn("truncate", !v.activo && "text-muted-foreground")} title={`${v.clientes} clientes activos`}>{v.nombre}{!v.activo ? " (inactivo)" : ""}</span> },
           { clave: "meta", titulo: "Meta", valor: (v) => v.meta, render: (v) => (v.meta > 0 ? formatPrice(v.meta) : <span className="text-muted-foreground">—</span>), derecha: true },
-          { clave: "venta", titulo: "Venta real", valor: (v) => v.venta, render: (v) => formatPrice(v.venta), derecha: true },
+          { clave: "venta", titulo: "Venta real", valor: (v) => v.venta, derecha: true,
+            render: (v) => <span className="inline-flex items-center gap-1" title={v.ne ? `Incluye ${formatPrice(v.ne)} de notas de entrega` : undefined}>{Math.abs(v.ne) > 0.004 && <InsigniaNE />}{formatPrice(v.venta)}</span> },
           { clave: "cumplimiento", titulo: "Cumplimiento", valor: (v) => v.cumplimiento, render: (v) => <BarraCumplimiento valor={v.cumplimiento} />, derecha: true },
           { clave: "brecha", titulo: "Brecha", valor: (v) => v.brecha, render: (v) => (v.brecha === null ? "—" : <span className={v.brecha > 0 ? "" : "text-success"}>{formatPrice(v.brecha)}</span>), derecha: true, ocultarMovil: true },
           ...(total.hayCurso ? [
@@ -137,6 +143,7 @@ export function MetasVendedores({ desde, hasta, onCargando }: { desde: string; h
               render: (v: Vendedor) => <span className={cn("tabular-nums", tonoCumpl(v.mesCurso?.proyeccion_pct ?? null))}>{pct(v.mesCurso?.proyeccion_pct ?? null)}</span>, derecha: true },
           ] : []),
           { clave: "facturas", titulo: "Facturas", valor: (v) => v.facturas, soloExportar: true },
+          ...(ne ? [{ clave: "ne", titulo: "Notas de entrega (USD)", valor: (v: Vendedor) => v.ne, soloExportar: true }] : []),
           { clave: "clientes", titulo: "Clientes activos", valor: (v) => v.clientes, soloExportar: true },
         ]} />
 
@@ -177,8 +184,8 @@ export function MetasVendedores({ desde, hasta, onCargando }: { desde: string; h
         </Panel>
       )}
       <p className="text-[11px] text-muted-foreground">
-        Venta real = facturas − notas de crédito de Odoo, sin IVA, de los clientes asignados a cada vendedor (la misma definición que ve el vendedor en su portal); no
-        incluye el histórico de Profit. Proyección = venta a la fecha ÷ días hábiles transcurridos × días hábiles del mes (lunes a viernes).
+        Venta real = facturas − notas de crédito de Odoo, sin IVA, de los clientes asignados a cada vendedor (la misma definición que ve el vendedor en su portal){ne
+          ? ", más las notas de entrega de esos clientes por lo que no pasó a factura" : ""}; no incluye el histórico de Profit. Proyección = venta a la fecha ÷ días hábiles transcurridos × días hábiles del mes (lunes a viernes).
       </p>
     </div>
   );

@@ -10,6 +10,34 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-09 · Las notas de entrega cuentan en los reportes de ventas, diferenciadas (22k) y video guía de los 4 reportes
+
+- **Pedido del usuario:** "Sí, las N/E deben contar en los reportes de ventas, diferenciadas"; publicar todo en main; grabar un
+  video corto (guía) de los 4 reportes de finanzas: dónde están, cómo se obtienen y cómo se ven.
+- **Publicado:** los 7 commits de 22a–22j se subieron a main antes de empezar.
+- **22k · N/E en los reportes de ventas** (migración `20261009_fase22k_ne_en_reportes_ventas.sql`):
+  - La venta incluye lo **no facturado** de cada N/E (sin IVA), con la misma regla que Ventas vs deuda: el saldo de la N/E al
+    cierre del período; lo que pasó a factura cuenta en su factura. Una N/E con líneas reparte esa parte por el subtotal de cada
+    línea (para categoría, producto y unidades); las históricas del Excel, sin líneas, van como "sin detalle".
+  - **Reportes → Ventas:** KPI "Notas de entrega" aparte, nota "Incluye … de N notas de entrega", serie ámbar en la venta por mes,
+    insignia N/E en los comparativos y las tablas, columna "N/E" y "Parte de notas de entrega" en las descargas. Facturado,
+    facturas y ticket promedio siguen siendo solo fiscales.
+  - **Análisis:** nuevo nivel/filtro **"Origen"** (Facturas de Odoo, Profit, Notas de entrega), medida "N/E" y el detalle de líneas
+    con tipo "Nota de entrega". Las N/E no cuentan como facturas (sí como clientes con compra).
+  - **Metas** (Reportes y Vendedores) y el **portal del vendedor**: la venta del mes incluye las N/E de sus clientes, aparte.
+  - **Interruptor "Notas de entrega"** junto al período (`?ne=0` las quita); vale para todo Reportes (también Antigüedad y Ventas
+    vs deuda). Solo con permiso de ver notas de entrega, como Ventas vs deuda (la base también lo exige).
+  - El vendedor de las N/E históricas se empareja con el de las ventas (nombre sin mayúsculas ni acentos o el único que tenga todas
+    sus palabras), para que no salgan como vendedores aparte.
+  - Sin pedir N/E, todo da igual que antes: 93 huellas de Ventas, Comparativo, Metas, Análisis y Líneas idénticas antes y después.
+  - Hoy: Quirutec suma USD 46.650,47 de 29 N/E históricas; GUDS no tiene N/E emitidas.
+- **Pruebas:** `scripts/probar-22k-ne-ventas.mjs` (19 casos, nada queda escrito); smoke privado `smoke-22k.cjs` (28 chequeos a 1440 y
+  390 en GUDS, Quirutec y «Ambas»).
+- **Video guía** (privado, con datos reales, fuera de git): `docs/privado/videos/guia-reportes-finanzas.mp4`, grabado con Playwright
+  (cuadros de Chromium por CDP) y armado con FFmpeg; script `docs/privado/22-verificacion/video-guia.cjs` para regrabarlo.
+
+---
+
 ## 2026-10-09 · Notas de entrega completas (22j · NE2–NE3) y clasificación de todos los clientes en Odoo (22i)
 
 - **Pedido del usuario:** respondió las 9 preguntas de finanzas sobre notas de entrega: las dos empresas las emiten; descargan

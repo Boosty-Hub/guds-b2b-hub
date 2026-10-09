@@ -500,6 +500,7 @@ Por eso `clientes.tipo_cliente`, `canal` y `segmento` están vacíos en GUDS: la
 | R3 | T5, T6, Antigüedad y NE1 (+ T1 si ya se decidió D5) — ✅ 22g | R0, NE1 |
 | R4 | Ventas vs deuda y días de recuperación nuevos, con su explicación — ✅ 22h | R3 |
 | NE2–NE3 | Emitir, abonos y conversión de N/E — ✅ 22j | respuestas de finanzas (9-oct) |
+| NE4 | N/E en Reportes → Ventas, Análisis y Metas, diferenciadas (KPI, serie, insignia, nivel «Origen») — ✅ 22k | respuesta del 9-oct |
 
 Cada fase se cierra con el cuadre contra el Excel del equipo (es la "respuesta correcta"), conteos de UI contra SQL y
 Playwright a 1440 y 390 px en GUDS, Quirutec y «Ambas».
@@ -509,7 +510,7 @@ Playwright a 1440 y 390 px en GUDS, Quirutec y «Ambas».
 > 9-oct (22i y 22j): **notas de entrega completas** y **clasificación de los 394 clientes con actividad enviada a Odoo**. Queda: el
 > histórico de notas de entrega YA PAGADAS de Profit no está en GUDS (el informe de ventas de Profit cargado no las trae): para que la
 > venta de Quirutec cuadre con su Excel (hoy −0,6 % a 12 meses al 30-abr) hace falta un reporte de Profit con las notas de entrega.
-> La venta de los reportes generales (Reportes → Ventas) sigue siendo la fiscal (Odoo + Profit), sin notas de entrega.
+> La venta de los reportes generales era la fiscal; **el 9-oct se decidió que las N/E también cuenten ahí, diferenciadas** (fase 22k).
 
 > 8-oct (noche, 22h): **Ventas vs deuda** hecha (ver §4). Para decidir con finanzas: el Excel de Quirutec cuenta como venta las
 > notas de entrega de Profit; el plan (D4) dice que nunca son venta y GUDS solo tiene las 29 abiertas, así que los clientes que

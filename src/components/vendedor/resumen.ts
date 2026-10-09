@@ -14,7 +14,8 @@ export interface ResumenVendedor {
     clientes_con_saldo: number; clientes_a_favor: number; clientes_excedidos: number;
     tramos: { por_vencer: number; d1_30: number; d31_60: number; d61_90: number; mas_90: number };
   };
-  ventas_mes: { neto: number; facturas: number; notas_credito: number };
+  /** neto incluye las notas de entrega del mes (lo no facturado, 22k), que también vienen aparte */
+  ventas_mes: { neto: number; facturas: number; notas_credito: number; notas_entrega?: number };
   /** Meta del mes cargada por administración (suma de las empresas visibles); la venta real es ventas_mes.neto. */
   meta_mes?: { meta: number; cargada: boolean };
   pedidos: { total: number; abiertos: number; por_aprobar: number; rechazados: number; mes_n: number; mes_monto: number };
