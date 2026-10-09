@@ -10,6 +10,31 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-09 · Verificación general: reportes alimentados solos y sincronización con Odoo sana
+
+- **Pedido del usuario:** verificar todo lo construido y confirmar que los reportes se alimentan solos de aquí en adelante y que la
+  sincronización con Odoo está operativa y sana.
+- **Sincronización:** 6 tareas programadas activas (sync cada 15 min lun–sáb 7:00–19:45 de Caracas + nocturna diaria 2:00, tasa
+  BCV 8:00, calidad, limpieza): 652 ejecuciones en 7 días sin una falla. Corridas de la sync en 7 días: 319 bien y 4 con error, todas ya
+  resueltas (3 interrupciones por despliegue el 6-oct y la de `fecha_pago` obligatoria el 8-oct); desde entonces todas bien en ~1 min.
+  La de las 7:00 del 9-oct arrancó sola y terminó bien en 56 s. La cola de escrituras hacia Odoo no tiene pendientes ni errores.
+- **Cuadre contra Odoo** (`scripts/cuadre-odoo.mjs`, solo lectura): **68/68**. Se ajustó el conteo de existencias por lote para no contar
+  las que Odoo conserva en cero (la sync no las guarda; las unidades ya cuadraban).
+- **Avisos de la sync, revisados:** las 11 "facturas sin cliente" son canceladas vacías (sin número, cliente ni monto); los cobros "sin
+  cliente" son 3 en cero y 6 depósitos por identificar (GUDS USD 12.438,41; Quirutec USD 6.593,15), que entran solos a Lo cobrado cuando
+  Odoo les asigna el cliente; los 4 pedidos "huérfanos" son pedidos borrados en Odoo que GUDS conserva cancelados.
+- **Reportes alimentados solos:** la última factura y el último cobro que trajo la sync de cada empresa aparecen sin ninguna carga en
+  el estado de cuenta, la Antigüedad, Ventas vs deuda y Lo cobrado; no hay vistas materializadas ni fotos que refrescar. Lo único fijo es el
+  histórico de Profit (cerrado en may-2026) y las cargas iniciales de finanzas (N/E históricas, gestión), que desde ahora se llevan en GUDS.
+- **Pruebas:** SQL 22a 36, 22b 29, 22c 23, 22d 45, 22f 31, 22g 38, 22h 23, 22j 38, 22k 19 y multiempresa 566; smokes general 42, 22e 19, 22f 52, 22g 66, 22h 57, 22j 53, 22k 28 y descargas 4, todo en verde; y una
+  revisión en producción (`docs/privado/22-verificacion/prod-reportes.cjs`: los 4 reportes, N/E en Ventas y el módulo de N/E en GUDS,
+  Quirutec y «Ambas», a 1440 y 390). Netlify corta con 403 ráfagas de recargas completas de un navegador automatizado (unas 40 en un minuto);
+  con uso normal y con curl responde 200.
+- **Pendiente para el equipo:** 25 clientes activos con facturas en el último año siguen sin tipo de cliente (40 propuestas sin confirmar
+  en Clasificación de clientes); los clientes nuevos que cree Odoo también llegan sin tipo hasta que se clasifiquen.
+
+---
+
 ## 2026-10-09 · Las notas de entrega cuentan en los reportes de ventas, diferenciadas (22k) y video guía de los 4 reportes
 
 - **Pedido del usuario:** "Sí, las N/E deben contar en los reportes de ventas, diferenciadas"; publicar todo en main; grabar un

@@ -95,7 +95,9 @@ for (const e of empresas) {
   const nLineas = await odoo.leer('stock.move.line', 'search_count',
     [[['company_id', '=', cid], ['picking_id', '!=', false], '|', ['lot_id', '!=', false], ['lot_name', '!=', false]]], {}, cid);
   comparar(e.nombre_corto, 'Lotes y series', lotesO.length, gi.lotes);
-  comparar(e.nombre_corto, 'Existencias por ubicación y lote', quantsO.length, gi.quants);
+  // La sync no guarda las existencias en cero (cantidad y reservado 0): Odoo las conserva hasta su limpieza
+  comparar(e.nombre_corto, 'Existencias por ubicación y lote',
+    quantsO.filter((q) => Math.abs(q.quantity || 0) > 0.0001 || Math.abs(q.reserved_quantity || 0) > 0.0001).length, gi.quants);
   comparar(e.nombre_corto, 'Unidades en existencia', suma(quantsO, 'quantity'), r2(gi.cantidad), 0.01);
   comparar(e.nombre_corto, 'Unidades reservadas', suma(quantsO, 'reserved_quantity'), r2(gi.reservado), 0.01);
   comparar(e.nombre_corto, 'Transferencias', transfO.length, gi.transf);
