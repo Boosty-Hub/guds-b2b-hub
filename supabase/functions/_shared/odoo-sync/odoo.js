@@ -195,9 +195,10 @@ export function crearClienteOdoo({ url, db, usuario, apiKey, timeoutMs = 120000 
       const regs = await rpc('object', 'execute_kw', [db, uid, apiKey, model, 'read', [ids, ['type', 'parent_id', 'comment']],
         { context: { active_test: false, allowed_company_ids: empresasPermitidas } }]);
       const deGuds = (r) => r.type === 'contact' && Array.isArray(r.parent_id) && RE_MARCA_GUDS.test(String(r.comment || '').trim());
-      // customer_rank no sirve (clientes con facturas quedan en 0): basta con el partner principal (sin padre, tipo contacto);
-      // que sea un cliente de GUDS lo exige la cola (clientes.odoo_id)
-      const esCliente = (r) => !Array.isArray(r.parent_id) && (r.type === 'contact' || !r.type);
+      // customer_rank no sirve (clientes con facturas quedan en 0): basta con el partner principal (sin padre). El tipo no
+      // importa sin padre: hay personas naturales de Odoo con tipo "invoice" que son su propio cliente (22i). Que sea un
+      // cliente de GUDS lo exige la cola (clientes.odoo_id)
+      const esCliente = (r) => !Array.isArray(r.parent_id);
       const ajenos = ids.filter((id) => {
         const r = regs.find((x) => x.id === id);
         if (!r) return true;

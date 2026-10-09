@@ -191,12 +191,19 @@ async function escribirClientes({ odoo, sql, fila, aplicar, log, quien }) {
     grupos.get(k).clientes.push({ ...c, nota });
   }
 
-  // Escritura: un write por grupo de clientes con los mismos valores y la misma compañía
+  // Escritura: un write por grupo de clientes con los mismos valores y la misma compañía. Si el grupo falla, se reintenta
+  // cliente por cliente para que uno rechazado no deje sin escribir a los demás (22i)
   if (aplicar) {
-    for (const g of grupos.values()) {
+    const pendientes = [...grupos.values()];
+    while (pendientes.length) {
+      const g = pendientes.shift();
       try {
         await odoo.escribir('res.partner', g.clientes.map((c) => c.odoo_id), g.vals, g.cid);
       } catch (e) {
+        if (g.clientes.length > 1) {
+          pendientes.unshift(...g.clientes.map((c) => ({ ...g, clientes: [c] })));
+          continue;
+        }
         for (const c of g.clientes) error(c, String(e?.message || e).slice(0, 300));
         continue;
       }
