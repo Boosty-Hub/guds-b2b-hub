@@ -10,6 +10,41 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-08 (noche) · Ventas vs deuda y días de recuperación oficiales en toda la plataforma (22h · R4)
+
+- **Pedido del usuario:** "sigue" con el plan de reportes de finanzas (R4: Ventas vs deuda y días de recuperación, D6).
+- **Reportes → Cobranza → Ventas vs deuda** (`?cobranza=ventas-deuda`, también en Ctrl+K; exige Reportes y Cuentas):
+  - Es el "Promedio de ventas vs deudas" de finanzas: venta con IVA por cliente y mes (Profit + Odoo), promedio de 12 y 5 meses, compra de 90 días, deuda neta, días de recuperación, deuda ÷ compra de 90 días, % de impuesto por cobrar y estado (activo, inactivo o en recuperación).
+  - Agrupa por cliente, vendedor, tipo, categoría o empresa; 12, 24 o 36 meses o desde dic-2020; corte al cierre del último mes o hoy; interruptor de notas de entrega; "activo" configurable.
+  - En el teléfono arranca en "solo resumen".
+  - Excel: Resumen · una hoja por empresa (con totales por año) · Por vendedor · Parámetros con la fórmula.
+- **Días de recuperación (D6)** = deuda neta al corte ÷ venta promedio mensual de 12 meses (con IVA) × 30 (migración `20261008_fase22h_ventas_vs_deuda.sql`):
+  - Deuda neta = la de la Antigüedad (`partidas_cobranza`), con notas de entrega si se incluyen. Las notas de entrega nunca cuentan como venta.
+  - Venta con IVA (`ventas_con_iva`): todos los documentos de Profit, como el Excel; en Odoo, facturas, NC y ND sin saldos iniciales.
+  - Cliente nuevo: el promedio se divide entre los meses desde su primera compra.
+  - Con deuda y sin compras en 12 meses = "en recuperación".
+- **La explicación está a la vista** donde aparece el número, con las cifras del cliente:
+  - Cuentas: nueva columna "Días rec.", con la fórmula al pasar el ratón.
+  - Tarjeta del detalle de la cuenta y ficha del vendedor.
+  - Cartera del vendedor en su portal.
+  - Reportes → Cobranza: recuperación por vendedor y por cliente.
+  - El Excel.
+  - El DSO de 90 días queda rotulado como "Tendencia 90 d (DSO)".
+- **Torre de control recalibrada:**
+  - "Clientes con más de 90 días de recuperación" y "Con deuda y sin compras en 12 meses", sin incobrables: hoy 61 y 95. Con la regla vieja del DSO salían 231.
+  - Umbral en `configuracion.cobranza_recuperacion_alerta_dias`.
+  - Cuentas filtra y cuenta lo mismo.
+- **Cuadre con el Excel al 30-abr-2026:**
+  - Venta de 12 meses: GUDS idéntica mes por mes (USD 1.669.545,30); Quirutec −1,4 %.
+  - El Excel de Quirutec suma como venta las notas de entrega de Profit. Ejemplo: las dos de sep-2025, USD 22.416. GUDS no las tiene ni las cuenta como venta.
+  - Deuda neta: GUDS −0,9 %, Quirutec −2,8 %.
+  - El "promedio anual" del Excel tiene divisores escritos a mano y agrupa clientes a mano; por cliente no siempre cuadra.
+- **Rendimiento:** el reporte ≈ 240 ms; las métricas de Cuentas con los días de hoy y del mes anterior ≈ 370 ms; la torre ≈ 200 ms.
+- **Verificación:**
+  - tsc, lint y build limpios.
+  - Suites: 22h 23/23 y las anteriores sin regresiones (ver informe).
+  - Playwright: 57/57 en GUDS, Quirutec y «Ambas» × 1440/390 (Excel, filtros, URL), más Cuentas = torre, detalle de la cuenta, ficha del vendedor, reportes, usuario sin Cuentas y portal del vendedor.
+
 ## 2026-10-08 (noche) · Antigüedad de la deuda, incobrables, anticipos de Odoo y notas de entrega (22g · R3 + NE1)
 
 - **Pedido del usuario:** "sigue" con el plan de reportes de finanzas (R3: T5, T6, Antigüedad y NE1).

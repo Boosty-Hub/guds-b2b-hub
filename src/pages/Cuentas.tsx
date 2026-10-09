@@ -31,7 +31,10 @@ import {
 import { HandCoins, ListChecks, Loader2, Mail, MailX } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EncabezadoOrdenable, useOrdenTabla } from "@/components/datos/tabla";
-import { useMetricasCobranza, dsoAlto, tendencia, textoDso, IconoTendencia, SelectorVentana, type MetricaCliente, type VentanaDso } from "@/components/cuentas/metricas";
+import {
+  useMetricasCobranza, dsoAlto, tendencia, textoDso, IconoTendencia, SelectorVentana, type MetricaCliente, type VentanaDso,
+  textoRecuperacion, formulaRecuperacion, recuperacionAlta, sinCompras, tendenciaRecuperacion,
+} from "@/components/cuentas/metricas";
 import { EnvioMasivoDialog } from "@/components/estado-cuenta/EnvioMasivoDialog";
 import { RegistroEnvios } from "@/components/estado-cuenta/RegistroEnvios";
 import { usePermissions } from "@/contexts/PermissionsContext";
@@ -109,6 +112,8 @@ const Cuentas = () => {
   const { datos: metricas, recargar: recargarMetricas } = useMetricasCobranza(ventana);
   const metricaDe = useMemo(() => new Map((metricas?.clientes ?? []).map((m) => [m.cliente_id, m])), [metricas]);
   const umbralDso = metricas?.alerta_dso ?? 60;
+  // 22h (D6): días de recuperación, la medida oficial (el DSO de la ventana queda como tendencia)
+  const umbralRec = metricas?.alerta_recuperacion ?? 90;
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [masivoAbierto, setMasivoAbierto] = useState(false);
   const [registroAbierto, setRegistroAbierto] = useState(false);
@@ -243,7 +248,9 @@ const Cuentas = () => {
     { valor: "con", etiqueta: "Con correo", prueba: (x) => !!x.m?.tiene_correo },
   ];
   const pruebasCobranza: OpcionPrueba<CuentaFila>[] = [
-    { valor: "dso_alto", etiqueta: `DSO alto (más de ${umbralDso} días o sin ventas con vencido)`, prueba: (x) => !!x.m && dsoAlto(x.m, umbralDso) },
+    { valor: "recuperacion_alta", etiqueta: `Recuperación lenta (más de ${umbralRec} días)`, prueba: (x) => !!x.m && recuperacionAlta(x.m, umbralRec) },
+    { valor: "sin_compras", etiqueta: "Con deuda y sin compras en 12 meses", prueba: (x) => !!x.m && sinCompras(x.m) },
+    { valor: "dso_alto", etiqueta: `Tendencia ${ventana} d alta (DSO de más de ${umbralDso} días o sin ventas con vencido)`, prueba: (x) => !!x.m && dsoAlto(x.m, umbralDso) },
     { valor: "empeora", etiqueta: "Empeora contra el mes anterior", prueba: (x) => !!x.m && tendencia(x.m) === "empeora" },
     { valor: "mejora", etiqueta: "Mejora contra el mes anterior", prueba: (x) => !!x.m && tendencia(x.m) === "mejora" },
     { valor: "a_favor_nc", etiqueta: "Con NC sin aplicar", prueba: (x) => (x.m?.a_favor_nc ?? 0) > 0.009 },
@@ -287,6 +294,7 @@ const Cuentas = () => {
   const { ordenadas: cuentasOrdenadas, orden, alternar } = useOrdenTabla(cuentasFiltradas, {
     cliente: (x) => x.c.nombre_negocio, saldo: (x) => x.saldo, vencido: (x) => x.m?.vencido ?? 0,
     dso: (x) => (x.m && x.m.deuda > 0.009 ? x.m.dso ?? 99999 : null), mora: (x) => x.m?.mora ?? 0, favor: (x) => x.m?.a_favor_nc ?? 0,
+    rec: (x) => (x.m && x.m.rec_deuda > 0.009 ? x.m.dias_rec ?? 99999 : null),
     docs: (x) => x.docs, limite: (x) => Number(x.c.limite_credito), ultimo: (x) => ultimoPagoByClient.get(x.c.id) ?? null,
   });
   const pagination = usePagination(cuentasOrdenadas, 50, f.firma);
@@ -312,7 +320,8 @@ const Cuentas = () => {
   const seleccionados = useMemo(() => cuentasCliente.filter((x) => seleccion.has(x.c.id)).map((x) => ({ id: x.c.id, nombre: x.c.nombre_negocio })), [cuentasCliente, seleccion]);
   const totalAFavorNc = (metricas?.clientes ?? []).reduce((s, m) => s + m.a_favor_nc, 0);
   const nSinCorreoDeuda = cuentasCliente.filter((x) => sinCorreo(x) && x.saldo > 0.009).length;
-  const nDsoAlto = cuentasCliente.filter((x) => x.m && dsoAlto(x.m, umbralDso)).length;
+  const nRecAlta = cuentasCliente.filter((x) => x.m && recuperacionAlta(x.m, umbralRec)).length;
+  const nSinCompras = cuentasCliente.filter((x) => x.m && sinCompras(x.m)).length;
   const pagination2 = usePagination(movimientosFiltrados, 50, f.firma);
 
   // Dialog: deudores + banco/método seleccionado
@@ -399,8 +408,10 @@ const Cuentas = () => {
         { label: "Clientes con Deuda", valor: clientesConDeuda, tono: "alerta" },
         { label: "A favor por aplicar", valor: formatPrice(totalAFavorNc), detalle: "NC sin cruzar", tono: totalAFavorNc > 0.009 ? "positivo" : "tenue",
           onClick: () => setTab("nc"), activo: tab === "nc" },
-        { label: `DSO alto (>${umbralDso} d)`, valor: metricas ? nDsoAlto : "…", tono: nDsoAlto ? "alerta" : "tenue",
-          onClick: () => { setTab("accounts"); setTimeout(() => f.setVarios({ cobranza: "dso_alto" }), 0); }, activo: f.v("cobranza") === "dso_alto" },
+        { label: `Recuperación > ${umbralRec} d`, valor: metricas ? nRecAlta : "…", tono: nRecAlta ? "alerta" : "tenue",
+          detalle: metricas && nSinCompras ? `${nSinCompras} con deuda y sin compras` : undefined,
+          titulo: "Días de recuperación = deuda neta ÷ venta promedio mensual de 12 meses (con IVA) × 30. No cuenta los incobrables",
+          onClick: () => { setTab("accounts"); setTimeout(() => f.setVarios({ cobranza: "recuperacion_alta" }), 0); }, activo: f.v("cobranza") === "recuperacion_alta" },
         { label: "Con deuda y sin correo", valor: metricas ? nSinCorreoDeuda : "…", tono: nSinCorreoDeuda ? "alerta" : "tenue",
           onClick: () => { setTab("accounts"); setTimeout(() => f.setVarios({ correo: "sin_deuda" }), 0); }, activo: f.v("correo") === "sin_deuda" },
         { label: "Recibos registrados", valor: pagos.filter((p) => p.estado === "verificado").length },
@@ -472,8 +483,11 @@ const Cuentas = () => {
                     <EncabezadoOrdenable clave="cliente" orden={orden} onOrdenar={alternar}>Cliente</EncabezadoOrdenable>
                     <EncabezadoOrdenable clave="saldo" orden={orden} onOrdenar={alternar} alinear="derecha">Saldo Deudor</EncabezadoOrdenable>
                     <EncabezadoOrdenable clave="vencido" orden={orden} onOrdenar={alternar} alinear="derecha" className="hidden lg:table-cell">Vencido</EncabezadoOrdenable>
-                    <EncabezadoOrdenable clave="dso" orden={orden} onOrdenar={alternar} alinear="derecha">
-                      <span title={`Días de venta adeudados: deuda ÷ venta promedio diaria de ${ventana} días`}>DSO</span>
+                    <EncabezadoOrdenable clave="rec" orden={orden} onOrdenar={alternar} alinear="derecha">
+                      <span title="Días de recuperación: deuda neta ÷ venta promedio mensual de 12 meses (con IVA) × 30. Pasa el ratón por un cliente para ver sus números">Días rec.</span>
+                    </EncabezadoOrdenable>
+                    <EncabezadoOrdenable clave="dso" orden={orden} onOrdenar={alternar} alinear="derecha" className="hidden lg:table-cell">
+                      <span title={`Tendencia (DSO): deuda bruta ÷ venta promedio diaria de ${ventana} días`}>Tend. {ventana} d</span>
                     </EncabezadoOrdenable>
                     <EncabezadoOrdenable clave="mora" orden={orden} onOrdenar={alternar} alinear="derecha" className="hidden xl:table-cell">
                       <span title="Días de mora ponderados por monto">Mora pond.</span>
@@ -490,6 +504,7 @@ const Cuentas = () => {
                     const est = estadoCuenta(c, saldo);
                     const t = m ? tendencia(m) : null;
                     const alto = m ? dsoAlto(m, umbralDso) : false;
+                    const lento = m ? recuperacionAlta(m, umbralRec) || sinCompras(m) : false;
                     return (
                       <TableRow key={c.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/cuentas/${c.id}`)} data-testid="cuenta-fila">
                         {puedeEnviar && (
@@ -508,7 +523,10 @@ const Cuentas = () => {
                           {formatPrice(saldo)}
                         </TableCell>
                         <TableCell className="hidden whitespace-nowrap text-right text-muted-foreground lg:table-cell">{m && m.vencido > 0.009 ? formatPrice(m.vencido) : "—"}</TableCell>
-                        <TableCell className={`whitespace-nowrap text-right tabular-nums ${alto ? "font-semibold text-destructive" : "text-muted-foreground"}`} data-testid="dso">
+                        <TableCell className={`whitespace-nowrap text-right tabular-nums ${lento ? "font-semibold text-destructive" : ""}`} data-testid="dias-rec" title={m ? formulaRecuperacion(m) : undefined}>
+                          <span className="inline-flex items-center justify-end gap-1">{m ? textoRecuperacion(m) : "—"}<IconoTendencia t={m ? tendenciaRecuperacion(m) : null} /></span>
+                        </TableCell>
+                        <TableCell className={`hidden whitespace-nowrap text-right tabular-nums lg:table-cell ${alto ? "font-semibold text-destructive" : "text-muted-foreground"}`} data-testid="dso">
                           <span className="inline-flex items-center justify-end gap-1">{m ? textoDso(m) : "—"}<IconoTendencia t={t} /></span>
                         </TableCell>
                         <TableCell className="hidden whitespace-nowrap text-right tabular-nums text-muted-foreground xl:table-cell">{m && m.deuda > 0.009 ? `${m.mora} d` : "—"}</TableCell>

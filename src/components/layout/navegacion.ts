@@ -118,6 +118,7 @@ export type AccesoBuscador = { label: string; path: string; seccion: string; mod
 export const accesosBuscador: AccesoBuscador[] = [
   { label: "Lo cobrado", path: "/admin/reportes?tab=cobranza&cobranza=cobrado", seccion: "Reportes · Cobranza", modulos: ["reportes"] },
   { label: "Antigüedad de la deuda", path: "/admin/reportes?tab=cobranza&cobranza=antiguedad", seccion: "Reportes · Cobranza", modulos: ["reportes", "cuentas"] },
+  { label: "Ventas vs deuda (días de recuperación)", path: "/admin/reportes?tab=cobranza&cobranza=ventas-deuda", seccion: "Reportes · Cobranza", modulos: ["reportes", "cuentas"] },
   { label: "Cobranza (resumen)", path: "/admin/reportes?tab=cobranza", seccion: "Reportes", modulos: ["reportes"] },
   { label: "Calidad y cuadre", path: "/admin/reportes?tab=calidad", seccion: "Reportes", modulos: ["reportes", "cuentas"] },
 ];

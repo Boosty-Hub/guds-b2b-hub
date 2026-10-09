@@ -18,7 +18,10 @@ import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { OdooBadge } from "@/components/OdooBadge";
 import { Badge } from "@/components/ui/badge";
 import { VendedorAccesoDialog, esCorreoRelleno } from "@/components/vendedores/VendedorAccesoDialog";
-import { useMetricasCobranza, dsoAlto, tendencia, textoDso, IconoTendencia, SelectorVentana, type MetricaCliente, type VentanaDso } from "@/components/cuentas/metricas";
+import {
+  useMetricasCobranza, dsoAlto, tendencia, textoDso, IconoTendencia, SelectorVentana, type MetricaCliente, type VentanaDso,
+  textoRecuperacion, formulaRecuperacion, recuperacionAlta, sinCompras, tendenciaRecuperacion, recuperacionGrupo, formulaGrupo,
+} from "@/components/cuentas/metricas";
 import { cn } from "@/lib/utils";
 
 interface Vendedor { id: string; nombre: string; apellido: string | null; email: string; telefono: string | null; activo: boolean; odoo_login?: string | null; }
@@ -80,6 +83,8 @@ const VendedorDetalle = () => {
     return new Map((metricas?.clientes ?? []).filter((m) => ids.has(m.cliente_id)).map((m) => [m.cliente_id, m]));
   }, [metricas, clientes]);
   const umbral = metricas?.alerta_dso ?? 60;
+  // 22h (D6): días de recuperación de la cartera = Σ deuda neta ÷ Σ venta promedio mensual (12 meses, con IVA) × 30
+  const umbralRec = metricas?.alerta_recuperacion ?? 90;
   const resumen = useMemo(() => {
     const ms = [...metricaDe.values()];
     const sum = (f: (m: MetricaCliente) => number) => ms.reduce((s, m) => s + f(m), 0);
@@ -93,8 +98,9 @@ const VendedorDetalle = () => {
       deuda, vencido: sum((m) => m.vencido), venta, dso, dsoAnt, mora, moraAnt, t: tendencia(agregado),
       aFavor: sum((m) => m.a_favor_nc), conNc: ms.filter((m) => m.a_favor_nc > 0.009).length,
       altos: ms.filter((m) => dsoAlto(m, umbral)).length,
+      rec: recuperacionGrupo(ms), lentos: ms.filter((m) => recuperacionAlta(m, umbralRec)).length, sinCompras: ms.filter(sinCompras).length,
     };
-  }, [metricaDe, ventana, umbral]);
+  }, [metricaDe, ventana, umbral, umbralRec]);
 
   const reasignar = async (clienteId: string, nuevoVendedorId: string | null) => {
     const { error } = await supabase.from("clientes").update({ vendedor_asignado_id: nuevoVendedorId }).eq("id", clienteId);
@@ -164,8 +170,18 @@ const VendedorDetalle = () => {
           </div>
           {!metricas && cargandoMet ? <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div> : (
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 p-3 text-xs sm:grid-cols-4">
+              <div className="col-span-2 border-b border-border pb-2 sm:col-span-4" data-testid="vd-recuperacion">
+                <dt className="text-muted-foreground">Días de recuperación de la cartera</dt>
+                <dd className={cn("text-base font-semibold tabular-nums", resumen.rec.dias != null && resumen.rec.dias > umbralRec && "text-destructive")} data-testid="vd-dias-rec">
+                  {resumen.rec.deuda <= 0.009 ? "Sin deuda" : resumen.rec.dias == null ? "Sin compras" : `${resumen.rec.dias} d`}
+                </dd>
+                <dd className="text-[11px] text-muted-foreground" data-testid="vd-formula">{formulaGrupo(resumen.rec)}</dd>
+                <dd className="text-[11px] text-muted-foreground">
+                  {resumen.lentos} cliente{resumen.lentos === 1 ? "" : "s"} con más de {umbralRec} días · {resumen.sinCompras} con deuda y sin compras en 12 meses (sin contar incobrables)
+                </dd>
+              </div>
               <div>
-                <dt className="text-muted-foreground">Días de venta adeudados (DSO)</dt>
+                <dt className="text-muted-foreground" title={`Deuda bruta ÷ venta promedio diaria de los últimos ${ventana} días`}>Tendencia {ventana} días (DSO)</dt>
                 <dd className={cn("flex items-center gap-1 text-base font-semibold tabular-nums", resumen.dso != null && resumen.dso > umbral && "text-destructive")} data-testid="vd-dso">
                   {resumen.deuda <= 0.009 ? "Sin deuda" : resumen.dso == null ? "Sin ventas" : `${resumen.dso} d`}<IconoTendencia t={resumen.t} />
                 </dd>
@@ -177,7 +193,7 @@ const VendedorDetalle = () => {
                 <dd className="text-[11px] text-muted-foreground">mes anterior {resumen.moraAnt} d · vencido {formatPrice(resumen.vencido)}</dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">Clientes con DSO alto</dt>
+                <dt className="text-muted-foreground">Clientes con tendencia alta</dt>
                 <dd className={cn("text-base font-semibold tabular-nums", resumen.altos > 0 && "text-destructive")} data-testid="vd-altos">{resumen.altos}</dd>
                 <dd className="text-[11px] text-muted-foreground">sobre {umbral} días o con vencido sin ventas</dd>
               </div>
@@ -202,17 +218,21 @@ const VendedorDetalle = () => {
         ) : (
           <>
             <Table>
-              <TableHeader><TableRow><TableHead>Cliente</TableHead><TableHead className="text-right">Saldo</TableHead><TableHead className="hidden text-right sm:table-cell">DSO</TableHead><TableHead className="w-56">Reasignar a</TableHead></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>Cliente</TableHead><TableHead className="text-right">Saldo</TableHead><TableHead className="text-right" title="Días de recuperación: deuda neta ÷ venta promedio mensual de 12 meses (con IVA) × 30">Días rec.</TableHead><TableHead className="hidden text-right md:table-cell" title={`Tendencia: deuda bruta ÷ venta diaria de ${ventana} días (DSO)`}>Tend. {ventana} d</TableHead><TableHead className="w-56">Reasignar a</TableHead></TableRow></TableHeader>
               <TableBody>
                 {pagination.pageItems.map((c) => (
                   <TableRow key={c.id}>
                     <TableCell><p className="flex items-center gap-1.5 font-medium">{c.nombre_negocio}{c.odoo_id && <OdooBadge />}</p><p className="text-xs text-muted-foreground">{c.codigo}</p></TableCell>
                     <TableCell className={`text-right font-semibold ${c.saldo > 0.009 ? "text-destructive" : ""}`}>{formatPrice(c.saldo)}</TableCell>
-                    {(() => { const m = metricaDe.get(c.id); return (
-                      <TableCell className={cn("hidden whitespace-nowrap text-right tabular-nums sm:table-cell", m && dsoAlto(m, umbral) ? "font-semibold text-destructive" : "text-muted-foreground")} data-testid="vd-dso-cliente">
+                    {(() => { const m = metricaDe.get(c.id); return (<>
+                      <TableCell className={cn("whitespace-nowrap text-right tabular-nums", m && (recuperacionAlta(m, umbralRec) || sinCompras(m)) && "font-semibold text-destructive")}
+                        title={m ? formulaRecuperacion(m) : undefined} data-testid="vd-rec-cliente">
+                        <span className="inline-flex items-center justify-end gap-1">{m ? textoRecuperacion(m) : "—"}{m && <IconoTendencia t={tendenciaRecuperacion(m)} />}</span>
+                      </TableCell>
+                      <TableCell className={cn("hidden whitespace-nowrap text-right tabular-nums md:table-cell", m && dsoAlto(m, umbral) ? "font-semibold text-destructive" : "text-muted-foreground")} data-testid="vd-dso-cliente">
                         <span className="inline-flex items-center justify-end gap-1">{m ? textoDso(m) : "—"}{m && <IconoTendencia t={tendencia(m)} />}</span>
                       </TableCell>
-                    ); })()}
+                    </>); })()}
                     <TableCell>
                       {c.odoo_id && c.vendedor_odoo ? (
                         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">

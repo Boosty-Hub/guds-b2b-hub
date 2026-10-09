@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 // Métricas internas de cobranza (fase 21b, plan de revisión §3): solo para el equipo, nunca en el estado de cuenta del
 // cliente. Fuente: metricas_cobranza(dias, cliente) — la misma para Cuentas, el detalle de la cuenta y la cartera del
 // vendedor; Reportes → Cobranza usa reporte_dso con el mismo cálculo.
+// 22h (D6): la medida oficial son los DÍAS DE RECUPERACIÓN = deuda neta ÷ venta promedio mensual de 12 meses (con IVA) × 30,
+// siempre con su explicación a la vista. El DSO de la ventana (30/90/180 días, deuda bruta) queda como "tendencia".
 
 export type VentanaDso = 30 | 90 | 180;
 
@@ -14,7 +16,7 @@ export interface MetricaCliente {
   deuda: number; vencido: number; docs: number;
   a_favor_nc: number; nc_sin_aplicar: number; nc_mas_antigua: string | null;
   venta: number;
-  /** Deuda ÷ venta promedio diaria de la ventana. null = sin ventas en la ventana (con deuda). */
+  /** Tendencia: deuda bruta ÷ venta promedio diaria de la ventana. null = sin ventas en la ventana (con deuda). */
   dso: number | null;
   /** Días de mora ponderados por monto (lo por vencer cuenta 0). */
   mora: number;
@@ -22,8 +24,17 @@ export interface MetricaCliente {
   /** Días promedio de la emisión al cobro (ponderado), de lo cobrado en la ventana. */
   dias_pago: number | null;
   limite: number; sobre_limite: boolean; tiene_correo: boolean; corte_ant: string;
+  /** Días de recuperación (D6). null = con deuda neta y sin compras en 12 meses. */
+  dias_rec: number | null;
+  dias_rec_ant: number | null;
+  /** Deuda neta (facturas y ND − NC a favor − anticipos, + notas de entrega si el usuario las ve) */
+  rec_deuda: number;
+  rec_ne: number;
+  /** Venta con IVA de los últimos 12 meses y los meses que la dividen (menos de 12 si es cliente nuevo) */
+  rec_venta: number; rec_meses: number; rec_promedio: number;
+  incobrable: boolean;
 }
-export interface Metricas { dias: number; alerta_dso: number; clientes: MetricaCliente[] }
+export interface Metricas { dias: number; alerta_dso: number; alerta_recuperacion: number; recuperacion_ne: boolean; clientes: MetricaCliente[] }
 
 const num = (v: unknown) => (v == null ? null : Number(v));
 const normalizar = (m: Record<string, unknown>): MetricaCliente => ({
@@ -34,6 +45,8 @@ const normalizar = (m: Record<string, unknown>): MetricaCliente => ({
   deuda_ant: Number(m.deuda_ant ?? 0), venta_ant: Number(m.venta_ant ?? 0), dso_ant: num(m.dso_ant), mora_ant: Number(m.mora_ant ?? 0),
   dias_pago: num(m.dias_pago), limite: Number(m.limite ?? 0), sobre_limite: !!m.sobre_limite, tiene_correo: !!m.tiene_correo,
   corte_ant: String(m.corte_ant ?? ""),
+  dias_rec: num(m.dias_rec), dias_rec_ant: num(m.dias_rec_ant), rec_deuda: Number(m.rec_deuda ?? 0), rec_ne: Number(m.rec_ne ?? 0),
+  rec_venta: Number(m.rec_venta ?? 0), rec_meses: Number(m.rec_meses ?? 12), rec_promedio: Number(m.rec_promedio ?? 0), incobrable: !!m.incobrable,
 });
 
 export function useMetricasCobranza(dias: VentanaDso | null, clienteId?: string | null, activo = true) {
@@ -45,8 +58,9 @@ export function useMetricasCobranza(dias: VentanaDso | null, clienteId?: string 
     setCargando(true);
     const { data, error: e } = await supabase.rpc("metricas_cobranza", { p_dias: dias, p_cliente_id: clienteId ?? null });
     if (e) { setError(e.message); setCargando(false); return; }
-    const d = data as { dias: number; alerta_dso: number; clientes: Record<string, unknown>[] };
-    setDatos({ dias: d.dias, alerta_dso: d.alerta_dso, clientes: (d.clientes ?? []).map(normalizar) });
+    const d = data as { dias: number; alerta_dso: number; alerta_recuperacion?: number; recuperacion_ne?: boolean; clientes: Record<string, unknown>[] };
+    setDatos({ dias: d.dias, alerta_dso: d.alerta_dso, alerta_recuperacion: d.alerta_recuperacion ?? 90, recuperacion_ne: !!d.recuperacion_ne,
+      clientes: (d.clientes ?? []).map(normalizar) });
     setError(null);
     setCargando(false);
   }, [dias, clienteId, activo]);
@@ -70,6 +84,39 @@ export const tendencia = (m: MetricaCliente): Tendencia => {
 
 export const textoDso = (m: Pick<MetricaCliente, "dso" | "deuda">) =>
   m.deuda <= 0.009 ? "Sin deuda" : m.dso == null ? "Sin ventas" : `${m.dso} d`;
+
+// ── Días de recuperación (D6) ──
+type Rec = Pick<MetricaCliente, "dias_rec" | "dias_rec_ant" | "rec_deuda" | "rec_promedio" | "rec_meses" | "rec_ne" | "incobrable">;
+const usd = (n: number) => `${n < 0 ? "-" : ""}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** "57 d" · "Sin deuda" · "Sin compras" (con deuda neta y sin compras en 12 meses) */
+export const textoRecuperacion = (m: Rec) => (m.rec_deuda <= 0.009 ? "Sin deuda" : m.dias_rec == null ? "Sin compras" : `${m.dias_rec} d`);
+/** Recuperación lenta: más días que el umbral (sin contar los incobrables; misma regla que alertas_cobranza). */
+export const recuperacionAlta = (m: Rec, umbral: number) => m.rec_deuda > 1 && m.dias_rec != null && m.dias_rec > umbral && !m.incobrable;
+/** Con deuda neta y sin compras en 12 meses ("en recuperación" en el Excel de finanzas), sin contar los incobrables. */
+export const sinCompras = (m: Rec) => m.rec_deuda > 1 && m.dias_rec == null && !m.incobrable;
+/** La regla, con los números del cliente (D6: la explicación va donde se muestre el número). */
+export const formulaRecuperacion = (m: Rec) => {
+  if (m.rec_deuda <= 0.009) return "Días de recuperación: sin deuda neta (facturas y ND − NC a favor − anticipos).";
+  const ne = m.rec_ne > 0.009 ? ` (incluye ${usd(m.rec_ne)} de notas de entrega)` : "";
+  if (m.dias_rec == null) return `Deuda neta ${usd(m.rec_deuda)}${ne} y sin compras en los últimos 12 meses: no hay venta promedio para calcular los días (en recuperación).`;
+  const meses = m.rec_meses >= 12 ? "12 meses" : `${m.rec_meses} ${m.rec_meses === 1 ? "mes" : "meses"} desde su primera compra`;
+  return `Días de recuperación: deuda neta ${usd(m.rec_deuda)}${ne} ÷ venta promedio mensual ${usd(m.rec_promedio)} (${meses}, con IVA) × 30 = ${m.dias_rec} días`;
+};
+/** Contra el cierre del mes anterior: más de 3 días (o 10 %) de diferencia. */
+export const tendenciaRecuperacion = (m: Rec): Tendencia => {
+  if (m.dias_rec == null || m.dias_rec_ant == null) return null;
+  const dif = m.dias_rec - m.dias_rec_ant;
+  if (Math.abs(dif) <= Math.max(3, Math.abs(m.dias_rec_ant) * 0.1)) return "igual";
+  return dif < 0 ? "mejora" : "empeora";
+};
+/** Días de recuperación de un grupo de clientes: Σ deuda neta ÷ Σ promedio mensual × 30 (como reporte_dso). */
+export const recuperacionGrupo = (ms: Rec[]) => {
+  const deuda = ms.reduce((s, m) => s + m.rec_deuda, 0), prom = ms.reduce((s, m) => s + m.rec_promedio, 0);
+  return { deuda, promedio: prom, dias: deuda <= 0.009 ? 0 : prom > 0.009 ? Math.round((deuda / prom) * 30) : null };
+};
+export const formulaGrupo = (g: { deuda: number; promedio: number; dias: number | null }) =>
+  g.deuda <= 0.009 ? "Sin deuda neta." : g.dias == null ? `Deuda neta ${usd(g.deuda)} y sin compras en 12 meses.`
+    : `Días de recuperación: deuda neta ${usd(g.deuda)} ÷ venta promedio mensual ${usd(g.promedio)} (12 meses, con IVA) × 30 = ${g.dias} días`;
 
 export function IconoTendencia({ t, className }: { t: Tendencia; className?: string }) {
   if (!t) return null;
@@ -101,6 +148,8 @@ export function TarjetaMetricas({ clienteId, formatPrice }: { clienteId: string;
   const m = datos?.clientes[0] ?? null;
   const t = m ? tendencia(m) : null;
   const alto = m && datos ? dsoAlto(m, datos.alerta_dso) : false;
+  const tr = m ? tendenciaRecuperacion(m) : null;
+  const lento = m && datos ? recuperacionAlta(m, datos.alerta_recuperacion) || sinCompras(m) : false;
   return (
     <div className="rounded-lg border border-border bg-card" data-testid="cd-metricas">
       <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
@@ -116,8 +165,18 @@ export function TarjetaMetricas({ clienteId, formatPrice }: { clienteId: string;
         : !m ? <p className="p-3 text-xs text-muted-foreground">Sin deuda ni ventas en los últimos {ventana} días.</p>
         : (
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 p-3 text-xs">
+            {/* 22h (D6): la medida oficial, con su explicación */}
+            <div className="col-span-2 border-b border-border pb-2" data-testid="cd-recuperacion">
+              <dt className="text-muted-foreground">Días de recuperación</dt>
+              <dd className={cn("flex items-center gap-1 text-base font-semibold tabular-nums", lento && "text-destructive")} data-testid="cd-dias-rec">
+                {textoRecuperacion(m)}<IconoTendencia t={tr} />
+                {m.incobrable && <span className="ml-1 rounded bg-destructive/10 px-1 text-[10px] font-medium text-destructive">Incobrable</span>}
+              </dd>
+              <dd className="text-[11px] text-muted-foreground" data-testid="cd-formula">{formulaRecuperacion(m)}</dd>
+              <dd className="text-[11px] text-muted-foreground">Cierre del mes anterior: {m.dias_rec_ant == null ? (m.rec_deuda > 0.009 ? "sin compras" : "—") : `${m.dias_rec_ant} días`}</dd>
+            </div>
             <div>
-              <dt className="text-muted-foreground">Días de venta adeudados (DSO)</dt>
+              <dt className="text-muted-foreground" title={`Deuda bruta ÷ venta promedio diaria de los últimos ${ventana} días: sirve para ver hacia dónde va`}>Tendencia {ventana} días (DSO)</dt>
               <dd className={cn("flex items-center gap-1 text-base font-semibold tabular-nums", alto && "text-destructive")} data-testid="cd-dso">
                 {textoDso(m)}<IconoTendencia t={t} />
               </dd>

@@ -51,7 +51,9 @@ export function usePendingActions() {
       supabase.from("ordenes").select("id", { count: "exact", head: true }).eq("aprobacion", "aprobada").is("odoo_id", null)
         .not("odoo_envio_error", "is", null),
     ]);
-    const cobranza = (cobranzaRes.data as { umbral: number; dso_alto: number; sobre_limite: number } | null) ?? { umbral: 60, dso_alto: 0, sobre_limite: 0 };
+    // 22h (D6): días de recuperación (deuda neta ÷ venta promedio mensual de 12 meses × 30) sobre el umbral, y con deuda sin compras
+    const cobranza = (cobranzaRes.data as { umbral: number; dso_alto: number; sobre_limite: number; umbral_recuperacion?: number; recuperacion_alta?: number; sin_compras?: number } | null)
+      ?? { umbral: 60, dso_alto: 0, sobre_limite: 0 };
 
     const lista: PendingActionItem[] = [
       { clave: "por-aprobar", label: "Pedidos por aprobar", count: porAprobarRes.count || 0, link: "/admin/ordenes?aprobacion=pendiente", icono: ClipboardCheck },
@@ -61,7 +63,8 @@ export function usePendingActions() {
       { clave: "consignacion", label: "Consignación por revisar", count: consignacionRes.count || 0, link: "/admin/consignacion", icono: Boxes },
       { clave: "retenciones", label: "Retenciones por revisar", count: retencionesRes.count || 0, link: "/admin/retenciones", icono: FileMinus2 },
       { clave: "conciliacion", label: "Líneas de extracto sin conciliar", count: extractoLineasRes.count || 0, link: "/admin/conciliacion", icono: ListChecks },
-      { clave: "dso-alto", label: `Clientes con DSO de más de ${cobranza.umbral} días`, count: cobranza.dso_alto || 0, link: "/admin/cuentas?cobranza=dso_alto", icono: Gauge },
+      { clave: "recuperacion-alta", label: `Clientes con más de ${cobranza.umbral_recuperacion ?? 90} días de recuperación`, count: cobranza.recuperacion_alta || 0, link: "/admin/cuentas?cobranza=recuperacion_alta", icono: Gauge },
+      { clave: "sin-compras", label: "Clientes con deuda y sin compras en 12 meses", count: cobranza.sin_compras || 0, link: "/admin/cuentas?cobranza=sin_compras", icono: Gauge },
       { clave: "sobre-limite", label: "Clientes sobre su límite de crédito", count: cobranza.sobre_limite || 0, link: "/admin/cuentas?situacion=excedido", icono: CreditCard },
       { clave: "stock", label: "Productos con stock bajo", count: stockBajoRes.count || 0, link: "/admin/inventario", icono: Package },
       { clave: "sin-vendedor", label: "Clientes sin vendedor asignado", count: sinVendedorRes.count || 0, link: "/admin/vendedores", icono: UserX },

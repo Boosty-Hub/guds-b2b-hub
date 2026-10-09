@@ -18,7 +18,10 @@ import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { useMetricasCobranza, dsoAlto, tendencia, textoDso, IconoTendencia } from "@/components/cuentas/metricas";
+import {
+  useMetricasCobranza, IconoTendencia, textoRecuperacion, formulaRecuperacion, recuperacionAlta, sinCompras as sinComprasConDeuda, tendenciaRecuperacion,
+  recuperacionGrupo, formulaGrupo,
+} from "@/components/cuentas/metricas";
 import {
   FiltrosLista, useFiltros, opcionesDe, opcionesTexto, opcionesPrueba, pasaPrueba, coincide, coincideTexto, contadorFiltrado,
   type OpcionPrueba,
@@ -29,6 +32,8 @@ import {
 // deuda que el admin y que resumen_vendedor()).
 // 21b: DSO por cliente (deuda ÷ venta promedio diaria de 90 días) con tendencia contra el mes anterior, de
 // metricas_cobranza (solo sus clientes); deuda y saldo a favor (NC sin aplicar) por separado.
+// 22h (D6): en lugar del DSO, los días de recuperación (deuda neta ÷ venta promedio mensual de 12 meses con IVA × 30), con
+// la explicación a la vista (encabezado, título de la columna y cifras de cada cliente al tocar o pasar el ratón).
 
 type Filtro = "todos" | "visitar" | "vencido" | "por_vencer" | "sin_compras" | "al_dia";
 type Orden = "prioridad" | "vencido" | "mora" | "monto" | "dso" | "nombre";
@@ -68,7 +73,9 @@ const VendedorCartera = () => {
   const { resumen } = useResumenVendedor();
   const { datos: metricas } = useMetricasCobranza(90);
   const metricaDe = useMemo(() => new Map((metricas?.clientes ?? []).map((m) => [m.cliente_id, m])), [metricas]);
-  const umbral = metricas?.alerta_dso ?? 60;
+  const umbralRec = metricas?.alerta_recuperacion ?? 90;
+  const lento = (id: string) => { const m = metricaDe.get(id); return !!m && (recuperacionAlta(m, umbralRec) || sinComprasConDeuda(m)); };
+  const recCartera = useMemo(() => recuperacionGrupo([...metricaDe.values()]), [metricaDe]);
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get("q") || "");
   const [orden, setOrden] = useState<Orden>("prioridad");
@@ -112,7 +119,10 @@ const VendedorCartera = () => {
       vencido: (a, b) => b.vencido - a.vencido,
       mora: (a, b) => b.dias_mora - a.dias_mora || b.vencido - a.vencido,
       monto: (a, b) => b.por_cobrar - a.por_cobrar,
-      dso: (a, b) => (metricaDe.get(b.id)?.dso ?? (b.por_cobrar > 0.009 ? 99999 : -1)) - (metricaDe.get(a.id)?.dso ?? (a.por_cobrar > 0.009 ? 99999 : -1)),
+      dso: (a, b) => {
+        const d = (id: string) => { const m = metricaDe.get(id); return !m || m.rec_deuda <= 0.009 ? -1 : m.dias_rec ?? 99999; };
+        return d(b.id) - d(a.id);
+      },
       nombre: (a, b) => a.nombre_negocio.localeCompare(b.nombre_negocio),
     };
     return [...filas].sort(cmp[orden]);
@@ -151,6 +161,12 @@ const VendedorCartera = () => {
         { label: "Saldo a favor", valor: formatPrice(Math.abs(totales.a_favor)), detalle: "notas de crédito", tono: "tenue" },
       ]} />
       <TramosAntiguedad tramos={tramos} activo={tramo} onElegir={setTramo} className="mb-3" />
+      {metricas && recCartera.deuda > 0.009 && (
+        <p className="-mt-1 mb-3 text-xs text-muted-foreground" data-testid="cartera-recuperacion">
+          <span className="font-semibold text-foreground">{recCartera.dias == null ? "Sin compras en 12 meses" : `${recCartera.dias} días de recuperación`}</span> en tu cartera.{" "}
+          {formulaGrupo(recCartera)}.
+        </p>
+      )}
 
       <BarraLista busqueda={q} onBusqueda={setQ} placeholder="Buscar cliente, código o ciudad..."
         filtros={
@@ -175,7 +191,7 @@ const VendedorCartera = () => {
               <SelectItem value="vencido">Mayor vencido</SelectItem>
               <SelectItem value="mora">Más días de mora</SelectItem>
               <SelectItem value="monto">Mayor saldo</SelectItem>
-              <SelectItem value="dso">Mayor DSO</SelectItem>
+              <SelectItem value="dso">Más días de recuperación</SelectItem>
               <SelectItem value="nombre">Nombre</SelectItem>
             </SelectContent>
           </Select>
@@ -199,8 +215,9 @@ const VendedorCartera = () => {
                         {c.vencido > 0.009 && <span className="font-semibold tabular-nums text-destructive">{formatPrice(c.vencido)} vencido</span>}
                         {c.por_cobrar > 0.009 && <span className="tabular-nums text-muted-foreground">de {formatPrice(c.por_cobrar)}</span>}
                         {c.cobros_pendientes > 0 && <span className="text-amber-700 dark:text-amber-300">{c.cobros_pendientes} cobro(s) por verificar</span>}
-                        {(() => { const m = metricaDe.get(c.id); return m && m.deuda > 0.009 ? (
-                          <span className={cn("inline-flex items-center gap-0.5 tabular-nums", dsoAlto(m, umbral) ? "font-semibold text-destructive" : "text-muted-foreground")}>DSO {textoDso(m)}<IconoTendencia t={tendencia(m)} /></span>
+                        {(() => { const m = metricaDe.get(c.id); return m && m.rec_deuda > 0.009 ? (
+                          <span className={cn("inline-flex items-center gap-0.5 tabular-nums", lento(c.id) ? "font-semibold text-destructive" : "text-muted-foreground")}
+                            title={formulaRecuperacion(m)}>Recuperación {textoRecuperacion(m)}<IconoTendencia t={tendenciaRecuperacion(m)} /></span>
                         ) : null; })()}
                       </div>
                     </div>
@@ -216,7 +233,7 @@ const VendedorCartera = () => {
                     <TableHead>Situación</TableHead>
                     <TableHead className="text-right">Vencido</TableHead>
                     <TableHead className="text-right">Por cobrar</TableHead>
-                    <TableHead className="text-right" title="Días de venta adeudados: deuda ÷ venta promedio diaria de 90 días">DSO</TableHead>
+                    <TableHead className="text-right" title="Días de recuperación: deuda neta ÷ venta promedio mensual de 12 meses (con IVA) × 30">Días rec.</TableHead>
                     <TableHead className="hidden text-right lg:table-cell">A favor</TableHead>
                     <TableHead className="hidden lg:table-cell">Próx. vencimiento</TableHead>
                     <TableHead className="hidden lg:table-cell">Última compra</TableHead>
@@ -237,8 +254,9 @@ const VendedorCartera = () => {
                           {c.a_favor < -0.009 && <span className="block text-[11px] text-emerald-700 dark:text-emerald-400 lg:hidden">{formatPrice(Math.abs(c.a_favor))} a favor</span>}
                         </TableCell>
                         {(() => { const m = metricaDe.get(c.id); return (
-                          <TableCell className={cn("whitespace-nowrap text-right tabular-nums", m && dsoAlto(m, umbral) ? "font-semibold text-destructive" : "text-muted-foreground")} data-testid="cartera-dso">
-                            <span className="inline-flex items-center justify-end gap-1">{m ? textoDso(m) : "—"}{m && <IconoTendencia t={tendencia(m)} />}</span>
+                          <TableCell className={cn("whitespace-nowrap text-right tabular-nums", lento(c.id) ? "font-semibold text-destructive" : "text-muted-foreground")}
+                            title={m ? formulaRecuperacion(m) : undefined} data-testid="cartera-dso">
+                            <span className="inline-flex items-center justify-end gap-1">{m ? textoRecuperacion(m) : "—"}{m && <IconoTendencia t={tendenciaRecuperacion(m)} />}</span>
                           </TableCell>
                         ); })()}
                         <TableCell className="hidden whitespace-nowrap text-right tabular-nums text-emerald-700 dark:text-emerald-400 lg:table-cell">{c.a_favor < -0.009 ? formatPrice(Math.abs(c.a_favor)) : ""}</TableCell>

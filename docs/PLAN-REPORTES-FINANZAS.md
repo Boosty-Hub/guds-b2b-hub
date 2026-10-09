@@ -295,6 +295,30 @@ Las ventas **cuadran al centavo** con `ventas_historicas.total_usd`.
    - Hay que **recalibrar el umbral de "DSO alto"** (hoy 60) de la torre de control con la nueva fórmula.
 3. Siempre rotular "venta con IVA" o "venta neta". La venta oficial de los reportes de ventas sigue siendo sin IVA.
 
+**✅ Hecho (22h, 8-oct).** Reportes → Cobranza → **Ventas vs deuda** (`?cobranza=ventas-deuda`, también en Ctrl+K; exige
+reportes y cuentas):
+
+- **Venta con IVA** (`ventas_con_iva`): Profit = todos sus documentos, como el Excel (facturas, devoluciones, notas
+  financieras, ND cambiarias y reversos); Odoo = facturas, NC y ND publicadas sin saldos iniciales.
+- **Días de recuperación (D6)** (`recuperacion_calculo`): deuda neta de la Antigüedad (`partidas_cobranza`, con N/E si se
+  incluyen) ÷ venta promedio mensual de 12 meses (cliente nuevo: los meses desde su primera compra) × 30. Con deuda y sin
+  compras en 12 meses = "en recuperación" (sin días).
+- La sub-vista: cliente × mes (12, 24, 36 meses o desde dic-2020), venta de 12 meses, promedios de 12 y 5 meses, compra de 90
+  días, deuda neta, días, deuda ÷ compra 90 d, % de impuesto por cobrar, activo / inactivo (compró en los últimos N meses,
+  configurable) y en recuperación; por cliente, vendedor, tipo, categoría o empresa; Excel con Resumen, una hoja por
+  empresa, Por vendedor y Parámetros (con la fórmula). Corte: cierre del último mes (por defecto) o hoy.
+- **La explicación está a la vista donde aparece el número**: encabezado de la sub-vista y total, título de cada celda, columna
+  "Días rec." de Cuentas, tarjeta del detalle de la cuenta, ficha del vendedor, cartera del vendedor en su portal,
+  Reportes → Cobranza (por vendedor y cliente) y Parámetros del Excel. El DSO de la ventana queda como **"Tendencia 90 d (DSO)"**.
+- **Torre de control recalibrada**: "más de 90 días de recuperación" (`configuracion.cobranza_recuperacion_alerta_dias`, 90) y
+  "con deuda y sin compras en 12 meses", sin contar los incobrables (hoy 61 y 95; con la regla vieja del DSO salían 231).
+  Cuentas cuenta lo mismo que la torre.
+- **Cuadre con el Excel al 30-abr:** venta de 12 meses de GUDS igual al centavo (USD 1.669.545,30, mes por mes); Quirutec −1,4 %
+  porque el Excel de Quirutec **suma como venta las notas de entrega de Profit** (no fiscales; p. ej. las dos de sep-2025 de
+  USD 22.416), que GUDS no tiene ni cuenta como venta (D4). Deuda neta: GUDS −0,9 %, Quirutec −2,8 % (anticipos de saldo
+  inicial fechados en mayo y documentos del 1 al 6 de mayo). El "promedio anual" del Excel tiene divisores manuales en algunas
+  filas y agrupa clientes a mano (hoja LISTADO): por cliente no siempre cuadra.
+
 ---
 
 ## D5 — Clasificación de clientes: qué hay en Odoo frente al Excel
@@ -462,13 +486,18 @@ Por eso `clientes.tipo_cliente`, `canal` y `segmento` están vacíos en GUDS: la
 | R1 | Estado de cuenta con el formato del equipo, Excel y corte | R0 |
 | R2 | Lo cobrado + carga de cobros de Profit ene–abr | R0 |
 | R3 | T5, T6, Antigüedad y NE1 (+ T1 si ya se decidió D5) — ✅ 22g | R0, NE1 |
-| R4 | Ventas vs deuda y días de recuperación nuevos, con su explicación | R3 |
+| R4 | Ventas vs deuda y días de recuperación nuevos, con su explicación — ✅ 22h | R3 |
 | NE2–NE3 | Emitir, abonos y conversión de N/E | respuestas de finanzas |
 
 Cada fase se cierra con el cuadre contra el Excel del equipo (es la "respuesta correcta"), conteos de UI contra SQL y
 Playwright a 1440 y 390 px en GUDS, Quirutec y «Ambas».
 
 ## Hallazgos para revisar
+
+> 8-oct (noche, 22h): **Ventas vs deuda** hecha (ver §4). Para decidir con finanzas: el Excel de Quirutec cuenta como venta las
+> notas de entrega de Profit; el plan (D4) dice que nunca son venta y GUDS solo tiene las 29 abiertas, así que los clientes que
+> compran con N/E salen con más días de recuperación en GUDS. Si finanzas quiere contarlas, hay que cargar el histórico de
+> N/E de Profit. Umbral de la torre: 90 días (la mediana hoy es 70); se cambia en `cobranza_recuperacion_alerta_dias`.
 
 > 8-oct (noche, 22g): **Antigüedad** hecha (ver §2). Dos hallazgos para finanzas: (1) Odoo tiene **USD 251.687 en cobros sin
 > aplicar** (GUDS 55.929, Quirutec 195.758; 256 cobros, varios de "Saldo Iniciales Anticipo") que GUDS no mostraba; ahora restan
