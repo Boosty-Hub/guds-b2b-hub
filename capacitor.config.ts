@@ -11,6 +11,9 @@ const config: CapacitorConfig = {
   server: {
     url: "https://portal.guds-supply.com/login",
     cleartext: false,
+    // Pantalla local (va en el binario: public/offline.html → dist/) cuando no se puede cargar el portal.
+    // Capacitor la resuelve contra el origen local de la app (webDir), no contra server.url.
+    errorPath: "offline.html",
   },
   appendUserAgent: "GudsStoreNativa",
   ios: {

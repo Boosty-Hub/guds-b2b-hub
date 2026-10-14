@@ -11,3 +11,6 @@ verify_jwt = false
 verify_jwt = false
 [functions.enviar-estado-cuenta]
 verify_jwt = false
+# La llama el disparador de notificaciones (pg_net) con el header x-push-secret; la función valida ese secreto.
+[functions.enviar-push]
+verify_jwt = false

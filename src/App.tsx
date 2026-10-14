@@ -13,6 +13,7 @@ import { EmpresaProvider, RemontarPorEmpresa } from "@/contexts/EmpresaContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { BoostySupport } from "@/components/support/BoostySupport";
+import { PushNativo } from "@/components/PushNativo";
 
 // Precarga del código de la ruta de entrada: las pantallas de los portales (y el módulo de rutas del admin) registran su
 // ruta y, si la URL con la que se abre la app coincide, su código se pide en paralelo con la sesión y la empresa, en vez
@@ -156,6 +157,8 @@ const App = () => (
             <CambioClaveSiHaceFalta />
             <BoostySupport />
             <BrowserRouter>
+              {/* App nativa: registro push y toques en notificaciones (fuera de RemontarPorEmpresa: no se remonta) */}
+              <PushNativo />
               <ErrorBoundary>
               <RemontarPorEmpresa>
               <Suspense fallback={<CargandoRuta />}>

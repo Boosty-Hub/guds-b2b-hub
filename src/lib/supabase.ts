@@ -27,6 +27,22 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   global: { fetch: fetchConEmpresa },
 });
 
+// Tareas que corren ANTES de cerrar la sesión, con la sesión todavía válida, sea cual sea el camino que llame a
+// supabase.auth.signOut() (menús de cada panel, cuenta desactivada, cambio de clave…). La usa la app nativa para quitar
+// el token push de este teléfono (lib/pushNativo.ts). Cada tarea debe acotar su propia espera.
+const tareasAntesDeSalir = new Set<() => Promise<void>>();
+export const antesDeCerrarSesion = (tarea: () => Promise<void>) => {
+  tareasAntesDeSalir.add(tarea);
+  return () => { tareasAntesDeSalir.delete(tarea); };
+};
+const signOutOriginal = supabase.auth.signOut.bind(supabase.auth);
+supabase.auth.signOut = async (opciones) => {
+  if (opciones?.scope !== 'others' && tareasAntesDeSalir.size) {
+    await Promise.allSettled([...tareasAntesDeSalir].map((tarea) => tarea()));
+  }
+  return signOutOriginal(opciones);
+};
+
 // Types
 export interface Empresa {
   id: string;

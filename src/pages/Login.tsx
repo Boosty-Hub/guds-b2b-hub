@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,15 +17,38 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
 
+// Pantalla de inicio de cada rol
+const inicioPorRol = (role?: string) => {
+  switch (role) {
+    case "admin":
+      return "/admin/dashboard";
+    case "cliente":
+      return "/portal";
+    case "vendedor":
+      return "/vendedor";
+    case "delivery":
+      return "/delivery";
+    default:
+      return "/";
+  }
+};
+
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, user, loading } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  // La app nativa abre siempre en /login: con sesión vigente se pasa directo al inicio del rol
+  useEffect(() => {
+    if (!loading && user) {
+      navigate(inicioPorRol(user.role), { replace: true });
+    }
+  }, [loading, user, navigate]);
 
   const handleForgotPassword = async () => {
     if (!email) {
@@ -72,23 +95,7 @@ const Login = () => {
           description: "Inicio de sesión exitoso",
         });
 
-        // Redirigir según el rol
-        switch (result.role) {
-          case "admin":
-            navigate("/admin/dashboard");
-            break;
-          case "cliente":
-            navigate("/portal");
-            break;
-          case "vendedor":
-            navigate("/vendedor");
-            break;
-          case "delivery":
-            navigate("/delivery");
-            break;
-          default:
-            navigate("/");
-        }
+        navigate(inicioPorRol(result.role));
       } else {
         toast({
           title: "Error de autenticación",

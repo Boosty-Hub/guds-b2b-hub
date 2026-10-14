@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light" />
+  <title>Guds Store — Sin conexión</title>
+  <!--
+    Pantalla de error de la app nativa (Capacitor server.errorPath). Va dentro del binario (dist/ → cap sync) y se muestra
+    cuando el WebView no puede cargar el portal. Autocontenida: sin red no hay fuentes ni estilos externos.
+  -->
+  <style>
+    html, body { margin: 0; height: 100%; background: #ffffff; color: #111827; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      display: flex; align-items: center; justify-content: center;
+      padding: env(safe-area-inset-top) 24px env(safe-area-inset-bottom);
+      box-sizing: border-box; -webkit-user-select: none; user-select: none;
+    }
+    main { max-width: 340px; width: 100%; text-align: center; }
+    img { width: 88px; height: 88px; border-radius: 20px; display: block; margin: 0 auto 20px; }
+    h1 { font-size: 20px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.01em; }
+    p { font-size: 16px; line-height: 1.45; color: #4b5563; margin: 0 0 28px; }
+    button {
+      appearance: none; -webkit-appearance: none; border: 0; border-radius: 12px;
+      background: #111827; color: #ffffff; font: inherit; font-size: 16px; font-weight: 600;
+      width: 100%; min-height: 48px; padding: 12px 20px; cursor: pointer;
+    }
+    button:active { opacity: 0.85; }
+    button[disabled] { opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/apple-touch-icon.png" alt="" onerror="this.style.display='none'" />
+    <h1>Guds Store</h1>
+    <p>No pudimos conectar con Guds Store. Revisa tu conexión a internet.</p>
+    <button id="reintentar" type="button">Reintentar</button>
+  </main>
+  <script>
+    (function () {
+      var PORTAL = "https://portal.guds-supply.com/login";
+      var boton = document.getElementById("reintentar");
+      function reintentar() {
+        boton.disabled = true;
+        boton.textContent = "Conectando…";
+        window.location.href = PORTAL;
+        // Si la carga vuelve a fallar, la app muestra esta pantalla otra vez; por si se queda aquí, se rehabilita.
+        setTimeout(function () { boton.disabled = false; boton.textContent = "Reintentar"; }, 8000);
+      }
+      boton.addEventListener("click", reintentar);
+      window.addEventListener("online", reintentar);
+    })();
+  </script>
+</body>
+</html>
