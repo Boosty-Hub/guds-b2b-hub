@@ -1,0 +1,280 @@
+# Compila y firma el App Bundle (.aab) de Android "Guds Store" y, si se pide, lo sube a Google Play.
+# A diferencia de iOS no hace falta una Mac: Gradle y el SDK de Android corren en Linux y la imagen de Ubuntu trae el
+# SDK con sus licencias aceptadas.
+#
+# EL PRIMER LANZAMIENTO ES MANUAL. La API de Google Play no puede crear una app y rechaza subidas de un paquete que Play
+# Console nunca vio ("Package not found"). El primer .aab se sube a mano:
+#   1. Crear la app en Play Console con el id com.guds.guds (no se puede cambiar una vez publicada).
+#   2. Correr este workflow con upload apagado y descargar el artifact guds-store-android-*.
+#   3. En Play Console, crear una versión en Prueba interna y subirlo.
+# Después de eso, cada build puede correr con upload encendido.
+#
+# APPS EN BORRADOR. Mientras la app no tenga su primera versión publicada en algún track, Play solo acepta versiones
+# creadas como borrador ("Only releases with status draft may be created on draft app"): por eso release_status es
+# draft por defecto. La versión se publica desde Play Console.
+#
+# Nunca apunta a producción: una versión probada se promueve desde Play Console.
+#
+# FIRMA. Play App Signing guarda la llave real de firma de la app; este job solo firma con la llave de subida, que Play
+# Console puede restablecer si se pierde. El keystore (PKCS12 creado con OpenSSL, alias guds-upload, contraseña del
+# keystore = contraseña de la llave) vive en secrets, nunca en el repo.
+#
+# VERSION CODE. Play rechaza un .aab cuyo versionCode ya recibió, así que se deriva del número de ejecución más 100 en
+# vez de subirlo a mano. Reintentar un job conserva su run number: volver a subir la misma ejecución falla en Play en vez
+# de pisar nada. El input version_code lo reemplaza cuando hace falta un número concreto.
+#
+# FIREBASE ES OBLIGATORIO. Sin google-services.json el plugin de push cierra la app en cuanto se registra para recibir
+# notificaciones, así que nunca debe existir un build sin Firebase: el job falla en vez de producirlo.
+#
+# Secrets requeridos (Settings > Secrets and variables > Actions):
+#   ANDROID_KEYSTORE_BASE64    keystore de subida (.p12), en base64
+#   ANDROID_KEYSTORE_PASSWORD  contraseña del keystore
+#   ANDROID_KEY_ALIAS          alias de la llave de subida (guds-upload)
+#   ANDROID_KEY_PASSWORD       contraseña de la llave (igual a la del keystore en un PKCS12)
+#   GOOGLE_SERVICES_JSON       google-services.json de Firebase, en base64 (también se acepta el JSON tal cual)
+#   PLAY_SERVICE_ACCOUNT_JSON  JSON de la cuenta de servicio de Google Play, tal cual (solo si upload=true)
+#
+# Las variables VITE_* vienen del archivo .env versionado en el repo. El shell carga el portal en vivo (server.url en
+# capacitor.config.ts); el dist/ empaquetado es solo respaldo.
+#
+# Solo manual: una subida a una ficha de tienda nunca debe ser efecto secundario de un push.
+
+name: Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "versionName (igual a la versión de iOS)"
+        type: string
+        default: "1.2.0"
+      version_code:
+        description: "versionCode fijo (vacío = número de ejecución + 100)"
+        type: string
+        required: false
+        default: ""
+      upload:
+        description: "Subir el .aab a Google Play"
+        type: boolean
+        default: false
+      track:
+        description: "Track de Play (nunca producción)"
+        type: choice
+        options:
+          - internal
+          - alpha
+        default: internal
+      release_status:
+        description: "Estado de la versión en Play (draft hasta que la app tenga su primera versión publicada)"
+        type: choice
+        options:
+          - draft
+          - completed
+        default: draft
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  android:
+    name: Build Android (Google Play)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      APPLICATION_ID: com.guds.guds
+      VERSION_CODE_OFFSET: 100
+      AAB_PATH: android/app/build/outputs/bundle/release/app-release.aab
+      BUNDLETOOL_VERSION: 1.18.3
+      BUNDLETOOL_SHA256: a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Antes de cualquier build: si no, un secret faltante aparece como error de firma de Gradle varios minutos después.
+      - name: Verificar secrets e inputs
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          UPLOAD: ${{ inputs.upload }}
+          INPUT_NAME: ${{ inputs.version_name }}
+          INPUT_CODE: ${{ inputs.version_code }}
+        run: |
+          missing=0
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD GOOGLE_SERVICES_JSON; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Falta el secret ${name}."
+              missing=1
+            fi
+          done
+          if [ "$UPLOAD" = "true" ] && [ -z "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::error::Falta el secret PLAY_SERVICE_ACCOUNT_JSON (obligatorio con upload encendido)."
+            missing=1
+          fi
+          if ! [[ "$INPUT_NAME" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]]; then
+            echo "::error::version_name debe tener la forma 1.2.0, se recibió '$INPUT_NAME'."
+            missing=1
+          fi
+          if [ -n "$INPUT_CODE" ] && ! [[ "$INPUT_CODE" =~ ^[1-9][0-9]{0,8}$ ]]; then
+            echo "::error::version_code debe ser un entero positivo, se recibió '$INPUT_CODE'."
+            missing=1
+          fi
+          exit $missing
+
+      # capacitor.build.gradle fija la compatibilidad de Java en 21.
+      - name: Setup Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build web y cap sync
+        run: |
+          npm ci
+          npm run build
+          npx cap sync android
+
+      - name: Resolver versionCode y versionName
+        env:
+          INPUT_NAME: ${{ inputs.version_name }}
+          INPUT_CODE: ${{ inputs.version_code }}
+        run: |
+          if [ -n "$INPUT_CODE" ]; then
+            CODE="$INPUT_CODE"
+          else
+            CODE=$(( GITHUB_RUN_NUMBER + VERSION_CODE_OFFSET ))
+          fi
+          echo "versionCode: $CODE · versionName: $INPUT_NAME"
+          echo "ANDROID_VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+          echo "ANDROID_VERSION_NAME=$INPUT_NAME" >> "$GITHUB_ENV"
+
+      # Se verifica, no solo se copia: un archivo de otra app compila bien y luego falla cada registro de FCM en el teléfono.
+      - name: Instalar google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          TARGET=android/app/google-services.json
+          if [[ "$GOOGLE_SERVICES_JSON" =~ ^[[:space:]]*\{ ]]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > "$TARGET"
+          else
+            printf '%s' "$GOOGLE_SERVICES_JSON" | base64 --decode > "$TARGET"
+          fi
+          node -e '
+            const fs = require("fs");
+            let f;
+            try { f = JSON.parse(fs.readFileSync("android/app/google-services.json", "utf8")); }
+            catch { console.error("::error::GOOGLE_SERVICES_JSON no es un JSON válido (ni en base64)."); process.exit(1); }
+            const ids = (f.client || []).map((c) => c?.client_info?.android_client_info?.package_name).filter(Boolean);
+            if (!ids.includes(process.env.APPLICATION_ID)) {
+              console.error("::error::google-services.json no tiene un cliente para " + process.env.APPLICATION_ID + " (encontrados: " + (ids.join(", ") || "ninguno") + ").");
+              process.exit(1);
+            }
+            console.log("Proyecto de Firebase: " + (f.project_info && f.project_info.project_id));
+          '
+
+      - name: Instalar keystore de subida
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/guds-upload.p12"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          # Falla aquí, con un mensaje claro, si la contraseña o el alias no corresponden al keystore.
+          if ! keytool -list -keystore "$KEYSTORE_PATH" -storetype PKCS12 -storepass:env ANDROID_KEYSTORE_PASSWORD \
+            -alias "$ANDROID_KEY_ALIAS" > /dev/null; then
+            echo "::error::No se pudo abrir el keystore o no contiene el alias indicado en ANDROID_KEY_ALIAS."
+            exit 1
+          fi
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      # gradlew puede llegar sin el bit de ejecución si se versionó desde Windows.
+      - name: Compilar App Bundle firmado
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon --stacktrace
+
+      # jarsigner responde "jar verified." para un bundle firmado (las advertencias por un certificado de subida
+      # autofirmado son esperables) y "jar is unsigned." si no lo está. Sin -strict, que falla justo por esa advertencia.
+      - name: Verificar firma del bundle
+        run: |
+          if [ ! -f "$AAB_PATH" ]; then
+            echo "::error::No se generó el bundle en $AAB_PATH."
+            exit 1
+          fi
+          OUT="$(jarsigner -verify -verbose -certs "$AAB_PATH" 2>&1 || true)"
+          if ! grep -q "jar verified." <<<"$OUT"; then
+            echo "$OUT" | tail -40
+            echo "::error::El bundle no está firmado."
+            exit 1
+          fi
+          echo "OK bundle firmado. Su SHA-256 debe coincidir con la llave de subida en Play Console > Prueba y lanzamiento > Configuración > Firma de apps:"
+          keytool -printcert -jarfile "$AAB_PATH" | grep -E "Owner:|SHA256:" || keytool -printcert -jarfile "$AAB_PATH"
+
+      - name: Verificar paquete, versionCode y versionName del bundle
+        run: |
+          JAR="$RUNNER_TEMP/bundletool.jar"
+          curl -fsSL -o "$JAR" "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
+          echo "${BUNDLETOOL_SHA256}  $JAR" | sha256sum -c -
+          leer() { java -jar "$JAR" dump manifest --bundle "$AAB_PATH" --xpath "$1" | tr -d '[:space:]'; }
+          fail=0
+          expect() {
+            if [ "$2" != "$3" ]; then echo "::error::$1 es '$2', se esperaba '$3'."; fail=1; else echo "OK $1 = $2"; fi
+          }
+          expect package "$(leer /manifest/@package)" "$APPLICATION_ID"
+          expect versionCode "$(leer /manifest/@android:versionCode)" "$ANDROID_VERSION_CODE"
+          expect versionName "$(leer /manifest/@android:versionName)" "$ANDROID_VERSION_NAME"
+          exit "$fail"
+
+      # Se guarda aunque no se suba: el primer lanzamiento se sube a mano desde este artifact. Solo si todas las
+      # verificaciones pasaron, para que nunca quede a mano un bundle sin firmar o con la versión equivocada.
+      - name: Subir .aab como artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: guds-store-android-${{ env.ANDROID_VERSION_NAME }}-${{ env.ANDROID_VERSION_CODE }}
+          path: ${{ env.AAB_PATH }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Subir a Google Play
+        if: ${{ inputs.upload }}
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.APPLICATION_ID }}
+          releaseFiles: ${{ env.AAB_PATH }}
+          releaseName: ${{ env.ANDROID_VERSION_NAME }} (${{ env.ANDROID_VERSION_CODE }})
+          track: ${{ inputs.track }}
+          status: ${{ inputs.release_status }}
+
+      # upload-google-play escribe la cuenta de servicio en ./serviceAccountJson.json y solo la borra si termina bien.
+      - name: Limpiar keystore y archivos con secretos
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/guds-upload.p12" "$RUNNER_TEMP/bundletool.jar" \
+            android/app/google-services.json ./serviceAccountJson.json

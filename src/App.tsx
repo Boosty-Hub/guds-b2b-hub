@@ -33,6 +33,8 @@ const Registro = lazy(() => import("./pages/Registro"));
 const TerminosCondiciones = lazy(() => import("./pages/TerminosCondiciones"));
 const Soporte = lazy(() => import("./pages/Soporte"));
 const PoliticasPrivacidad = lazy(() => import("./pages/PoliticasPrivacidad"));
+// Eliminación de cuenta sin sesión ni app instalada (requisito de Google Play)
+const EliminarCuenta = lazy(() => import("./pages/EliminarCuenta"));
 // Estado de cuenta público por enlace (sin sesión, revocable): fase 20w
 const EstadoCuentaPublico = lazyRuta(["/estado-cuenta/:token"], () => import("./pages/EstadoCuentaPublico"));
 
@@ -171,6 +173,7 @@ const App = () => (
                 <Route path="/terminos" element={<TerminosCondiciones />} />
                 <Route path="/soporte" element={<Soporte />} />
                 <Route path="/privacidad" element={<PoliticasPrivacidad />} />
+                <Route path="/eliminar-cuenta" element={<EliminarCuenta />} />
                 <Route path="/estado-cuenta/:token" element={<EstadoCuentaPublico />} />
                 
                 {/* Panel de administración (solo admin): sus rutas y páginas se descargan aparte (rutas/RutasAdmin) */}

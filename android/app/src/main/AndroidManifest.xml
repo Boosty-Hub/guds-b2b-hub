@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+
+        <!-- Valores por defecto de Firebase Messaging para un push que llega con la app en segundo plano. Sin el ícono,
+             Android pinta un cuadro blanco en la barra de estado. El canal es el mismo que crea src/lib/pushNativo.ts y el
+             que manda supabase/functions/enviar-push. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_guds" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/guds_notificacion" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="avisos" />
+    </application>
+
+    <!-- Permisos: solo los que la app usa de verdad -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Notificaciones push. Android 13+ lo pide en tiempo de ejecución; el plugin lo solicita desde JS con
+         requestPermissions() (pushNativo.ts, después de iniciar sesión). El plugin no lo declara por su cuenta. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Fotos de comprobantes de pago (cobros del vendedor) y de la evidencia de entrega (cierre de entrega del
+         repartidor): <input type="file" capture="environment">. BridgeWebChromeClient pide este permiso antes de abrir
+         la cámara cuando está declarado. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Ubicación del repartidor (navigator.geolocation, alta precisión) solo con la app abierta: mientras tiene una
+         ruta activa y al cerrar una entrega. BridgeWebChromeClient.onGeolocationPermissionsShowPrompt pide ambos
+         permisos en tiempo de ejecución; sin declararlos aquí la geolocalización del WebView siempre se niega.
+         No hay ubicación en segundo plano (no se declara ACCESS_BACKGROUND_LOCATION). -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- Sin permisos de almacenamiento ni de medios (READ_MEDIA_IMAGES, READ_MEDIA_VIDEO, READ_EXTERNAL_STORAGE), a
+         propósito: adjuntar una imagen existente pasa por el selector del sistema (fileChooserParams.createIntent()),
+         que no necesita permiso. La política de fotos y videos de Google Play rechaza READ_MEDIA_IMAGES en apps cuya
+         función principal no es acceder a toda la galería. -->
+
+    <!-- Sin identificador de publicidad: la app no muestra anuncios ni usa el ID de publicidad (así se declara en Play).
+         Firebase lo agregaría al combinar los manifiestos de sus librerías; se quita aquí. -->
+    <uses-permission
+        android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="remove" />
+
+    <!-- La cámara y la ubicación se usan a través del WebView y no son requisitos para instalar (CAMERA y los permisos
+         de ubicación los implicarían): así las tabletas sin cámara o sin ubicación pueden instalar la app. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+
+</manifest>

@@ -1,168 +1,239 @@
-import { Button } from "@/components/ui/button";
-import { ArrowLeft, Shield } from "lucide-react";
-import { useNavigate } from "react-router-dom";
-import { useContactoEmpresa } from "@/hooks/useContactoEmpresa";
+import type { ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
+import { Logo } from "@/components/Logo";
+import { CORREO_PRIVACIDAD, DESARROLLADOR, NOMBRE_APP, SITIO_PORTAL } from "@/lib/legal";
+
+// Pública a propósito (fuera de ProtectedRoute): es la URL de la política de privacidad en Google Play y App Store, así
+// que abre sin sesión y sin la app instalada. Google Play la compara con el formulario de Seguridad de los datos: todo lo
+// que se diga aquí tiene que coincidir con lo que la app recopila de verdad y con quién lo recibe. Si se agrega un dato o
+// un proveedor nuevo, se actualiza esta página (y la fecha) y el formulario de Play.
+
+const ULTIMA_ACTUALIZACION = "16 de octubre de 2026";
+
+const Seccion = ({ numero, titulo, children }: { numero: number; titulo: string; children: ReactNode }) => (
+  <section className="space-y-3">
+    <h2 className="text-lg font-semibold text-foreground">{numero}. {titulo}</h2>
+    {children}
+  </section>
+);
+
+const Parrafo = ({ children }: { children: ReactNode }) => (
+  <p className="text-sm leading-relaxed text-muted-foreground">{children}</p>
+);
+
+const Lista = ({ children }: { children: ReactNode }) => (
+  <ul className="list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted-foreground">{children}</ul>
+);
+
+const Dato = ({ children }: { children: ReactNode }) => <strong className="font-semibold text-foreground">{children}</strong>;
+
+const Correo = () => (
+  <a href={`mailto:${CORREO_PRIVACIDAD}`} className="font-medium text-primary hover:underline break-all">
+    {CORREO_PRIVACIDAD}
+  </a>
+);
 
 const PoliticasPrivacidad = () => {
-  const contacto = useContactoEmpresa();
   const navigate = useNavigate();
-
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
-        <Button
-          variant="ghost"
-          onClick={() => navigate(-1)}
-          className="mb-6"
+    <div className="min-h-screen bg-background px-4 py-10">
+      <div className="mx-auto w-full max-w-3xl space-y-8">
+        <button
+          type="button"
+          onClick={() => (window.history.length > 1 ? navigate(-1) : navigate("/login"))}
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="h-4 w-4 mr-2" />
+          <ArrowLeft className="h-4 w-4" aria-hidden />
           Volver
-        </Button>
+        </button>
 
-        <div className="flex items-center gap-3 mb-8">
-          <Shield className="h-10 w-10 text-primary" />
-          <h1 className="text-4xl font-bold text-foreground">Políticas de Privacidad</h1>
+        <div className="flex justify-center">
+          <Logo className="h-14 text-primary" />
         </div>
 
-        <div className="prose prose-gray dark:prose-invert max-w-none">
-          <p className="text-muted-foreground text-lg mb-8">
-            Última actualización: {new Date().toLocaleDateString('es-VE', { year: 'numeric', month: 'long', day: 'numeric' })}
-          </p>
+        <header className="space-y-2 text-center">
+          <h1 className="text-3xl font-bold text-foreground">Política de privacidad</h1>
+          <p className="text-sm text-muted-foreground">Última actualización: {ULTIMA_ACTUALIZACION}</p>
+        </header>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">1. Introducción</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              En GUDS ("nosotros", "nuestro" o "la aplicación"), nos comprometemos a proteger la privacidad 
-              y seguridad de la información personal de nuestros usuarios. Esta Política de Privacidad describe 
-              cómo recopilamos, usamos, almacenamos y protegemos su información cuando utiliza nuestra aplicación 
-              y servicios.
-            </p>
-          </section>
+        <Seccion numero={1} titulo="Quiénes somos">
+          <Parrafo>
+            {DESARROLLADOR} ("GUDS", "nosotros") es una distribuidora mayorista. Esta política explica qué información
+            personal recopilamos, para qué la usamos, con quién la compartimos y qué opciones tienes. Aplica a la app{" "}
+            {NOMBRE_APP} para iPhone y Android y al portal web {SITIO_PORTAL}, que son el mismo servicio.
+          </Parrafo>
+          <Parrafo>
+            {NOMBRE_APP} es un servicio entre empresas: lo usan nuestros clientes (comercios), nuestros vendedores y
+            repartidores, y nuestro personal administrativo. Las cuentas de clientes se abren con una solicitud de registro que
+            revisamos o las crea GUDS para tu empresa; las de vendedores y repartidores las crea GUDS.
+          </Parrafo>
+        </Seccion>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">2. Información que Recopilamos</h2>
-            <p className="text-muted-foreground leading-relaxed mb-4">
-              Podemos recopilar los siguientes tipos de información:
-            </p>
-            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4">
-              <li><strong>Información de identificación personal:</strong> Nombre, apellido, correo electrónico, número de teléfono.</li>
-              <li><strong>Información del negocio:</strong> Nombre del negocio, RIF, dirección comercial, tipo de negocio.</li>
-              <li><strong>Información de transacciones:</strong> Historial de pedidos, métodos de pago utilizados, preferencias de compra.</li>
-              <li><strong>Información de ubicación:</strong> Dirección de entrega, coordenadas geográficas para optimizar rutas de delivery.</li>
-              <li><strong>Información del dispositivo:</strong> Tipo de dispositivo, sistema operativo, identificadores únicos.</li>
-              <li><strong>Información de uso:</strong> Páginas visitadas, funciones utilizadas, tiempo de sesión.</li>
-            </ul>
-          </section>
+        <Seccion numero={2} titulo="Información que recopilamos">
+          <Lista>
+            <li>
+              <Dato>Solicitud de registro como cliente:</Dato> razón social, RIF, tipo de negocio, si es contribuyente especial,
+              el documento del RIF que subes, nombre, correo y teléfono de la persona de contacto, dirección fiscal y de
+              entrega, ciudad y estado.
+            </li>
+            <li>
+              <Dato>Tu cuenta:</Dato> nombre, apellido, correo, teléfono, rol y, si decides subirla, una foto de perfil. Tu
+              contraseña la guarda el servicio de autenticación solo de forma protegida (con hash); nadie puede leerla.
+            </li>
+            <li>
+              <Dato>Pedidos, pagos y cuenta comercial:</Dato> pedidos, facturas, notas de entrega, estado de cuenta y crédito;
+              los pagos que reportas (referencia, banco, monto, fecha) con la imagen del comprobante; y los comprobantes de
+              retención de impuestos que subes.
+            </li>
+            <li>
+              <Dato>Vendedores:</Dato> los pedidos y cobros que registran para sus clientes, con la foto del comprobante de pago.
+            </li>
+            <li>
+              <Dato>Repartidores:</Dato> fotos de evidencia de entrega, la firma y el nombre de quien recibe y las notas de la
+              entrega. También la <Dato>ubicación precisa</Dato> del teléfono, solo con la app abierta y en primer plano:
+              mientras el repartidor tiene una ruta activa o una entrega en camino (una lectura cada pocos minutos, que se
+              borra a los 90 días) y al confirmar una entrega (se guarda con esa entrega). La app no usa la ubicación en
+              segundo plano ni la de clientes o vendedores.
+            </li>
+            <li>
+              <Dato>Notificaciones:</Dato> si las permites, un identificador (token) por teléfono que Apple o Google usan para
+              entregarlas, junto con la plataforma, la versión de la app y el modelo del teléfono.
+            </li>
+            <li>
+              <Dato>Soporte:</Dato> si usas el chat de soporte con la sesión iniciada, tu nombre, tu correo y lo que escribas.
+            </li>
+          </Lista>
+          <Parrafo>
+            <Dato>Lo que no hacemos.</Dato> Los pagos no se procesan en la app: los clientes reportan transferencias, pagos
+            móviles o Zelle hechos fuera de ella, y no pedimos ni guardamos datos de tarjetas. La app no muestra publicidad, no
+            usa el identificador de publicidad del teléfono, no tiene herramientas de analítica ni cookies de seguimiento, y no
+            vendemos tus datos. No accede a tus contactos ni a tu calendario. Usa la cámara solo cuando decides tomar una foto,
+            y las imágenes que adjuntas las eliges tú en el selector del sistema. En tu teléfono o navegador guardamos tu
+            sesión y algunas preferencias para que la app funcione.
+          </Parrafo>
+        </Seccion>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">3. Uso de la Información</h2>
-            <p className="text-muted-foreground leading-relaxed mb-4">
-              Utilizamos la información recopilada para:
-            </p>
-            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4">
-              <li>Procesar y gestionar sus pedidos</li>
-              <li>Proporcionar servicios de entrega</li>
-              <li>Comunicarnos con usted sobre su cuenta y pedidos</li>
-              <li>Enviar notificaciones relacionadas con el servicio</li>
-              <li>Mejorar nuestros productos y servicios</li>
-              <li>Personalizar su experiencia de usuario</li>
-              <li>Cumplir con obligaciones legales y regulatorias</li>
-              <li>Prevenir fraudes y actividades no autorizadas</li>
-            </ul>
-          </section>
+        <Seccion numero={3} titulo="Para qué la usamos">
+          <Lista>
+            <li>Revisar tu solicitud de registro y abrir y administrar tu cuenta de cliente.</li>
+            <li>Tomar, preparar, facturar y entregar tus pedidos, y llevar tu estado de cuenta, tus pagos y tu crédito.</li>
+            <li>Organizar las rutas de reparto, saber cuándo y dónde se entregó un pedido y resolver reclamos sobre una entrega.</li>
+            <li>Avisarte por notificación o correo sobre tus pedidos, pagos y cuenta, y enviarte tu estado de cuenta.</li>
+            <li>Conciliar los pagos reportados con los movimientos de nuestras cuentas bancarias.</li>
+            <li>Darte soporte, mantener el servicio seguro y evitar usos indebidos.</li>
+            <li>Cumplir nuestras obligaciones legales, contables y fiscales.</li>
+          </Lista>
+        </Seccion>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">4. Compartición de Información</h2>
-            <p className="text-muted-foreground leading-relaxed mb-4">
-              No vendemos ni alquilamos su información personal a terceros. Podemos compartir información con:
-            </p>
-            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4">
-              <li><strong>Proveedores de servicios:</strong> Empresas que nos ayudan a operar nuestro negocio (procesamiento de pagos, servicios de hosting).</li>
-              <li><strong>Personal de delivery:</strong> Información necesaria para completar las entregas (dirección, nombre del destinatario).</li>
-              <li><strong>Autoridades legales:</strong> Cuando sea requerido por ley o para proteger nuestros derechos.</li>
-            </ul>
-          </section>
+        <Seccion numero={4} titulo="Con quién la compartimos">
+          <Parrafo>No vendemos ni alquilamos tu información. Solo la compartimos con:</Parrafo>
+          <Lista>
+            <li>
+              <Dato>Nuestro personal,</Dato> según su función: el vendedor asignado a tu cuenta, el repartidor que lleva tu
+              pedido (nombre del negocio, dirección y contacto de entrega) y el personal administrativo.
+            </li>
+            <li>
+              <Dato>Proveedores que operan partes del servicio</Dato> por cuenta nuestra y solo para ese fin:
+              <ul className="mt-2 list-[circle] space-y-1.5 pl-5">
+                <li>Supabase: alojamiento, inicio de sesión, base de datos y almacenamiento de archivos.</li>
+                <li>Google Firebase Cloud Messaging y Apple Push Notification service: notificaciones a los teléfonos.</li>
+                <li>Boosty Support: el chat de soporte, que recibe el nombre y el correo de quien tiene la sesión iniciada.</li>
+                <li>Mapbox: mapas y búsqueda de direcciones en las pantallas de nuestro personal (rutas y ubicaciones de entrega).</li>
+                <li>Resend: envío por correo de los estados de cuenta.</li>
+                <li>
+                  Anthropic: asistencia con inteligencia artificial en la conciliación bancaria interna; procesa líneas de
+                  nuestros extractos bancarios y las referencias de los pagos reportados.
+                </li>
+                <li>Odoo: nuestro sistema administrativo (ERP), donde se registran clientes, pedidos, facturas y pagos.</li>
+              </ul>
+            </li>
+            <li>
+              <Dato>Autoridades,</Dato> cuando la ley lo exija o para proteger los derechos y la seguridad de GUDS, de nuestros
+              clientes o de terceros.
+            </li>
+          </Lista>
+          <Parrafo>Algunos de estos proveedores procesan los datos en servidores fuera de Venezuela.</Parrafo>
+        </Seccion>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">5. Seguridad de los Datos</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              Implementamos medidas de seguridad técnicas y organizativas apropiadas para proteger su información 
-              personal contra acceso no autorizado, alteración, divulgación o destrucción. Esto incluye el uso de 
-              cifrado SSL/TLS, almacenamiento seguro de contraseñas y acceso restringido a datos personales.
-            </p>
-          </section>
+        <Seccion numero={5} titulo="Seguridad">
+          <Parrafo>
+            La información viaja cifrada entre tu teléfono o navegador y nuestros servidores (HTTPS). El acceso a los datos
+            está limitado según el rol de cada usuario: un cliente ve los datos de su propia empresa y nuestro personal, lo que
+            necesita para su trabajo. Ningún sistema es infalible; si ocurre un incidente que afecte tus datos personales, te
+            avisaremos según lo exija la ley.
+          </Parrafo>
+        </Seccion>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">6. Retención de Datos</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              Conservamos su información personal mientras sea necesario para proporcionar nuestros servicios, 
-              cumplir con obligaciones legales, resolver disputas y hacer cumplir nuestros acuerdos. El período 
-              de retención específico depende del tipo de información y los requisitos legales aplicables.
-            </p>
-          </section>
+        <Seccion numero={6} titulo="Cuánto tiempo la conservamos">
+          <Lista>
+            <li>Los datos de tu cuenta, mientras la cuenta exista.</li>
+            <li>
+              Los pedidos, facturas, notas de entrega, pagos, retenciones y la ficha de cliente de tu empresa, por el plazo que
+              exigen nuestras obligaciones legales, contables y fiscales, aunque elimines tu cuenta.
+            </li>
+            <li>Las lecturas de ubicación de los repartidores durante una ruta, 90 días.</li>
+            <li>
+              Los tokens de notificación, hasta que cierras sesión, eliminas tu cuenta o Apple o Google informan que ya no son
+              válidos.
+            </li>
+          </Lista>
+        </Seccion>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">7. Sus Derechos</h2>
-            <p className="text-muted-foreground leading-relaxed mb-4">
-              Usted tiene derecho a:
-            </p>
-            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4">
-              <li>Acceder a su información personal</li>
-              <li>Rectificar datos incorrectos o incompletos</li>
-              <li>Solicitar la eliminación de sus datos</li>
-              <li>Oponerse al procesamiento de sus datos</li>
-              <li>Solicitar la portabilidad de sus datos</li>
-              <li>Retirar su consentimiento en cualquier momento</li>
-            </ul>
-            <p className="text-muted-foreground leading-relaxed mt-4">
-              Para ejercer estos derechos, contáctenos por los canales de la sección 11 (Contacto).
-            </p>
-          </section>
+        <Seccion numero={7} titulo="Eliminar tu cuenta">
+          <Parrafo>
+            Puedes eliminar tu cuenta desde la app (Mi cuenta → Cerrar mi acceso → Eliminar mi cuenta) o por correo, sin
+            necesidad de la app. Se eliminan tu acceso, tus sesiones, los teléfonos registrados para notificaciones, tu carrito
+            y tus favoritos; los registros comerciales y fiscales se conservan como se explica arriba. Los pasos y el detalle
+            están en{" "}
+            <Link to="/eliminar-cuenta" className="font-medium text-primary hover:underline">{SITIO_PORTAL}/eliminar-cuenta</Link>.
+            Las cuentas de vendedores y repartidores se eliminan a solicitud, escribiendo a la empresa.
+          </Parrafo>
+        </Seccion>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">8. Cookies y Tecnologías Similares</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              Utilizamos cookies y tecnologías similares para mejorar su experiencia, analizar el uso de la 
-              aplicación y personalizar el contenido. Puede gestionar sus preferencias de cookies a través de 
-              la configuración de su navegador.
-            </p>
-          </section>
+        <Seccion numero={8} titulo="Tus derechos y opciones">
+          <Lista>
+            <li>
+              Si eres cliente, puedes ver y corregir tus datos personales en Mi cuenta → Datos personales. En cualquier caso,
+              puedes pedirnos que lo hagamos.
+            </li>
+            <li>Puedes pedirnos una copia de tus datos personales o que eliminemos los que no estemos obligados a conservar.</li>
+            <li>
+              Puedes desactivar las notificaciones y retirar el permiso de cámara o de ubicación cuando quieras, desde los
+              ajustes de tu teléfono.
+            </li>
+            <li>Para ejercer cualquiera de estos derechos, escríbenos a <Correo />.</li>
+          </Lista>
+        </Seccion>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">9. Menores de Edad</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              Nuestros servicios están dirigidos a empresas y no están diseñados para menores de 18 años. 
-              No recopilamos intencionalmente información de menores de edad.
-            </p>
-          </section>
+        <Seccion numero={9} titulo="Menores de edad">
+          <Parrafo>
+            {NOMBRE_APP} es un servicio para empresas y no está dirigido a menores de 18 años. No recopilamos a sabiendas
+            información de menores de edad.
+          </Parrafo>
+        </Seccion>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">10. Cambios a esta Política</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              Podemos actualizar esta Política de Privacidad periódicamente. Le notificaremos sobre cambios 
-              significativos publicando la nueva política en nuestra aplicación y, cuando sea apropiado, 
-              enviándole una notificación.
-            </p>
-          </section>
+        <Seccion numero={10} titulo="Cambios a esta política">
+          <Parrafo>
+            Si cambiamos esta política, publicaremos la nueva versión en esta página con su fecha de actualización. Si el
+            cambio es importante, también te avisaremos en la app o por correo.
+          </Parrafo>
+        </Seccion>
 
-          <section className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground mb-4">11. Contacto</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              Si tiene preguntas o inquietudes sobre esta Política de Privacidad o nuestras prácticas de 
-              privacidad, contáctenos:
-            </p>
-            <div className="mt-4 text-muted-foreground">
-              {contacto.email && <p><strong>Email:</strong> <span className="break-all">{contacto.email}</span></p>}
-              {contacto.telefono && <p><strong>Teléfono:</strong> {contacto.telefono}</p>}
-              {!contacto.email && !contacto.telefono && <p>A través de tu ejecutivo de cuenta o desde Ayuda, en tu portal.</p>}
-              <p><strong>Dirección:</strong> {contacto.ciudad ? `${contacto.ciudad}, Venezuela` : "Venezuela"}</p>
-            </div>
-          </section>
-        </div>
+        <Seccion numero={11} titulo="Contacto">
+          <Parrafo>
+            {DESARROLLADOR}
+            <br />
+            Correo: <Correo />
+            <br />
+            Portal: {SITIO_PORTAL}
+          </Parrafo>
+        </Seccion>
 
-        <div className="text-center mt-12 text-muted-foreground text-sm border-t border-border pt-8">
-          <p>{contacto.nombre ?? "GUDS"}</p>
-          <p>© {new Date().getFullYear()} Todos los derechos reservados</p>
+        <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 border-t border-border pt-6 text-sm">
+          <Link to="/login" className="font-medium text-primary hover:underline">Iniciar sesión</Link>
+          <Link to="/eliminar-cuenta" className="font-medium text-primary hover:underline">Eliminar tu cuenta</Link>
+          <Link to="/terminos" className="font-medium text-primary hover:underline">Términos y condiciones</Link>
         </div>
       </div>
     </div>

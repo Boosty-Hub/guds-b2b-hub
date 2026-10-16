@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Guds Store usa la cámara para que puedas fotografiar tus comprobantes de pago, el documento del RIF al registrarte, tu foto de perfil y las fotos de confirmación de entrega.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Guds Store usa tu ubicación, solo mientras la app está abierta, para seguir tu ruta de reparto activa y registrar el lugar donde confirmas cada entrega.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Guds Store accede a tus fotos para que puedas adjuntar comprobantes de pago, el documento del RIF al registrarte, tu foto de perfil e imágenes de productos.</string>
 	<key>UIApplicationSceneManifest</key>

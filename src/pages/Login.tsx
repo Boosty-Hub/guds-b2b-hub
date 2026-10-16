@@ -209,6 +209,12 @@ const Login = () => {
               Regístrate aquí
             </Link>
           </p>
+
+          {/* Páginas legales públicas (las enlazan Google Play y App Store) */}
+          <nav aria-label="Información legal" className="mt-8 flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <Link to="/privacidad" className="hover:text-foreground hover:underline">Política de privacidad</Link>
+            <Link to="/eliminar-cuenta" className="hover:text-foreground hover:underline">Eliminar mi cuenta</Link>
+          </nav>
         </div>
       </div>
 

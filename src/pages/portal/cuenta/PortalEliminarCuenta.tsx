@@ -10,7 +10,7 @@ import {
   Loader2,
   CheckCircle
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -88,41 +88,50 @@ const PortalEliminarCuenta = () => {
           <div>
             <p className="font-semibold text-destructive">Acción irreversible</p>
             <p className="text-sm text-destructive">
-              Esta acción eliminará permanentemente tu cuenta y todos los datos asociados.
+              Se eliminará tu acceso a Guds Store de forma permanente. Los registros comerciales y fiscales de tu empresa se conservan.
             </p>
           </div>
         </div>
 
-        {/* What will be deleted */}
+        {/* Lo que hace cerrar_mi_cuenta (supabase/migrations/20260719_fase5b_cerrar_cuenta.sql); /eliminar-cuenta dice lo mismo */}
         <div className="bg-card rounded-xl border border-border p-4 space-y-4">
           <h2 className="font-semibold">¿Qué sucederá al eliminar tu cuenta?</h2>
-          
+
           <ul className="space-y-3 text-sm">
             <li className="flex items-start gap-2">
               <span className="text-destructive" aria-hidden>•</span>
               <span className="text-muted-foreground">
-                Tu cuenta se cerrará y perderás el acceso de forma permanente
+                Se eliminan tu usuario de acceso (correo y contraseña) y tus sesiones: no podrás volver a entrar con él
               </span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-destructive" aria-hidden>•</span>
               <span className="text-muted-foreground">
-                Tu historial de pedidos se archiva por motivos fiscales (ya no lo verás)
+                Se eliminan tu carrito, tus favoritos y los teléfonos registrados para notificaciones
               </span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-destructive" aria-hidden>•</span>
               <span className="text-muted-foreground">
-                Se eliminarán tus productos favoritos guardados
+                Tu ficha de usuario queda desactivada y desvinculada del acceso (conserva tu nombre, correo y teléfono)
               </span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-destructive" aria-hidden>•</span>
               <span className="text-muted-foreground">
-                No podrás recuperar la cuenta después de eliminarla
+                La ficha de tu empresa, sus pedidos, facturas y pagos se conservan por obligaciones legales y fiscales; ya no los verás desde esta cuenta
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-destructive" aria-hidden>•</span>
+              <span className="text-muted-foreground">
+                No podrás recuperar el acceso después de eliminarlo
               </span>
             </li>
           </ul>
+          <p className="text-xs text-muted-foreground">
+            Detalle completo en <Link to="/eliminar-cuenta" className="underline underline-offset-2 hover:text-foreground">Eliminar tu cuenta</Link>.
+          </p>
         </div>
 
         {/* Confirmation */}
@@ -185,7 +194,7 @@ const PortalEliminarCuenta = () => {
               ¿Estás seguro?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acción no se puede deshacer. Tu cuenta y todos los datos asociados serán eliminados permanentemente.
+              Esta acción no se puede deshacer. Se eliminará tu acceso de forma permanente; los registros comerciales y fiscales de tu empresa se conservan.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

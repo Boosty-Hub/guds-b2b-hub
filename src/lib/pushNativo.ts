@@ -19,6 +19,11 @@ import { antesDeCerrarSesion, supabase } from "@/lib/supabase";
 export const EVENTO_PUSH_RECIBIDA = "push:recibida";
 /** Se tocó una notificación con la app abierta: hay un toque pendiente para consumir. */
 export const EVENTO_TOQUE_PUSH = "push:toque";
+/**
+ * Canal de notificaciones de Android. Debe coincidir con el channel_id que manda supabase/functions/enviar-push y con
+ * com.google.firebase.messaging.default_notification_channel_id en AndroidManifest.xml.
+ */
+export const CANAL_ANDROID = "avisos";
 
 const CLAVE_TOKEN = "guds.push.token";
 const CLAVE_HUERFANO = "guds.push.huerfano";
@@ -26,7 +31,11 @@ const ESPERA_INICIAL_MS = 30_000;
 const ESPERA_MAXIMA_MS = 30 * 60_000;
 const ESPERA_QUITAR_MS = 4_000;
 
-type CapacitorGlobal = { isNativePlatform?: () => boolean; getPlatform?: () => string };
+type CapacitorGlobal = {
+  isNativePlatform?: () => boolean;
+  getPlatform?: () => string;
+  isPluginAvailable?: (nombre: string) => boolean;
+};
 type PluginPush = typeof import("@capacitor/push-notifications").PushNotifications;
 type PluginApp = typeof import("@capacitor/app").App;
 
@@ -41,6 +50,16 @@ export function esAppNativa(): boolean {
 function plataforma(): "ios" | "android" | null {
   const p = (window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor?.getPlatform?.();
   return p === "ios" || p === "android" ? p : null;
+}
+
+/** El binario trae el plugin de push (se pregunta al puente antes de llamarlo: un plugin ausente rechaza la llamada). */
+function hayPluginPush(): boolean {
+  try {
+    const cap = (window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor;
+    return cap?.isPluginAvailable ? cap.isPluginAvailable("PushNotifications") : true;
+  } catch {
+    return false;
+  }
 }
 
 const leer = (clave: string) => { try { return localStorage.getItem(clave); } catch { return null; } };
@@ -105,8 +124,10 @@ function nombreDispositivo(): string {
   const ua = navigator.userAgent;
   if (/iPad/.test(ua)) return "iPad";
   if (/iPhone/.test(ua)) return "iPhone";
+  // WebView de Android: "(Linux; Android 14; Pixel 7 Build/UP1A.231005.007; wv)" → "Pixel 7"
   const android = ua.match(/Android [\d.]+;\s*([^;)]+)/);
-  return android ? android[1].trim().slice(0, 100) : (plataforma() ?? "Dispositivo");
+  const modelo = android?.[1].replace(/\s+Build\/.*$/, "").trim();
+  return modelo ? modelo.slice(0, 100) : (plataforma() ?? "Dispositivo");
 }
 
 async function versionApp(): Promise<string | null> {
@@ -172,8 +193,18 @@ async function pedirRegistroNativo(): Promise<void> {
       estado = (await push.requestPermissions()).receive;
       if (estado !== "granted") { permisoDenegado = true; return; }
     }
+    // Android 8+ descarta una notificación cuyo canal no existe; se crea antes de register() para que exista cuando
+    // llegue el primer aviso. Importancia alta (4) = suena y aparece como banner. Sin `sound` a propósito: el plugin lo
+    // toma como un archivo de res/raw y, si no existe, el canal queda mudo; sin él, Android usa el sonido del sistema.
     if (plataforma() === "android") {
-      await push.createChannel({ id: "general", name: "General", importance: 4 }).catch(() => { /* ya existe */ });
+      await push.createChannel({
+        id: CANAL_ANDROID,
+        name: "Avisos",
+        description: "Pedidos, pagos, entregas y avisos de tu cuenta",
+        importance: 4,
+        visibility: 1,
+        vibration: true,
+      }).catch((e) => { console.warn("Push: no se pudo crear el canal de Android", e); });
     }
     if (tokenActual) await registrarToken();
     // register() también entrega el token vigente si cambió; el resultado llega por el listener 'registration'
@@ -223,7 +254,7 @@ async function quitarAntesDeSalir(): Promise<void> {
  * No pide permiso: eso lo hace activarPushParaSesion.
  */
 export function iniciarPushNativo(): Promise<void> {
-  if (!esAppNativa()) return Promise.resolve();
+  if (!esAppNativa() || !hayPluginPush()) return Promise.resolve();
   if (inicio) return inicio;
   inicio = (async () => {
     const [{ PushNotifications }, { App }] = await Promise.all([
@@ -245,6 +276,9 @@ export function iniciarPushNativo(): Promise<void> {
     await PushNotifications.addListener("pushNotificationReceived", () => {
       window.dispatchEvent(new Event(EVENTO_PUSH_RECIBIDA));
     });
+    // iOS: claves del payload de APNs. Android: el data de FCM (todo texto) llega en los extras del intent, también en
+    // un arranque en frío (BridgeActivity entrega el intent de lanzamiento y el plugin retiene el evento hasta que hay
+    // listener). En ambos casos la ruta viaja en data.link.
     await PushNotifications.addListener("pushNotificationActionPerformed", (accion) => {
       const datos = (accion?.notification?.data ?? {}) as Record<string, unknown>;
       toquePendiente = rutaSegura(datos.link);

@@ -9,15 +9,22 @@
 //     todos los workers vía push_jwt_reclamar (Apple rechaza renovarlo más de una vez cada 20 min).
 //       - TooManyProviderTokenUpdates: no se vuelve a firmar; solo se olvida el de memoria (el siguiente sale de la base).
 //       - ExpiredProviderToken / InvalidProviderToken: se borra la fila solo si sigue siendo ese JWT.
-//   · Android (FCM HTTP v1): escrito pero inerte hasta que exista FCM_SERVICE_ACCOUNT_JSON.
+//   · Android (FCM HTTP v1): cuenta de servicio de Firebase (FCM_SERVICE_ACCOUNT_JSON) → JWT RS256 firmado con WebCrypto
+//     → token OAuth de Google, guardado en memoria ~50 min por worker. Canal "avisos" (el mismo que crea la app y el del
+//     manifest), ícono ic_stat_guds y color de marca; la ruta del toque va en data.link (FCM solo admite texto en data).
+//     Sin el secreto (o si es inválido) se omiten los tokens Android con un aviso en el log e iOS sigue igual.
 //   · Tiempos: 8 s por envío, 8 envíos a la vez y ningún envío nuevo pasados 20 s desde que llegó la solicitud (el resto
 //     se registra como SinTiempo).
 //   · Tokens muertos (se borran de device_tokens): APNs 410 o BadDeviceToken, Unregistered, DeviceTokenNotForTopic,
-//     TopicDisallowed; FCM UNREGISTERED, SENDER_ID_MISMATCH e INVALID_ARGUMENT sobre message.token. Lo demás es transitorio.
-//   · Responde {notificaciones, envios, enviados, fallidos, podados, motivos}.
+//     TopicDisallowed; FCM UNREGISTERED, o un 400 INVALID_ARGUMENT que nombra el token. Nunca por un 404 sin UNREGISTERED
+//     (un project_id equivocado da 404 para todos) ni por SENDER_ID_MISMATCH (cuenta de servicio y google-services.json
+//     de proyectos distintos: un error de configuración que, si se podara, borraría todos los teléfonos Android).
+//     Lo demás es transitorio.
+//   · Responde {notificaciones, envios, enviados, fallidos, podados, omitidos_android, motivos}.
 //
 // Secretos: PUSH_WEBHOOK_SECRET, APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_PRIVATE_KEY (.p8), APNS_ENVIRONMENT
-// (production | development). Opcional: FCM_SERVICE_ACCOUNT_JSON. La plataforma inyecta SUPABASE_URL y SUPABASE_SECRET_KEYS.
+// (production | development). Android: FCM_SERVICE_ACCOUNT_JSON (el JSON completo de la cuenta de servicio de Firebase;
+// opcional, sin él no se envía a Android). La plataforma inyecta SUPABASE_URL y SUPABASE_SECRET_KEYS.
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 type Fila = {
@@ -217,24 +224,37 @@ async function enviarApns(srv: SupabaseClient, cfg: ConfigApns, e: Envio): Promi
 }
 
 // ── FCM (Android) ───────────────────────────────────────────────────────────────────────────────────────────────────
+// Deben coincidir con src/lib/pushNativo.ts (CANAL_ANDROID) y con AndroidManifest.xml (meta-data de Firebase).
+const CANAL_ANDROID = "avisos";
+const ICONO_ANDROID = "ic_stat_guds";
+const COLOR_ANDROID = "#8B1A1A";
+// FCM rechaza el mensaje entero si data usa estas claves (y las que empiezan por "google." o "gcm.").
+const CLAVES_RESERVADAS_FCM = new Set(["from", "notification", "message_type", "collapse_key"]);
+
 type CuentaFcm = { client_email: string; private_key: string; project_id: string; token_uri?: string };
 
-let avisoSinFcm = false;
 let cuentaFcmCache: CuentaFcm | null | undefined;
+/** La cuenta de servicio de Firebase, o null si Android no está configurado. Nunca se registra su contenido. */
 function cuentaFcm(): CuentaFcm | null {
   if (cuentaFcmCache !== undefined) return cuentaFcmCache;
   const crudo = Deno.env.get("FCM_SERVICE_ACCOUNT_JSON");
   let cuenta: CuentaFcm | null = null;
-  if (crudo) {
+  let problema = "";
+  if (!crudo) {
+    problema = "falta el secreto FCM_SERVICE_ACCOUNT_JSON";
+  } else {
     try {
-      const c = JSON.parse(crudo) as Partial<CuentaFcm>;
-      if (c.client_email && c.private_key && c.project_id) cuenta = c as CuentaFcm;
-    } catch { /* JSON inválido */ }
+      const c = JSON.parse(crudo) as Partial<Record<keyof CuentaFcm, unknown>>;
+      const texto = (v: unknown) => typeof v === "string" && v.trim() !== "";
+      const faltan = (["project_id", "client_email", "private_key"] as const).filter((k) => !texto(c[k]));
+      if (faltan.length) problema = `a FCM_SERVICE_ACCOUNT_JSON le falta ${faltan.join(", ")}`;
+      else if (!String(c.private_key).includes("PRIVATE KEY")) problema = "private_key de FCM_SERVICE_ACCOUNT_JSON no es una llave PEM";
+      else cuenta = c as CuentaFcm;
+    } catch {
+      problema = "FCM_SERVICE_ACCOUNT_JSON no es un JSON válido";
+    }
   }
-  if (!cuenta && !avisoSinFcm) {
-    console.warn("enviar-push: falta o es inválido FCM_SERVICE_ACCOUNT_JSON — se omite Android");
-    avisoSinFcm = true;
-  }
+  if (!cuenta) console.warn(`enviar-push: ${problema} — se omiten los dispositivos Android`);
   cuentaFcmCache = cuenta;
   return cuenta;
 }
@@ -265,30 +285,55 @@ async function tokenAccesoFcm(c: CuentaFcm): Promise<string> {
       }),
       signal: AbortSignal.timeout(TIEMPO_ENVIO_MS),
     });
-    const j = await r.json().catch(() => ({})) as { access_token?: string };
-    if (!r.ok || !j.access_token) throw new Error(`OAuth FCM HTTP ${r.status}`);
+    // Solo el código de error de Google (p. ej. invalid_grant), nunca el cuerpo completo ni la llave
+    const j = await r.json().catch(() => ({})) as { access_token?: string; error?: unknown };
+    if (!r.ok || !j.access_token) {
+      throw new Error(`OAuth FCM HTTP ${r.status}${typeof j.error === "string" ? ` ${j.error}` : ""}`);
+    }
     accesoFcm = { token: j.access_token, vence: Date.now() + VIDA_JWT_MS };
     return j.access_token;
   })();
   try { return await accesoFcmEnCurso; } finally { accesoFcmEnCurso = null; }
 }
 
+// FCM exige que todos los valores de data sean texto: los demás se mandan como JSON.
 function datosFcm(fila: Fila): Record<string, string> {
+  const base: Record<string, string> = { notificacion_id: fila.id };
+  if (fila.tipo) base.tipo = fila.tipo;
+  if (fila.link) base.link = fila.link;
   const d: Record<string, string> = {};
-  for (const [k, v] of Object.entries(datosEntidad(fila))) d[k] = typeof v === "string" ? v : JSON.stringify(v);
-  d.notificacion_id = fila.id;
-  if (fila.tipo) d.tipo = fila.tipo;
-  if (fila.link) d.link = fila.link;
-  return d;
+  for (const [k, v] of Object.entries(datosEntidad(fila))) {
+    if (CLAVES_RESERVADAS_FCM.has(k) || k.startsWith("google.") || k.startsWith("gcm.")) continue;
+    d[k] = typeof v === "string" ? v : JSON.stringify(v);
+  }
+  const completo = { ...d, ...base };
+  // FCM admite 4 KB por mensaje: si la data de la entidad no cabe, se manda sin ella (igual que en APNs).
+  return new TextEncoder().encode(JSON.stringify(completo)).byteLength <= 3_000 ? completo : base;
 }
 
 type ErrorFcm = {
   error?: {
+    code?: number;
     status?: string;
     message?: string;
     details?: { "@type"?: string; errorCode?: string; fieldViolations?: { field?: string }[] }[];
   };
 };
+
+/**
+ * Si la falla de FCM significa que el token ya no sirve. UNREGISTERED es inequívoco. INVALID_ARGUMENT también sale por
+ * un mensaje mal armado, así que solo cuenta con HTTP 400 y cuando Google señala el token. Un 404 sin UNREGISTERED o
+ * SENDER_ID_MISMATCH son errores de configuración (proyecto equivocado): podar ahí borraría todos los teléfonos Android.
+ */
+function tokenFcmMuerto(status: number, j: ErrorFcm): boolean {
+  const detalles = j.error?.details ?? [];
+  const codigos = detalles.map((x) => x.errorCode).filter(Boolean);
+  if (codigos.includes("UNREGISTERED")) return true;
+  const invalido = codigos.includes("INVALID_ARGUMENT") || j.error?.status === "INVALID_ARGUMENT";
+  if (status !== 400 || !invalido) return false;
+  return detalles.some((x) => (x.fieldViolations ?? []).some((f) => f.field === "message.token")) ||
+    /message\.token|registration token/i.test(j.error?.message ?? "");
+}
 
 async function enviarFcm(c: CuentaFcm, e: Envio): Promise<Resultado> {
   let acceso: string;
@@ -309,7 +354,11 @@ async function enviarFcm(c: CuentaFcm, e: Envio): Promise<Resultado> {
           priority: "HIGH",
           ttl: "86400s",
           notification: {
-            channel_id: "general",
+            channel_id: CANAL_ANDROID,
+            icon: ICONO_ANDROID,
+            color: COLOR_ANDROID,
+            // Solo cuenta antes de Android 8; desde ahí manda el canal (creado sin sonido propio = sonido del sistema)
+            sound: "default",
             tag: e.fila.id,
             notification_count: Math.max(0, e.fila.no_leidas ?? 0),
           },
@@ -324,12 +373,8 @@ async function enviarFcm(c: CuentaFcm, e: Envio): Promise<Resultado> {
   }
   if (r.status === 401) accesoFcm = null;
   const j = await r.json().catch(() => ({})) as ErrorFcm;
-  const detalles = j.error?.details ?? [];
-  const codigo = detalles.find((x) => x.errorCode)?.errorCode ?? j.error?.status ?? `HTTP ${r.status}`;
-  const sobreToken = detalles.some((x) => (x.fieldViolations ?? []).some((f) => f.field === "message.token")) ||
-    /message\.token|registration token/i.test(j.error?.message ?? "");
-  const podar = codigo === "UNREGISTERED" || codigo === "SENDER_ID_MISMATCH" || (codigo === "INVALID_ARGUMENT" && sobreToken);
-  return { ok: false, motivo: codigo, podar };
+  const codigo = j.error?.details?.find((x) => x.errorCode)?.errorCode ?? j.error?.status ?? `HTTP ${r.status}`;
+  return { ok: false, motivo: codigo, podar: tokenFcmMuerto(r.status, j) };
 }
 
 // ── Handler ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -349,7 +394,7 @@ Deno.serve(async (req) => {
     return responder(400, { error: "Cuerpo inválido" });
   }
   ids = [...new Set(ids)].slice(0, MAX_IDS);
-  const vacio = { notificaciones: 0, envios: 0, enviados: 0, fallidos: 0, podados: 0, motivos: {} };
+  const vacio = { notificaciones: 0, envios: 0, enviados: 0, fallidos: 0, podados: 0, omitidos_android: 0, motivos: {} };
   if (!ids.length) return responder(200, vacio);
 
   const secreta = llave("SUPABASE_SECRET_KEYS") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -366,10 +411,13 @@ Deno.serve(async (req) => {
   const fcm = filas.some((f) => f.tokens_android?.length) ? cuentaFcm() : null;
 
   const cola: Envio[] = [];
+  let omitidosAndroid = 0;
   for (const fila of filas) {
     if (apns) for (const token of fila.tokens_ios ?? []) cola.push({ plataforma: "ios", token, fila });
     if (fcm) for (const token of fila.tokens_android ?? []) cola.push({ plataforma: "android", token, fila });
+    else omitidosAndroid += fila.tokens_android?.length ?? 0;
   }
+  if (omitidosAndroid > 0) console.warn(`enviar-push: ${omitidosAndroid} envíos a Android omitidos (FCM sin configurar)`);
 
   let enviados = 0;
   let fallidos = 0;
@@ -415,5 +463,7 @@ Deno.serve(async (req) => {
     else podados = borrados?.length ?? 0;
   }
 
-  return responder(200, { notificaciones: filas.length, envios: cola.length, enviados, fallidos, podados, motivos });
+  return responder(200, {
+    notificaciones: filas.length, envios: cola.length, enviados, fallidos, podados, omitidos_android: omitidosAndroid, motivos,
+  });
 });

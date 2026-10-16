@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Guds Store</string>
+    <string name="title_activity_main">Guds Store</string>
+    <string name="package_name">com.guds.guds</string>
+    <string name="custom_url_scheme">com.guds.guds</string>
+</resources>

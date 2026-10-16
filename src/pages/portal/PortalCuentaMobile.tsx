@@ -17,6 +17,7 @@ import {
   Receipt,
   Settings,
   Shield,
+  ShieldCheck,
   TicketPercent,
   User,
   type LucideIcon,
@@ -69,6 +70,7 @@ const SECCIONES: { titulo: string; items: { icono: LucideIcon; etiqueta: string;
       { icono: Settings, etiqueta: "Preferencias", ruta: "/portal/cuenta/preferencias" },
       { icono: HelpCircle, etiqueta: "Centro de ayuda", ruta: "/portal/ayuda" },
       { icono: FileText, etiqueta: "Términos y condiciones", ruta: "/terminos" },
+      { icono: ShieldCheck, etiqueta: "Política de privacidad", ruta: "/privacidad" },
     ],
   },
 ];
@@ -247,6 +249,8 @@ const PortalCuenta = () => {
           {/* En B2B cerrar el acceso no es una opción del día a día: queda al fondo y discreto */}
           <p className="text-center text-xs text-muted-foreground">
             ¿Ya no usarás el portal? <Link to="/portal/cuenta/eliminar" className="underline underline-offset-2 hover:text-foreground">Cerrar mi acceso</Link>
+            {" · "}
+            <Link to="/eliminar-cuenta" className="underline underline-offset-2 hover:text-foreground">Qué se elimina y qué se conserva</Link>
           </p>
         </div>
       </div>

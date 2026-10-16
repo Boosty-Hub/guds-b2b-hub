@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Rojo de marca (theme-color de index.html). Tiñe el ícono de las notificaciones push. -->
+    <color name="guds_notificacion">#8B1A1A</color>
+</resources>
