@@ -10,6 +10,19 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-21 · Menú móvil completo y franjas negras de la app iOS
+
+- **`7b6014d`:** el menú del celular (MainLayout) era una lista a mano con 16 enlaces: le faltaban 15 módulos (Reportes, Contactos,
+  Vendedores, Almacenes, Consignación, Cuentas por Cobrar, Facturas, Notas de entrega y de crédito, Retenciones, Bancos,
+  Conciliación, Clasificación de clientes, Devoluciones, Papelera) y no filtraba por permisos. Ahora sale de `navegacion.ts` con
+  las secciones y el filtro del lateral de escritorio. Verificado en iPhone 14 emulado: 31 enlaces.
+- **Safe-area en la web:** encabezados móviles, menús laterales, torre de control y el botón de cerrar de las hojas reservan
+  `env(safe-area-inset-top)`; las barras de abajo usaban `h-safe-area-inset-bottom`, que no existe en Tailwind (medía 0).
+  Verificado con insets emulados 47/34 (CDP) y en 0 (la app actual: no cambia nada).
+- **Nativo:** `ios.contentInset: "never"` (como BoostyDesk y Spatium; en Spatium, con "always" y el iPhone en modo oscuro, la
+  barra de estado y el indicador de inicio salían negros) e iOS 1.2.1 (101), subido a TestFlight con «iOS Release».
+- **Pendiente:** probar 1.2.1 en TestFlight y enviarla a revisión; Android no cambia.
+
 ## 2026-10-09 · Verificación general: reportes alimentados solos y sincronización con Odoo sana
 
 - **Pedido del usuario:** verificar todo lo construido y confirmar que los reportes se alimentan solos de aquí en adelante y que la

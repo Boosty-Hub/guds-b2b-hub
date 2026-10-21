@@ -41,8 +41,8 @@ jobs:
       TEAM_ID: 45TRWF6998
       BUNDLE_ID: com.guds.guds
       PROFILE_NAME: Guds Store App Store CI
-      EXPECTED_VERSION: 1.2.0
-      EXPECTED_BUILD: "100"
+      EXPECTED_VERSION: 1.2.1
+      EXPECTED_BUILD: "101"
 
     steps:
       - name: Checkout

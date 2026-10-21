@@ -18,7 +18,10 @@ const config: CapacitorConfig = {
   },
   appendUserAgent: "GudsStoreNativa",
   ios: {
-    contentInset: "always",
+    // "never" (como BoostyDesk y Spatium): la web ocupa toda la pantalla y sus encabezados y barras pintan las
+    // franjas de la barra de estado y del indicador de inicio con env(safe-area-inset-*). Con "always" esas franjas
+    // quedaban fuera de la web y mostraban el fondo nativo, negro con el iPhone en modo oscuro.
+    contentInset: "never",
   },
   android: {
     allowMixedContent: false,
