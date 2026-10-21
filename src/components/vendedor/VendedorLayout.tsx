@@ -76,7 +76,7 @@ export const VendedorLayout = ({ children, title, pantallaCompletaMovil = false 
 
       {/* Mobile Header: en una sola fila los controles dejaban el título en 5 px. Fila 1: menú, título de la pantalla y
           campana; fila 2: buscador (ocupa lo que sobra), empresa, moneda y soporte. */}
-      <header className={cn("md:hidden sticky top-0 z-50 bg-emerald-800 text-white", pantallaCompletaMovil && "hidden")}>
+      <header className={cn("md:hidden sticky top-0 z-50 bg-emerald-800 pt-[env(safe-area-inset-top)] text-white", pantallaCompletaMovil && "hidden")}>
         <div className="flex h-12 items-center gap-1 px-2">
           <button onClick={() => setIsMobileMenuOpen(true)} className="shrink-0 p-1.5" aria-label="Abrir menú">
             <Menu className="h-6 w-6" aria-hidden />
@@ -151,7 +151,7 @@ export const VendedorLayout = ({ children, title, pantallaCompletaMovil = false 
             </NavLink>
           ))}
         </div>
-        <div className="h-safe-area-inset-bottom bg-card" />
+        <div className="h-[env(safe-area-inset-bottom)] bg-card" />
       </nav>
 
       {/* Mobile Menu Sheet */}
@@ -183,7 +183,7 @@ export const BarraSuperiorMovil = ({ titulo, subtitulo, volverA, onVolver, derec
 }) => {
   const navigate = useNavigate();
   return (
-    <header className="sticky top-0 z-40 flex min-h-12 items-center gap-1 bg-emerald-800 px-1.5 py-1 text-white md:hidden" data-testid="barra-movil">
+    <header className="sticky top-0 z-40 flex min-h-12 items-center gap-1 bg-emerald-800 px-1.5 pb-1 pt-[max(0.25rem,env(safe-area-inset-top))] text-white md:hidden" data-testid="barra-movil">
       <button type="button" aria-label="Volver" className="shrink-0 rounded-md p-2 active:bg-white/15"
         onClick={() => (onVolver ? onVolver() : volverA ? navigate(volverA) : navigate(-1))}>
         <ArrowLeft className="h-5 w-5" aria-hidden />

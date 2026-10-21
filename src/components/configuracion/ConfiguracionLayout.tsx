@@ -42,7 +42,7 @@ export const ConfiguracionLayout = ({ children, title, description }: Configurac
       <ConfiguracionSidebar />
       <div className="lg:pl-64">
         {/* Mobile Header */}
-        <header className="lg:hidden sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-primary px-4 text-primary-foreground">
+        <header className="lg:hidden sticky top-0 z-30 box-content flex h-14 items-center justify-between border-b border-border bg-primary px-4 pt-[env(safe-area-inset-top)] text-primary-foreground">
           <button onClick={() => setMenuOpen(true)} className="p-2 -ml-2" aria-label="Abrir menú de configuración">
             <Menu className="h-6 w-6" />
           </button>
@@ -90,7 +90,7 @@ export const ConfiguracionLayout = ({ children, title, description }: Configurac
 
       {/* Mobile Config Nav Drawer */}
       <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-        <SheetContent side="left" className="w-72 p-0">
+        <SheetContent side="left" className="w-72 p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
           <SheetHeader className="border-b border-border p-4">
             <SheetTitle className="flex items-center gap-2">
               <Settings className="h-5 w-5 text-primary" />

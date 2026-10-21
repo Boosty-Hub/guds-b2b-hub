@@ -96,7 +96,7 @@ export const PortalPagina = ({
 /** Esqueleto de página mientras carga el código de la ruta. */
 export const PaginaCargando = () => (
   <div aria-busy="true" aria-label="Cargando">
-    <div className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-card px-4 lg:hidden">
+    <div className="sticky top-0 z-30 box-content flex h-14 items-center gap-3 border-b border-border bg-card px-4 pt-[env(safe-area-inset-top)] lg:hidden">
       <Skeleton className="h-8 w-8 rounded-lg" />
       <Skeleton className="h-4 w-32" />
     </div>

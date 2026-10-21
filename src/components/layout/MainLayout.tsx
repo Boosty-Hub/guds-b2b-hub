@@ -97,7 +97,7 @@ export function MainLayout({ children, title }: MainLayoutProps) {
       </div>
 
       {/* Mobile Header */}
-      <header className="lg:hidden sticky top-0 z-50 bg-primary text-primary-foreground">
+      <header className="lg:hidden sticky top-0 z-50 bg-primary pt-[env(safe-area-inset-top)] text-primary-foreground">
         <div className="flex items-center justify-between h-14 px-4">
           <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2">
             <Menu className="h-6 w-6" />
@@ -159,12 +159,12 @@ export function MainLayout({ children, title }: MainLayoutProps) {
             </NavLink>
           ))}
         </div>
-        <div className="h-safe-area-inset-bottom bg-card" />
+        <div className="h-[env(safe-area-inset-bottom)] bg-card" />
       </nav>
 
       {/* Mobile Menu Sheet */}
       <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-        <SheetContent side="left" className="w-80 p-0">
+        <SheetContent side="left" className="w-80 p-0 pt-[env(safe-area-inset-top)]">
           <SheetHeader className="p-4 border-b border-border">
             <SheetTitle className="flex items-center gap-3">
               <Logo className="h-10 text-primary" />
@@ -218,7 +218,7 @@ export function MainLayout({ children, title }: MainLayoutProps) {
           </nav>
 
           {/* Logout */}
-          <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border bg-background">
+          <div className="absolute bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-border bg-background">
             <button 
               onClick={handleLogout}
               className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-destructive hover:bg-destructive/10"

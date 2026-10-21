@@ -44,7 +44,7 @@ export function MenuMovilVendedor({ abierto, setAbierto, onLogout }: { abierto: 
   const { user } = useAuth();
   return (
     <Sheet open={abierto} onOpenChange={setAbierto}>
-      <SheetContent side="left" className="flex w-80 flex-col gap-0 p-0">
+      <SheetContent side="left" className="flex w-80 flex-col gap-0 p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
         <SheetHeader className="p-4 border-b border-border">
           <SheetTitle className="flex items-center gap-3">
             <Logo className="h-8 text-primary" />

@@ -59,7 +59,7 @@ export const DeliveryLayout = ({ children, title }: DeliveryLayoutProps) => {
       </div>
 
       {/* Mobile Header */}
-      <header className="md:hidden sticky top-0 z-50 bg-amber-500 text-white">
+      <header className="md:hidden sticky top-0 z-50 bg-amber-500 pt-[env(safe-area-inset-top)] text-white">
         <div className="flex items-center justify-between h-14 px-4">
           <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2">
             <Menu className="h-6 w-6" />
@@ -124,12 +124,12 @@ export const DeliveryLayout = ({ children, title }: DeliveryLayoutProps) => {
             </NavLink>
           ))}
         </div>
-        <div className="h-safe-area-inset-bottom bg-card" />
+        <div className="h-[env(safe-area-inset-bottom)] bg-card" />
       </nav>
 
       {/* Mobile Menu Sheet */}
       <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-        <SheetContent side="left" className="w-80 p-0">
+        <SheetContent side="left" className="w-80 p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
           <SheetHeader className="p-4 border-b border-border">
             <SheetTitle className="flex items-center gap-3">
               <Logo className="h-8 text-primary" />

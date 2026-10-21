@@ -171,7 +171,7 @@ export function ControlTower() {
   if (!esDesktop) {
     return (
       <Sheet open={open} onOpenChange={(o) => !o && close()}>
-        <SheetContent side="right" className="w-full p-0 sm:max-w-full">
+        <SheetContent side="right" className="w-full p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:max-w-full">
           <SheetHeader className="flex h-16 flex-row items-center justify-between border-b border-border p-4">
             <SheetTitle>Torre de Control</SheetTitle>
           </SheetHeader>
