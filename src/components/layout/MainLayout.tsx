@@ -31,6 +31,8 @@ import { useNotifications } from "@/contexts/NotificationsContext";
 import { usePendingActions } from "@/hooks/use-pending-actions";
 import { EmpresaSelector, ModoConsultaBanner } from "@/components/EmpresaSelector";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { usePermissions } from "@/contexts/PermissionsContext";
+import { navSections } from "./navegacion";
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -63,6 +65,19 @@ export function MainLayout({ children, title }: MainLayoutProps) {
   const { unreadCount } = useNotifications();
   const { total: totalPendientes } = usePendingActions();
   const totalBadgeMobile = unreadCount + totalPendientes;
+  const { can } = usePermissions();
+
+  // El menú del celular sale de la misma lista y el mismo filtro de permisos que el lateral de escritorio
+  // (navegacion.ts). Antes era una lista escrita a mano y le faltaban 15 módulos (Reportes, Facturas, Bancos…).
+  const seccionesMovil = navSections
+    .map((s) => ({ ...s, items: s.items.filter((i) => i.modulo === "dashboard" || can(i.modulo, "ver")) }))
+    .filter((s) => s.items.length > 0);
+  // Un módulo con otro enlace debajo de su ruta (Delivery → Devoluciones) solo se marca en su ruta exacta
+  const tieneHijo = (path: string) => navSections.some((s) => s.items.some((i) => i.path.startsWith(path + "/")));
+  const claseItemMovil = ({ isActive }: { isActive: boolean }) =>
+    `flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
+      isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+    }`;
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -173,43 +188,33 @@ export function MainLayout({ children, title }: MainLayoutProps) {
             </div>
           </div>
 
-          {/* Full Navigation */}
-          <nav className="p-4 space-y-1 max-h-[calc(100vh-280px)] overflow-y-auto">
-            {[
-              { icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard" },
-              { icon: ShoppingCart, label: "Órdenes", path: "/admin/ordenes" },
-              { icon: Users, label: "Clientes", path: "/admin/clientes" },
-              { label: "Registros", path: "/admin/registros" },
-              { icon: Package, label: "Productos", path: "/admin/productos" },
-              { label: "Categorías", path: "/admin/categorias" },
-              { label: "Inventario", path: "/admin/inventario" },
-              { label: "Transferencias", path: "/admin/transferencias" },
-              { label: "Precios", path: "/admin/precios" },
-              { label: "Cupones", path: "/admin/cupones" },
-              { label: "Banners", path: "/admin/banners" },
-              { label: "Proveedores", path: "/admin/proveedores" },
-              { label: "Cuentas por Pagar", path: "/admin/cuentas-por-pagar" },
-              { label: "Cuentas", path: "/admin/cuentas" },
-              { label: "Delivery", path: "/admin/delivery" },
-              { icon: Settings, label: "Configuración", path: "/admin/configuracion" },
-            ].map((item) => (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                onClick={() => setIsMobileMenuOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted"
-                  }`
-                }
-              >
-                {item.icon && <item.icon className="h-5 w-5" />}
-                {!item.icon && <div className="h-5 w-5" />}
-                {item.label}
-              </NavLink>
+          {/* Full Navigation: las mismas secciones del lateral, filtradas por permisos */}
+          <nav className="p-4 max-h-[calc(100vh-280px)] overflow-y-auto">
+            {seccionesMovil.map((section) => (
+              <div key={section.title} className="mb-3">
+                <p className="px-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80">{section.title}</p>
+                <div className="space-y-1">
+                  {section.items.map((item) => (
+                    <NavLink
+                      key={item.path}
+                      to={item.path}
+                      end={tieneHijo(item.path)}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={claseItemMovil}
+                    >
+                      <item.icon className="h-5 w-5 shrink-0" />
+                      {item.label}
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
             ))}
+            <div className="space-y-1 border-t border-border pt-3">
+              <NavLink to="/admin/configuracion" onClick={() => setIsMobileMenuOpen(false)} className={claseItemMovil}>
+                <Settings className="h-5 w-5 shrink-0" />
+                Configuración
+              </NavLink>
+            </div>
           </nav>
 
           {/* Logout */}
