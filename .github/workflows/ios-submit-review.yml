@@ -1,0 +1,44 @@
+name: iOS Enviar a revisión
+
+# Manual: deja la versión en App Store Connect con su build y sus notas y la envía a revisión de Apple.
+# modo=estado solo lee (la app, el build y las versiones), para revisar antes de enviar.
+on:
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "estado (solo lee) o enviar"
+        type: choice
+        options: [estado, enviar]
+        default: estado
+      version:
+        description: "Versión (MARKETING_VERSION)"
+        required: true
+      build:
+        description: "Build (CURRENT_PROJECT_VERSION)"
+        required: true
+      notas:
+        description: "Novedades de la versión (What's New)"
+        required: false
+        default: ""
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "pyjwt[crypto]==2.9.0"
+      - name: App Store Connect
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          BUNDLE_ID: com.guds.guds
+          MODO: ${{ inputs.modo }}
+          VERSION: ${{ inputs.version }}
+          BUILD: ${{ inputs.build }}
+          NOTAS: ${{ inputs.notas }}
+        run: python scripts/asc_enviar_revision.py
