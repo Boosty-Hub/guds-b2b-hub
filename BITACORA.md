@@ -10,6 +10,17 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-26 · Fotos de productos GUDS → Odoo: revisión y la del Bianchi enviada
+
+- **Revisión** (pedido del usuario): de los 13 productos con foto en GUDS, 12 ya estaban en Odoo (gomitas Trululu; 11 las cambió
+  Wonderly Lima del 21 al 23-oct y la cola las escribió solas, todas `hecha`). Faltaba **CHOCOLATE BIANCHI BARRA XL 40G** (odoo_id
+  1976): su foto es anterior a la fase 20r (origen null), así que nunca se encoló. Enviada con `enviar_producto_odoo` a nombre del
+  usuario: escritura `hecha`, nota "(GUDS)" en Odoo, imagen de 94 KB verificada leyendo `product.template`.
+- **Sin cambios en GUDS**: descripciones (ninguna editada), precios, ofertas, ocultos y stock mín./máx. Las fotos adicionales de la
+  galería (9 productos) siguen solo en GUDS por decisión del usuario: a Odoo va únicamente la foto principal.
+- Gotcha para envíos por SQL: `request.jwt.claims.sub` es `usuarios.auth_id` (no `usuarios.id`), y con una cuenta en «Ambas
+  empresas» el disparador `trg_guardia_empresa` rechaza el cambio salvo `guds.bypass_guard = on`.
+
 ## 2026-10-21 · Menú móvil completo y franjas negras de la app iOS
 
 - **`7b6014d`:** el menú del celular (MainLayout) era una lista a mano con 16 enlaces: le faltaban 15 módulos (Reportes, Contactos,
