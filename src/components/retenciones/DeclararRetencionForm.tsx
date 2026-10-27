@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -8,7 +9,8 @@ import { Loader2, Send, Upload } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { SelectorFacturas, type FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
+import { SelectorFacturas } from "@/components/cuentas/SelectorFacturas";
+import { facturasParaSelector, resumirCobroBs, tasaEmision, formatoBs, type FacturaCobrable } from "@/components/cuentas/cobroBs";
 import { compressImage } from "@/lib/image";
 
 const MAX_COMPROBANTE_SIZE = 5 * 1024 * 1024;
@@ -18,14 +20,14 @@ interface Concepto { id: string; codigo: string | null; concepto: string; porcen
 
 interface Props {
   clienteId: string;
-  facturas: FacturaSaldo[];
+  facturas: FacturaCobrable[];
   permiteComprobante?: boolean; // false para el admin (registro directo, sin subir archivo)
   onDeclarado: () => void;
 }
 
 export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante = true, onDeclarado }: Props) {
   const { toast } = useToast();
-  const { formatPrice } = useCurrency();
+  const { formatPrice, exchangeRate } = useCurrency();
   const [tipo, setTipo] = useState<"iva" | "islr">("iva");
   const [conceptos, setConceptos] = useState<Concepto[]>([]);
   const [conceptoId, setConceptoId] = useState("");
@@ -35,6 +37,10 @@ export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante 
   const [notas, setNotas] = useState("");
   const [comprobanteFile, setComprobanteFile] = useState<File | null>(null);
   const [asignaciones, setAsignaciones] = useState<Record<string, number>>({});
+  // Los comprobantes de retención vienen en Bs. (PEN-14773): cada factura en Bs. se convierte con su tasa de emisión;
+  // las facturas en USD, con la tasa que indique el comprobante.
+  const [enBs, setEnBs] = useState(true);
+  const [tasaUsd, setTasaUsd] = useState(0);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -42,7 +48,18 @@ export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante 
       .then(({ data }) => setConceptos((data as Concepto[]) ?? []));
   }, []);
 
+  useEffect(() => {
+    if (exchangeRate > 0) setTasaUsd((t) => t || Math.round(exchangeRate * 100) / 100);
+  }, [exchangeRate]);
+
   const montoDisponible = Number(montoTotal) || 0;
+  const hayFacturasUsd = facturas.some((f) => !tasaEmision(f));
+  const facturasSelector = useMemo(() => facturasParaSelector(facturas, enBs, tasaUsd), [facturas, enBs, tasaUsd]);
+  const resumenBs = useMemo(
+    () => (enBs ? resumirCobroBs(montoDisponible, asignaciones, facturas, tasaUsd) : null),
+    [enBs, montoDisponible, asignaciones, facturas, tasaUsd],
+  );
+  const aplicadoUsd = resumenBs ? Object.values(resumenBs.asignacionesUsd).reduce((t, v) => t + v, 0) : 0;
 
   const uploadComprobante = async (file: File): Promise<string> => {
     const isImage = file.type.startsWith("image/");
@@ -70,9 +87,14 @@ export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante 
   };
 
   const declarar = async () => {
-    const items = Object.entries(asignaciones).filter(([, m]) => m > 0);
+    const items = Object.entries(resumenBs ? resumenBs.asignacionesUsd : asignaciones).filter(([, m]) => m > 0);
     if (items.length === 0) {
       toast({ title: "Elegí a qué facturas aplica la retención", variant: "destructive" });
+      return;
+    }
+    const asignadoBs = Object.values(asignaciones).reduce((t, v) => t + v, 0);
+    if (enBs && Math.abs(asignadoBs - montoDisponible) > 0.01) {
+      toast({ title: "Los montos no cuadran", description: `Lo asignado a las facturas (${formatoBs(asignadoBs)}) debe ser igual al monto del comprobante (${formatoBs(montoDisponible)}).`, variant: "destructive" });
       return;
     }
     if (tipo === "islr" && !conceptoId) {
@@ -92,7 +114,7 @@ export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante 
         p_comprobante_url: comprobante_url,
         p_numero: numero || null,
         p_fecha: fecha,
-        p_notas: notas || null,
+        p_notas: [notas.trim(), resumenBs ? `Comprobante en Bs.: ${formatoBs(montoDisponible)} (cada factura convertida con su tasa).` : ""].filter(Boolean).join(" · ") || null,
       });
       if (error) throw error;
 
@@ -134,14 +156,34 @@ export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante 
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="retencion-monto">Monto total retenido (USD) *</Label>
-          <Input id="retencion-monto" type="number" min="0" step="0.01" inputMode="decimal" value={montoTotal} onChange={(e) => setMontoTotal(e.target.value)} placeholder="0.00" />
+          <Label htmlFor="retencion-monto">Monto total retenido ({enBs ? "Bs." : "USD"}) *</Label>
+          <Input id="retencion-monto" type="number" min="0" step="0.01" inputMode="decimal" value={montoTotal} onChange={(e) => { setMontoTotal(e.target.value); setAsignaciones({}); }} placeholder="0.00" />
+          {resumenBs && aplicadoUsd > 0 && <p className="text-xs text-muted-foreground">Equivale a <span className="font-semibold">{formatPrice(aplicadoUsd)}</span></p>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="retencion-fecha">Fecha</Label>
           <Input id="retencion-fecha" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
         </div>
       </div>
+
+      <label className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+        <Checkbox checked={enBs} onCheckedChange={(c) => { setEnBs(!!c); setAsignaciones({}); }} className="mt-0.5" aria-label="Comprobante en bolívares" />
+        <span>
+          <span className="font-medium">Comprobante en bolívares</span>
+          <span className="block text-xs text-muted-foreground">
+            {enBs
+              ? "Escriba los montos tal como aparecen en el comprobante. Cada factura se convierte a dólares con la tasa con que se emitió."
+              : "Los montos se escriben en dólares."}
+          </span>
+        </span>
+      </label>
+
+      {enBs && hayFacturasUsd && (
+        <div className="space-y-2">
+          <Label htmlFor="retencion-tasa">Tasa del comprobante para facturas en USD (Bs/USD)</Label>
+          <Input id="retencion-tasa" type="number" min="0" step="0.01" inputMode="decimal" value={tasaUsd || ""} onChange={(e) => setTasaUsd(parseFloat(e.target.value) || 0)} />
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label htmlFor="retencion-numero">Nº de comprobante (opcional)</Label>
@@ -159,11 +201,14 @@ export function DeclararRetencionForm({ clienteId, facturas, permiteComprobante 
       )}
 
       <SelectorFacturas
-        facturas={facturas}
+        facturas={facturasSelector}
         montoDisponible={montoDisponible}
         asignaciones={asignaciones}
         onChange={setAsignaciones}
-        formatPrice={formatPrice}
+        formatPrice={enBs ? formatoBs : formatPrice}
+        conTasa={enBs}
+        instruccion="Marque las facturas a las que corresponde la retención y cuánto de cada una"
+        etiquetaSobrante="Falta por asignar"
       />
 
       <div className="space-y-2">

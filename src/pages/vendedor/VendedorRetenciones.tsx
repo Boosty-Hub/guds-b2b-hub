@@ -9,7 +9,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { DeclararRetencionForm } from "@/components/retenciones/DeclararRetencionForm";
-import type { FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
+import type { FacturaCobrable } from "@/components/cuentas/cobroBs";
 import { FiltrosLista, useFiltros, opcionesDe, coincide, enRango, contadorFiltrado } from "@/components/datos/FiltrosLista";
 
 interface ClienteConRetencion { id: string; nombre_negocio: string; }
@@ -28,7 +28,7 @@ const VendedorRetenciones = () => {
   // El cliente elegido va en la URL (?cliente=): sobrevive a recargar y se puede compartir
   const [params, setParams] = useSearchParams();
   const clienteId = params.get("cliente") ?? "";
-  const [facturas, setFacturas] = useState<FacturaSaldo[]>([]);
+  const [facturas, setFacturas] = useState<FacturaCobrable[]>([]);
   const [retenciones, setRetenciones] = useState<Retencion[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -47,11 +47,10 @@ const VendedorRetenciones = () => {
 
   const cargarDetalle = async (cid: string) => {
     const { data: facs } = await supabase.from("facturas")
-      .select("id, numero, fecha_emision, saldo_usd")
+      .select("id, numero, fecha_emision, saldo_usd, moneda, total, total_usd, tasa_cambio")
       .eq("cliente_id", cid).eq("tipo", "factura").eq("estado", "posted").gt("saldo_usd", 0.009)
       .order("fecha_emision", { ascending: true });
-    setFacturas(((facs as { id: string; numero: string; fecha_emision: string | null; saldo_usd: number }[]) ?? [])
-      .map((f) => ({ id: f.id, numero: f.numero, fecha_emision: f.fecha_emision, saldo_usd: Number(f.saldo_usd) })));
+    setFacturas(((facs as FacturaCobrable[]) ?? []).map((f) => ({ ...f, saldo_usd: Number(f.saldo_usd) })));
     const { data: rets } = await supabase.from("retenciones")
       .select("id, numero, tipo, estado, fecha, total")
       .eq("cliente_id", cid).is("odoo_id", null).order("created_at", { ascending: false });
@@ -101,7 +100,7 @@ const VendedorRetenciones = () => {
             <>
               <div className="rounded-lg border border-border bg-card p-3">
                 <h2 className="mb-2 text-[13px] font-semibold">Declarar retención — {clienteSel.nombre_negocio}</h2>
-                <DeclararRetencionForm clienteId={clienteSel.id} facturas={facturas} onDeclarado={() => cargarDetalle(clienteId)} />
+                <DeclararRetencionForm key={clienteSel.id} clienteId={clienteSel.id} facturas={facturas} onDeclarado={() => cargarDetalle(clienteId)} />
               </div>
 
               <div className="rounded-lg border border-border bg-card">

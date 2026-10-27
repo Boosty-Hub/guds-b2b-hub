@@ -113,10 +113,14 @@ const FacturaDetalle = () => {
   };
 
   const esNotaCredito = factura?.tipo === "nota_credito";
-  // Montos del documento en su moneda (Bs. o USD); total y saldo se muestran siempre en USD
+  // Montos del documento en su moneda (Bs. o USD); total y saldo en USD, con su equivalente en Bs. si el documento es en Bs.
   const fmtDoc = (n: number) => factura?.moneda === "VES"
     ? `Bs. ${Number(n || 0).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : `$${Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Saldo expresado en Bs. a la tasa implícita del documento (total Bs. ÷ total USD), no a la del día
+  const enBs = factura?.moneda === "VES";
+  const tasaEmision = enBs && factura?.total_usd ? Math.abs(factura.total / factura.total_usd) : null;
+  const saldoBsEmision = tasaEmision ? factura!.saldo_usd * tasaEmision : null;
   const volverPath = esNotaCredito ? "/admin/notas-credito" : "/admin/facturas";
   const fmtFecha = (d?: string | null) => (d ? new Date(d).toLocaleDateString("es-VE", { day: "2-digit", month: "long", year: "numeric" }) : "—");
 
@@ -209,11 +213,20 @@ const FacturaDetalle = () => {
           )}
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-4 border-t border-border pt-4 sm:grid-cols-4">
-          <div><p className="text-xs text-muted-foreground">Subtotal ({factura.moneda === "VES" ? "Bs." : "USD"})</p><p className="font-medium">{fmtDoc(factura.subtotal)}</p></div>
-          <div><p className="text-xs text-muted-foreground">Impuesto ({factura.moneda === "VES" ? "Bs." : "USD"})</p><p className="font-medium">{fmtDoc(factura.impuesto)}</p></div>
+        <div className={`mt-4 grid grid-cols-2 gap-4 border-t border-border pt-4 ${enBs ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
+          <div><p className="text-xs text-muted-foreground">Subtotal ({enBs ? "Bs." : "USD"})</p><p className="font-medium">{fmtDoc(factura.subtotal)}</p></div>
+          <div><p className="text-xs text-muted-foreground">Impuesto ({enBs ? "Bs." : "USD"})</p><p className="font-medium">{fmtDoc(factura.impuesto)}</p></div>
+          {enBs && <div><p className="text-xs text-muted-foreground">Total (Bs.)</p><p className="text-base font-semibold">{fmtDoc(factura.total)}</p></div>}
           <div><p className="text-xs text-muted-foreground">Total (USD)</p><p className="text-base font-semibold">{formatPrice(factura.total_usd)}</p></div>
-          <div><p className="text-xs text-muted-foreground">Saldo (USD)</p><p className={`text-lg font-bold ${Math.abs(factura.saldo_usd) > 0.009 ? (factura.saldo_usd > 0 ? "text-destructive" : "text-success") : ""}`}>{formatPrice(factura.saldo_usd)}</p></div>
+          <div>
+            <p className="text-xs text-muted-foreground">Saldo (USD)</p>
+            <p className={`text-lg font-bold ${Math.abs(factura.saldo_usd) > 0.009 ? (factura.saldo_usd > 0 ? "text-destructive" : "text-success") : ""}`}>{formatPrice(factura.saldo_usd)}</p>
+            {saldoBsEmision !== null && Math.abs(factura.saldo_usd) > 0.009 && (
+              <p className="text-xs text-muted-foreground">
+                ≈ {fmtDoc(saldoBsEmision)} a tasa de emisión
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

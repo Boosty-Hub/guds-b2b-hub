@@ -9,7 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
 import { DeclararRetencionForm } from "@/components/retenciones/DeclararRetencionForm";
-import type { FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
+import type { FacturaCobrable } from "@/components/cuentas/cobroBs";
 
 // Retenciones del cliente (F6): el historial completo (las registradas en Odoo y las declaradas en el portal, con su
 // origen) y el formulario para declarar una nueva. Se puede declarar si la ficha lo marca como agente de retención o si ya
@@ -35,7 +35,7 @@ const PortalRetenciones = () => {
   const { formatPrice } = useCurrency();
   const { toast } = useToast();
   const [flags, setFlags] = useState<ClienteFlags | null>(null);
-  const [facturas, setFacturas] = useState<FacturaSaldo[]>([]);
+  const [facturas, setFacturas] = useState<FacturaCobrable[]>([]);
   const [retenciones, setRetenciones] = useState<Retencion[]>([]);
   const [loading, setLoading] = useState(true);
   const [visibles, setVisibles] = useState(POR_PAGINA);
@@ -45,7 +45,7 @@ const PortalRetenciones = () => {
     if (!cid) return;
     const [{ data: cli }, { data: facs }, { data: rets }] = await Promise.all([
       supabase.from("clientes").select("retiene_iva, retiene_islr").eq("id", cid).maybeSingle(),
-      supabase.from("facturas").select("id, numero, fecha_emision, saldo_usd")
+      supabase.from("facturas").select("id, numero, fecha_emision, saldo_usd, moneda, total, total_usd, tasa_cambio")
         .eq("cliente_id", cid).eq("tipo", "factura").eq("estado", "posted").gt("saldo_usd", 0.009)
         .order("fecha_emision", { ascending: true }),
       // Historial completo: Odoo y portal
@@ -53,8 +53,7 @@ const PortalRetenciones = () => {
         .eq("cliente_id", cid).order("fecha", { ascending: false }).order("created_at", { ascending: false }),
     ]);
     setFlags((cli as ClienteFlags) ?? null);
-    setFacturas(((facs as { id: string; numero: string; fecha_emision: string | null; saldo_usd: number }[]) ?? [])
-      .map((f) => ({ id: f.id, numero: f.numero, fecha_emision: f.fecha_emision, saldo_usd: Number(f.saldo_usd) })));
+    setFacturas(((facs as FacturaCobrable[]) ?? []).map((f) => ({ ...f, saldo_usd: Number(f.saldo_usd) })));
     setRetenciones(((rets as Retencion[]) ?? []).map((r) => ({ ...r, total: Number(r.total) })));
     setLoading(false);
   };

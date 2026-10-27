@@ -28,6 +28,8 @@ import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { SelectorFacturas, type FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
+import { facturasParaSelector, formatoBs, NOTA_TASA_EMISION, resumirCobroBs } from "@/components/cuentas/cobroBs";
+import { Checkbox } from "@/components/ui/checkbox";
 import { KpiStrip } from "@/components/datos/KpiStrip";
 import { BarraLista } from "@/components/datos/BarraLista";
 import { useOrdenTabla, EncabezadoOrdenable, exportarCSV, BotonExportar } from "@/components/datos/tabla";
@@ -37,7 +39,7 @@ import {
   contadorFiltrado, type DefFiltro, type OpcionPrueba,
 } from "@/components/datos/FiltrosLista";
 
-interface FacturaRow { id: string; numero: string; cliente_id: string; tipo: string; fecha_emision: string | null; fecha_vencimiento: string | null; saldo_usd: number; }
+interface FacturaRow { id: string; numero: string; cliente_id: string; tipo: string; fecha_emision: string | null; fecha_vencimiento: string | null; saldo_usd: number; moneda: string | null; total: number | null; total_usd: number | null; tasa_cambio: number | null; }
 interface Banco { id: string; nombre: string; moneda: string; metodo_pago: string; metodos: string[] | null; }
 
 const metodoLabel: Record<string, string> = {
@@ -100,6 +102,8 @@ const CuentasPorCobrar = () => {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ cliente_id: "", banco_id: "", metodo: "", monto: 0, tasa: 0, referencia: "", notas: "" });
   const [asignaciones, setAsignaciones] = useState<Record<string, number>>({});
+  // Cobro en Bs.: cada factura se salda con su tasa de emisión (los clientes pagan los Bs. del documento)
+  const [aTasaEmision, setATasaEmision] = useState(true);
 
   // Aplicar anticipo
   const [aplicarAnt, setAplicarAnt] = useState<Anticipo | null>(null);
@@ -109,7 +113,7 @@ const CuentasPorCobrar = () => {
   const fetchAll = async () => {
     setLoading(true);
     const [{ data: facs }, { data: clis }, { data: bcs }, { data: cbs }, { data: pend }, { data: ants }] = await Promise.all([
-      supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, fecha_vencimiento, saldo_usd").eq("estado", "posted"),
+      supabase.from("facturas").select("id, numero, cliente_id, tipo, fecha_emision, fecha_vencimiento, saldo_usd, moneda, total, total_usd, tasa_cambio").eq("estado", "posted"),
       supabase.from("clientes").select("id, nombre_negocio, ciudad, empresa_id, vendedor_asignado_id, vendedor:usuarios!clientes_vendedor_asignado_id_fkey(nombre, apellido)").order("nombre_negocio"),
       supabase.from("bancos").select("id, nombre, moneda, metodo_pago, metodos").eq("activo", true).order("nombre"),
       supabase.from("pagos").select("id, numero, monto, monto_moneda, moneda, created_at, fecha_pago, banco_id, empresa_id, estado, odoo_id, es_igtf, cliente:clientes(nombre_negocio), banco:bancos(nombre)").eq("estado", "verificado").order("fecha_pago", { ascending: false }).order("created_at", { ascending: false }).limit(5000),
@@ -248,18 +252,28 @@ const CuentasPorCobrar = () => {
   const esBs = bancoSel?.moneda === "BS";
   const metodosBanco = bancoSel?.metodos?.length ? bancoSel.metodos : bancoSel ? [bancoSel.metodo_pago] : [];
   const saldoCliente = deudores.find((d) => d.cliente_id === form.cliente_id)?.saldo ?? 0;
-  const montoUSD = esBs ? (form.tasa > 0 ? form.monto / form.tasa : 0) : form.monto;
+  const cobroBs = esBs && aTasaEmision;
 
-  const facturasDelCliente = (clienteId: string): FacturaSaldo[] => facturasNormales
+  const facturasCrudasDelCliente = (clienteId: string) => facturasNormales
     .filter((f) => f.cliente_id === clienteId)
-    .map((f) => ({ id: f.id, numero: f.numero, fecha_emision: f.fecha_emision, saldo_usd: Number(f.saldo_usd) }))
     .sort((a, b) => new Date(a.fecha_emision || 0).getTime() - new Date(b.fecha_emision || 0).getTime());
+  const facturasDelCliente = (clienteId: string): FacturaSaldo[] => facturasParaSelector(facturasCrudasDelCliente(clienteId), false, 0);
 
-  const facturasCliente = useMemo(() => facturasDelCliente(form.cliente_id), [facturasNormales, form.cliente_id]);
+  const facturasCrudasCobro = useMemo(() => facturasCrudasDelCliente(form.cliente_id), [facturasNormales, form.cliente_id]);
+  const facturasCliente = useMemo(
+    () => facturasParaSelector(facturasCrudasCobro, cobroBs, form.tasa),
+    [facturasCrudasCobro, cobroBs, form.tasa],
+  );
+  const resumenBs = useMemo(
+    () => (cobroBs ? resumirCobroBs(form.monto, asignaciones, facturasCrudasCobro, form.tasa) : null),
+    [cobroBs, form.monto, asignaciones, facturasCrudasCobro, form.tasa],
+  );
+  const montoUSD = resumenBs ? resumenBs.montoUsd : esBs ? (form.tasa > 0 ? form.monto / form.tasa : 0) : form.monto;
 
   const abrirCobro = (cliente_id?: string) => {
     setForm({ cliente_id: cliente_id || "", banco_id: "", metodo: "", monto: 0, tasa: Math.round(exchangeRate * 100) / 100, referencia: "", notas: "" });
     setAsignaciones({});
+    setATasaEmision(true);
     setOpen(true);
   };
 
@@ -267,6 +281,7 @@ const CuentasPorCobrar = () => {
     const b = bancos.find((x) => x.id === banco_id);
     const ms = b?.metodos?.length ? b.metodos : b ? [b.metodo_pago] : [];
     setForm((f) => ({ ...f, banco_id, metodo: ms[0] || "transferencia" }));
+    setAsignaciones({}); // cambia la moneda en que se asigna
   };
 
   const registrar = async () => {
@@ -279,22 +294,23 @@ const CuentasPorCobrar = () => {
       return;
     }
     const asignado = Object.values(asignaciones).reduce((s, v) => s + v, 0);
-    if (asignado > montoUSD + 0.01) {
+    if (asignado > (cobroBs ? form.monto : montoUSD) + 0.01) {
       toast({ title: "La asignación excede el monto", description: "Revisá los montos por factura.", variant: "destructive" });
       return;
     }
     setSaving(true);
-    const p_asignaciones = Object.entries(asignaciones).map(([factura_id, monto]) => ({ factura_id, monto }));
+    const p_asignaciones = Object.entries(resumenBs ? resumenBs.asignacionesUsd : asignaciones).map(([factura_id, monto]) => ({ factura_id, monto }));
     const { data, error } = await supabase.rpc("registrar_cobro_facturas", {
       p_cliente_id: form.cliente_id,
       p_banco_id: form.banco_id,
       p_monto_moneda: form.monto,
       p_moneda: bancoSel?.moneda || "USD",
-      p_tasa: esBs ? form.tasa : null,
+      // a tasa de emisión se guarda la tasa equivalente: monto Bs. ÷ tasa = USD aplicados a cada factura a su tasa
+      p_tasa: resumenBs ? resumenBs.tasaEquivalente : esBs ? form.tasa : null,
       p_metodo: form.metodo || metodosBanco[0] || "transferencia",
       p_referencia: form.referencia || null,
       p_comprobante_url: null,
-      p_notas: form.notas || null,
+      p_notas: resumenBs ? [form.notas, NOTA_TASA_EMISION].filter(Boolean).join("\n") : form.notas || null,
       p_asignaciones,
     });
     setSaving(false);
@@ -639,22 +655,42 @@ const CuentasPorCobrar = () => {
               </div>
               {esBs && (
                 <div className="space-y-2">
-                  <Label>Tasa (Bs/USD) *</Label>
-                  <Input type="number" step="0.01" min="0" value={form.tasa || ""} onChange={(e) => setForm({ ...form, tasa: parseFloat(e.target.value) || 0 })} />
+                  <Label>{cobroBs ? "Tasa del día (Bs/USD) *" : "Tasa (Bs/USD) *"}</Label>
+                  <Input type="number" step="0.01" min="0" value={form.tasa || ""} onChange={(e) => { setForm({ ...form, tasa: parseFloat(e.target.value) || 0 }); if (cobroBs) setAsignaciones({}); }} />
                 </div>
               )}
             </div>
+            {esBs && (
+              <label className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                <Checkbox checked={aTasaEmision} onCheckedChange={(c) => { setATasaEmision(!!c); setAsignaciones({}); }} className="mt-0.5" />
+                <span>
+                  <span className="font-medium">Cobrar Bs. a tasa de emisión</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {aTasaEmision
+                      ? "Cada factura se salda con la tasa con que se emitió. La tasa del día solo se usa para facturas en USD y para lo que quede como anticipo."
+                      : "Todo el monto se convierte a USD con una sola tasa."}
+                  </span>
+                </span>
+              </label>
+            )}
             {esBs && form.monto > 0 && form.tasa > 0 && (
               <p className="text-xs text-muted-foreground">Equivale a <span className="font-semibold">{formatPrice(montoUSD)}</span></p>
+            )}
+            {resumenBs && Object.keys(resumenBs.asignacionesUsd).length > 0 && resumenBs.sobranteBs > 0.009 && (
+              <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs">
+                Quedan <span className="font-semibold">{formatoBs(resumenBs.sobranteBs)}</span> sin asignar, que se guardarán como anticipo.
+                Si el cliente pagó indexado a la tasa del día, desmarque "Cobrar Bs. a tasa de emisión".
+              </p>
             )}
 
             {form.cliente_id && (
               <SelectorFacturas
                 facturas={facturasCliente}
-                montoDisponible={montoUSD}
+                montoDisponible={cobroBs ? form.monto : montoUSD}
                 asignaciones={asignaciones}
                 onChange={setAsignaciones}
-                formatPrice={formatPrice}
+                formatPrice={cobroBs ? formatoBs : formatPrice}
+                conTasa={cobroBs}
               />
             )}
 

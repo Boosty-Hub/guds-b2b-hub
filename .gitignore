@@ -37,3 +37,9 @@ docs/privado/
 
 # Archivos temporales de Vite al recargar la configuración
 vite.config.ts.timestamp-*
+
+# Documentos internos (correos, screenshots, notas de trabajo) — nunca al repositorio
+docs-internos/
+
+# capturas del navegador de pruebas
+.playwright-mcp/

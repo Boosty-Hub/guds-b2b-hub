@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/use-pagination";
 import { DataTablePagination } from "@/components/ui/data-table-pagination";
 import { DeclararRetencionForm } from "@/components/retenciones/DeclararRetencionForm";
-import type { FacturaSaldo } from "@/components/cuentas/SelectorFacturas";
+import type { FacturaCobrable } from "@/components/cuentas/cobroBs";
 import { OdooBadge } from "@/components/OdooBadge";
 import { BarraLista } from "@/components/datos/BarraLista";
 import {
@@ -63,7 +63,7 @@ const Retenciones = () => {
   const [openNueva, setOpenNueva] = useState(false);
   const [clientes, setClientes] = useState<ClienteLite[]>([]);
   const [clienteId, setClienteId] = useState("");
-  const [facturasCliente, setFacturasCliente] = useState<FacturaSaldo[]>([]);
+  const [facturasCliente, setFacturasCliente] = useState<FacturaCobrable[]>([]);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -153,11 +153,10 @@ const Retenciones = () => {
   const elegirClienteNueva = async (cid: string) => {
     setClienteId(cid);
     const { data } = await supabase.from("facturas")
-      .select("id, numero, fecha_emision, saldo_usd")
+      .select("id, numero, fecha_emision, saldo_usd, moneda, total, total_usd, tasa_cambio")
       .eq("cliente_id", cid).eq("tipo", "factura").eq("estado", "posted").gt("saldo_usd", 0.009)
       .order("fecha_emision", { ascending: true });
-    setFacturasCliente(((data as { id: string; numero: string; fecha_emision: string | null; saldo_usd: number }[]) ?? [])
-      .map((f) => ({ id: f.id, numero: f.numero, fecha_emision: f.fecha_emision, saldo_usd: Number(f.saldo_usd) })));
+    setFacturasCliente(((data as FacturaCobrable[]) ?? []).map((f) => ({ ...f, saldo_usd: Number(f.saldo_usd) })));
   };
 
   const renderTabla = (rows: Retencion[], pg: ReturnType<typeof usePagination<Retencion>>, accionable: boolean) => (
@@ -289,6 +288,7 @@ const Retenciones = () => {
             </div>
             {clienteId && (
               <DeclararRetencionForm
+                key={clienteId}
                 clienteId={clienteId}
                 facturas={facturasCliente}
                 permiteComprobante={false}
