@@ -14,7 +14,8 @@
 //       de personas de contacto que creó GUDS; correo de esas personas o del propio cliente (partner principal, sin padre;
 //       decisión del 30-sep, 21b). Se comprueba en Odoo antes de escribir.
 //     · stock.move / stock.move.line: cantidades entregadas de un documento de entrega asignado a un repartidor.
-//     · product.template: imagen y descripción de venta editadas en GUDS (decisión 15, migración 20r). La imagen solo se
+//     · product.template: imagen y descripción editadas en GUDS (decisión 15, migración 20r). La descripción va a la de
+//       ventas y a la del comercio electrónico (description_ecommerce, pedido del 28-oct, ticket PEN-14763). La imagen solo se
 //       reemplaza: escribir image_1920 = false borraría su adjunto en Odoo y está bloqueado.
 //     · res.partner: Industria, Canal y Segmento de contacto (tipo, canal y categoría de cobranza de finanzas, 22d), solo en
 //       el propio cliente (partner principal) y solo con el id de un valor del catálogo (quitarlos no se permite).
@@ -35,7 +36,7 @@ const ESCRITURA_PERMITIDA = {
     'industry_id', 'eu_partner_channel_id', 'eu_partner_segment_id']),
   'stock.move': new Set(['quantity', 'picked']),
   'stock.move.line': new Set(['quantity', 'picked']),
-  'product.template': new Set(['image_1920', 'description_sale']),
+  'product.template': new Set(['image_1920', 'description_sale', 'description_ecommerce']),
   ...Object.fromEntries([...CATALOGOS_CLASIFICACION].map((m) => [m, new Set(['name'])])),
 };
 // La clasificación (22d) solo se escribe en el propio cliente (partner principal, sin padre)
@@ -53,6 +54,7 @@ const VALOR_PROHIBIDO = {
     image_1920: (v) => typeof v !== 'string' || v.length < 100 || !/^[A-Za-z0-9+/]+={0,2}$/.test(v.slice(-64))
       ? 'image_1920 solo acepta una imagen en base64 (quitar la imagen borraría su adjunto en Odoo)' : null,
     description_sale: (v) => (v !== false && typeof v !== 'string' ? 'description_sale debe ser texto' : null),
+    description_ecommerce: (v) => (v !== false && typeof v !== 'string' ? 'description_ecommerce debe ser texto (HTML)' : null),
   },
   'res.partner': {
     name: (v) => (typeof v !== 'string' || !v.trim() ? 'el nombre no puede quedar vacío' : null),

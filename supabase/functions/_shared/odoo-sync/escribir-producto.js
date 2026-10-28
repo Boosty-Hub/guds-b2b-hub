@@ -1,5 +1,7 @@
-// Foto principal y descripción de venta de un producto editadas en GUDS → Odoo (product.template). Migración 20r
+// Foto principal y descripción de un producto editadas en GUDS → Odoo (product.template). Migración 20r
 // (decisión 15 del dueño: fotos y descripciones bidireccionales, gana el cambio más reciente).
+// La descripción se escribe en dos campos (pedido del 28-oct, ticket PEN-14763): la de ventas (description_sale, texto) y la
+// del comercio electrónico (description_ecommerce, HTML). La huella y la vuelta Odoo → GUDS siguen siendo la de ventas.
 //
 // La fila de la cola solo avisa que algo cambió: se envía el ESTADO ACTUAL del producto en GUDS, y solo de los campos que
 // cambió GUDS (origen 'guds') y que difieren de lo último que se vio en Odoo. Antes de escribir se relee Odoo: si Odoo cambió
@@ -7,24 +9,24 @@
 // Al escribir se guarda la huella nueva de Odoo (checksum del adjunto de la imagen, md5 de la descripción): así lo que
 // escribió GUDS no vuelve en la próxima sincronización como si fuera un cambio de Odoo.
 // Nunca borra en Odoo: quitar la foto en GUDS no se envía (en Odoo eso borraría el adjunto de la imagen) y odoo.js bloquea
-// image_1920 = false. Solo usa `escribir` de odoo.js con image_1920 / description_sale.
+// image_1920 = false. Solo usa `escribir` de odoo.js con image_1920 / description_sale / description_ecommerce.
 // Cada escritura aplicada deja una nota interna "(GUDS)" en la plantilla (decisión D, 29-sep); si la nota falla, la escritura
 // no se revierte y el error queda en el resultado.
-import { txt, fechaOdoo, aBase64, fechaCaracas } from './util.js';
+import { txt, fechaOdoo, aBase64, fechaCaracas, stripHtml, textoAHtml } from './util.js';
 import { dejarNota } from './notas.js';
 
 const MAX_BYTES_FOTO = 5 * 1024 * 1024;
 const lit = (v) => (v === null || v === undefined ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
 
 async function leerOdoo(odoo, odooId, lang) {
-  const [t] = await odoo.leer('product.template', 'read', [[odooId]], { fields: ['name', 'description_sale', 'write_date', 'company_id'], context: { lang } });
+  const [t] = await odoo.leer('product.template', 'read', [[odooId]], { fields: ['name', 'description_sale', 'description_ecommerce', 'write_date', 'company_id'], context: { lang } });
   if (!t) return null;
   const [a] = await odoo.leer('ir.attachment', 'search_read',
     [[['res_model', '=', 'product.template'], ['res_field', '=', 'image_1920'], ['res_id', '=', odooId]]],
     { fields: ['checksum', 'write_date', 'file_size', 'mimetype'], order: 'id desc', limit: 1 });
   return {
     nombre: typeof t.name === 'object' && t.name ? (t.name.es_VE || t.name.en_US) : t.name,
-    descripcion: txt(t.description_sale), escrito_en: fechaOdoo(t.write_date), empresa: Array.isArray(t.company_id) ? t.company_id[0] : null,
+    descripcion: txt(t.description_sale), descripcion_ecommerce: stripHtml(t.description_ecommerce), escrito_en: fechaOdoo(t.write_date), empresa: Array.isArray(t.company_id) ? t.company_id[0] : null,
     imagen: a ? { checksum: a.checksum || null, escrita_en: fechaOdoo(a.write_date), bytes: a.file_size, tipo: a.mimetype } : null,
   };
 }
@@ -71,13 +73,17 @@ export async function escribirProducto({ odoo, sql, fila, aplicar, log = () => {
   const vals = {};
   const omitidos = [];
   const plan = { producto: p.nombre, odoo_id: p.odoo_id, empresa_odoo: cid, idioma: lang, campos: [], omitidos, avisos };
+  // La del comercio electrónico se compara como texto (Odoo puede reescribir el HTML al sanearlo)
+  const ecomHtml = textoAHtml(p.descripcion);
+  const ecomIgual = antes.descripcion_ecommerce === stripHtml(ecomHtml);
   if (p.desc_pendiente) {
     if (c.desc_odoo_cambio && c.desc_gana_odoo) {
       omitidos.push({ campo: 'descripcion', motivo: 'Odoo tiene un cambio más reciente de la descripción: se trae a GUDS' });
-    } else if (c.desc_igual) {
+    } else if (c.desc_igual && ecomIgual) {
       plan.descripcion = { ya_igual: true };
     } else {
       vals.description_sale = p.descripcion || false;
+      vals.description_ecommerce = ecomHtml;
       plan.campos.push('descripcion');
       plan.descripcion = { antes: antes.descripcion?.slice(0, 300) ?? null, despues: p.descripcion?.slice(0, 300) ?? null, caracteres: p.descripcion?.length ?? 0 };
     }
@@ -103,7 +109,7 @@ export async function escribirProducto({ odoo, sql, fila, aplicar, log = () => {
     return { modo: aplicar ? 'aplicada' : 'simulacion', sin_cambios: true, ...plan,
       motivo: omitidos.length ? omitidos.map((o) => o.motivo).join(' · ') : 'Odoo ya tenía estos datos' };
   }
-  const queCambio = [plan.campos.includes('imagen') && 'Foto principal', plan.campos.includes('descripcion') && 'descripción de venta'].filter(Boolean).join(' y ');
+  const queCambio = [plan.campos.includes('imagen') && 'Foto principal', plan.campos.includes('descripcion') && 'descripción de ventas y del comercio electrónico'].filter(Boolean).join(' y ');
   const nota = { modelo: 'product.template', id: p.odoo_id,
     texto: `(GUDS) ${queCambio.charAt(0).toUpperCase()}${queCambio.slice(1)} actualizada${plan.campos.length > 1 ? 's' : ''} desde GUDS por ${quien} el ${fechaCaracas()}.` };
   if (!aplicar) return { modo: 'simulacion', ...plan, nota: { ...nota, simulada: true } };
@@ -121,6 +127,7 @@ export async function escribirProducto({ odoo, sql, fila, aplicar, log = () => {
   return {
     modo: 'aplicada', ...plan, nota: notaHecha,
     despues: { descripcion_igual: 'description_sale' in vals ? despues.descripcion === (p.descripcion || null) : undefined,
+      descripcion_ecommerce_igual: 'description_ecommerce' in vals ? despues.descripcion_ecommerce === stripHtml(ecomHtml) : undefined,
       imagen: despues.imagen ? { checksum: despues.imagen.checksum, bytes: despues.imagen.bytes, tipo: despues.imagen.tipo } : null },
   };
 }

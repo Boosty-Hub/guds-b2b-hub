@@ -10,6 +10,15 @@ export const stripHtml = (s) => {
   return t || null;
 };
 
+// Texto plano → HTML para los campos html de Odoo: un <p> por párrafo (línea en blanco), <br> por salto de línea
+const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+export const textoAHtml = (s) => {
+  const t = txt(s);
+  if (!t) return false;
+  return t.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter(Boolean)
+    .map((p) => `<p>${escHtml(p).replace(/\r?\n/g, '<br>')}</p>`).join('');
+};
+
 // Texto de Odoo: false → null, recorta espacios
 export const txt = (v, max = null) => {
   if (v == null || v === false) return null;

@@ -10,6 +10,25 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-28 · Descripción de producto también al «comercio electrónico» de Odoo (ticket PEN-14763)
+
+- **Pedido** (Wonderly Lima por el widget de tickets, confirmado por el usuario): la descripción que se carga en
+  `/admin/productos` debe llegar a la ficha de Odoo en «Descripción del comercio electrónico» (pestaña Ventas), además de
+  «Descripción de ventas». Decisión del usuario: **a los dos campos**.
+- **Antes:** desde 20r solo se escribía `description_sale`. Ninguna descripción se había enviado (0 de 623 productos con
+  descripción en GUDS; en Odoo `description_sale`, `description_ecommerce`, `website_description` y `description` vacíos en
+  todos), así que no hubo nada que migrar.
+- **Cambio:** `escribir-producto.js` escribe también `description_ecommerce` (html, `sanitize`, traducible: se escribe en el
+  idioma del usuario de la API, como la de ventas) con `textoAHtml` de `util.js` (un `<p>` por párrafo, `<br>` por salto de línea,
+  escapa `& < >`). Se compara como texto (`stripHtml`) porque Odoo reescribe el HTML al sanearlo. `odoo.js` permite el campo en
+  la lista blanca de `product.template` (solo texto). La huella (`descripcion_odoo_md5`) y la vuelta Odoo → GUDS siguen siendo
+  `description_sale`.
+- **Verificado:** `fields_get` (ambos campos `readonly: false`, `store: true`); simulación de `escribirProducto` con lectura real
+  de Odoo (plantilla 1111) y SQL simulado; `sync-odoo` redesplegada (v47) desde el árbol de trabajo (sin cambios en
+  `sync-odoo`/`_shared` desde el deploy del 9-oct).
+- **Pendiente:** prueba real cuando Wonderly cargue la descripción de un producto; revisar en Odoo los dos campos y cerrar el
+  ticket.
+
 ## 2026-10-26 · Fotos de productos GUDS → Odoo: revisión y la del Bianchi enviada
 
 - **Revisión** (pedido del usuario): de los 13 productos con foto en GUDS, 12 ya estaban en Odoo (gomitas Trululu; 11 las cambió
