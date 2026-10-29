@@ -43,6 +43,7 @@ const NotaEntregaDetalle = pagina(["notas-entrega/:notaId"], () => import("../pa
 const NotasCredito = pagina(["notas-credito"], () => import("../pages/NotasCredito"));
 const Retenciones = pagina(["retenciones"], () => import("../pages/Retenciones"));
 const Bancos = pagina(["bancos"], () => import("../pages/Bancos"));
+const Tasas = pagina(["tasas"], () => import("../pages/Tasas"));
 const BancoDetalle = pagina(["bancos/:bancoId"], () => import("../pages/BancoDetalle"));
 const Proveedores = pagina(["proveedores"], () => import("../pages/Proveedores"));
 const ProveedorDetalle = pagina(["proveedores/:proveedorId"], () => import("../pages/ProveedorDetalle"));
@@ -117,6 +118,8 @@ export default function RutasAdmin() {
       <Route path="notas-credito" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><NotasCredito /></ProtectedRoute>} />
       <Route path="retenciones" element={<ProtectedRoute allowedRoles={["admin"]} modulo="cuentas"><Retenciones /></ProtectedRoute>} />
       <Route path="bancos" element={<ProtectedRoute allowedRoles={["admin"]} modulo="bancos"><Bancos /></ProtectedRoute>} />
+      {/* Fase 24a: tasas del día e historial. Sin módulo: el chip del encabezado la enlaza para todo el personal */}
+      <Route path="tasas" element={<ProtectedRoute allowedRoles={["admin"]}><Tasas /></ProtectedRoute>} />
       <Route path="bancos/:bancoId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="bancos"><BancoDetalle /></ProtectedRoute>} />
       <Route path="proveedores" element={<ProtectedRoute allowedRoles={["admin"]} modulo="compras"><Proveedores /></ProtectedRoute>} />
       <Route path="proveedores/:proveedorId" element={<ProtectedRoute allowedRoles={["admin"]} modulo="compras"><ProveedorDetalle /></ProtectedRoute>} />

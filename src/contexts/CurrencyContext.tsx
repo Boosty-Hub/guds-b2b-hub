@@ -7,6 +7,8 @@ interface RefreshResult {
   tasa?: number;
   fuente?: string;
   error?: string;
+  /** Fuentes que fallaron (BCV, respaldo, paralelo o la base): con ok=false aunque algo se haya guardado. */
+  avisos?: string[];
 }
 
 interface CurrencyContextType {
@@ -60,7 +62,8 @@ export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
       const { data, error } = await supabase.functions.invoke("actualizar-tasa-bcv");
       if (error) return { ok: false, error: error.message };
       await cargarTasa();
-      return (data as RefreshResult) ?? { ok: true };
+      const r = (data as RefreshResult) ?? { ok: true };
+      return r.ok || r.error ? r : { ...r, error: r.avisos?.join(" · ") };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : "Error desconocido" };
     } finally {

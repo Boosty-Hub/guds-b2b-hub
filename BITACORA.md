@@ -10,6 +10,34 @@ resume qué se ejecutó, qué cambió en base de datos (producción) y qué qued
 
 ---
 
+## 2026-10-29 · Módulo de tasas: BCV dólar y euro, paralelo, brecha e historial diario (fase 24a)
+
+- **Pedido del usuario** (por Telegram): como en BoostyDesk, un módulo de tasas con BCV dólar y euro, el paralelo y la brecha,
+  con historial diario y en el encabezado.
+- **Base** (`20261029_fase24a_tasas_diarias.sql`, aplicada): tabla `tasas_diarias` (una fila por **fecha valor** del BCV; el
+  paralelo en el día de la consulta; `brecha_pct` generada = paralelo ÷ BCV $ − 1), `registrar_tasas_automaticas` (solo
+  service_role, no pisa una fila `editada_manual`), `guardar_tasa_diaria` (personal admin con editar en Configuración, Cuentas o
+  Bancos; lo que se deja en blanco conserva el valor) y `tasa_del_dia(fecha)` (la vigente, más la del día hábil siguiente si el
+  BCV ya la publicó). Lectura para cualquier usuario con sesión, como `tasa_bcv`. Nuevo cron `actualizar-tasa-bcv-tarde`
+  (17:00 de Caracas) junto al de las 8:00.
+- **Edge Function `actualizar-tasa-bcv`** (redesplegada): BCV $ y € con su fecha valor desde bcv.org.ve (respaldo: históricos
+  oficiales de DolarApi) y paralelo de DolarApi → `tasas_diarias`. **La tasa canónica** (`configuracion.tasa_cambio` +
+  `tasa_bcv`, la de cobros, retenciones y estados de cuenta) se sigue actualizando, **ahora solo con la ya vigente** (fecha
+  valor ≤ hoy) y sin repetir la fila del día: antes el cron del sábado guardaba la del lunes, que el BCV publica el viernes en
+  la tarde. Una corrección a mano del BCV $ de hoy corrige también la fila de hoy en `tasa_bcv` y `configuracion`, y la carga
+  automática no la pisa.
+- **Histórico**: `scripts/importar-tasas-diarias-historico.mjs --aplicar` (DolarApi, idempotente): 1.003 fechas, BCV $ y €
+  desde el 3-ene-2023 (920 días hábiles) y paralelo desde el 14-feb-2026 (243). Contra `tasa_bcv`: 747 de 753 días iguales; las
+  6 distintas son de Odoo (4 por una diezmilésima).
+- **Pantallas**: el chip del encabezado (`TasaBcv`) muestra BCV $, € (≥ lg), paralelo (≥ xl) y brecha (≥ 1400 px); al tocarlo,
+  el detalle, la del día hábil siguiente, el botón de actualizar y el enlace al historial. En el celular, un ícono en la barra.
+  Nueva pantalla **Finanzas → Tasas** (`/admin/tasas`, `src/pages/Tasas.tsx`, servicio `src/lib/tasas.ts`): las cuatro cifras
+  del día, el historial (30 / 90 días, este año, todo) con la BCV vigente arrastrada en fines de semana y feriados para la
+  brecha del día, «Actualizar ahora» y «Registrar tasa» / corregir.
+- **Verificado**: la función en vivo (BCV del viernes 30: $ 889,2553 · € 992,8002; paralelo 1.002,21; la canónica no se movió),
+  permisos de la corrección simulados en SQL con rollback (admin sí, vendedor no; la canónica sigue a la corrección), y la
+  pantalla en local a 1600 px y en iPhone 14 (sin desborde).
+
 ## 2026-10-28 · Descripción de producto también al «comercio electrónico» de Odoo (ticket PEN-14763)
 
 - **Pedido** (Wonderly Lima por el widget de tickets, confirmado por el usuario): la descripción que se carga en

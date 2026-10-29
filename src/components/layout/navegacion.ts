@@ -29,6 +29,7 @@ import {
   Contact,
   Trash2,
   ClipboardList,
+  Coins,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -91,6 +92,8 @@ export const navSections: NavSection[] = [
       { icon: Receipt, label: "Retenciones", path: "/admin/retenciones", modulo: "cuentas" },
       { icon: Landmark, label: "Bancos", path: "/admin/bancos", modulo: "bancos" },
       { icon: ListChecks, label: "Conciliación", path: "/admin/conciliacion", modulo: "bancos" },
+      // 24a: BCV dólar y euro, paralelo y brecha, con su historial diario
+      { icon: Coins, label: "Tasas", path: "/admin/tasas", modulo: "cuentas" },
       // 22d: tipo de cliente, canal y categoría de cobranza de finanzas (se guarda en Odoo); la pantalla vive en Configuración
       { icon: Tags, label: "Clasificación de clientes", path: "/admin/configuracion/clasificacion-clientes", modulo: "clasificacion_clientes" },
     ],

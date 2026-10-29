@@ -1,14 +1,18 @@
 // Edge Function: actualizar-tasa-bcv
-// Scrapea la tasa oficial del dolar (USD) en https://www.bcv.org.ve y la guarda
-// en configuracion.tasa_cambio (vía RPC upsert_tasa_bcv). Se dispara desde:
-//   - el cron diario (08:00 America/Caracas)
-//   - el boton manual del header
+// Registra las tasas del día (fase 24a). Se dispara desde:
+//   - pg_cron a las 8:00 y a las 17:00 de Caracas
+//   - el botón «Actualizar» del encabezado y de /admin/tasas
+//
+//   · BCV dólar y euro: bcv.org.ve, con su «Fecha Valor» (en la tarde ya publica la del día hábil siguiente). Si la
+//     web del BCV falla, DolarApi (que replica el BCV, con la misma fecha valor) como respaldo.
+//   · Dólar paralelo: DolarApi (promedio del paralelo), registrado en el día de la consulta.
+// Todo va a tasas_diarias (registrar_tasas_automaticas). La tasa canónica de cobros y estados de cuenta
+// (configuracion.tasa_cambio + tasa_bcv, vía upsert_tasa_bcv) se actualiza solo con la tasa ya vigente: fecha valor
+// ≤ hoy. La publicada por adelantado espera a su día (la carga de las 8:00 de ese día la toma).
 //
 // El sitio del BCV no envia el certificado intermedio de su cadena TLS, por lo
 // que un fetch normal falla con "unable to verify". Embebemos la cadena de CA de
 // Sectigo y la pasamos via Deno.createHttpClient({ caCerts }) para validar bien.
-// Si aun asi el BCV no responde, usamos un espejo publico de la MISMA tasa
-// oficial del BCV como respaldo.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -159,6 +163,10 @@ MGjnzXc3hXnVJYzbVQ==
 -----END CERTIFICATE-----`
 ];
 
+interface TasasBcv { fecha: string; usd: number; eur: number; fuente: string }
+
+const AGENTE = "Mozilla/5.0 (compatible; GUDS/1.0)";
+
 // "36.900,50" (formato es-VE) -> 36900.50
 function parseVe(str: string): number | null {
   if (!str) return null;
@@ -167,60 +175,82 @@ function parseVe(str: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+const hoyCaracas = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "America/Caracas", year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(new Date());
+
+async function obtener(url: string): Promise<Response> {
+  const r = await fetch(url, { headers: { "User-Agent": AGENTE }, signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error(`${url} respondió ${r.status}`);
+  return r;
+}
+
 // Fuente principal: la propia pagina del BCV, con la cadena de CA embebida.
-async function desdeBCV(): Promise<number | null> {
+async function desdeBCV(): Promise<TasasBcv> {
   const client = Deno.createHttpClient({ caCerts: BCV_CA_CERTS });
   try {
     const res = await fetch("https://www.bcv.org.ve/", {
       client,
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; GUDS/1.0)" },
+      headers: { "User-Agent": AGENTE },
       signal: AbortSignal.timeout(15000),
     });
-    if (!res.ok) return null;
-    const html = await res.text();
-    // Recuadro del dolar: <div id="dolar"> ... <strong class="strong-tb">736,93</strong>
-    const bloque = html.split(/id\s*=\s*["']dolar["']/i)[1] ?? "";
-    const m = bloque.match(/<strong[^>]*>\s*([\d.,]+)\s*<\/strong>/i);
-    return m ? parseVe(m[1]) : null;
+    if (!res.ok) throw new Error(`bcv.org.ve respondió ${res.status}`);
+    const html = (await res.text()).replace(/\s+/g, " ");
+    // Recuadros: <div id="dolar"> ... <strong>889,25530000</strong>, igual con id="euro"
+    const valor = (id: string) => {
+      const bloque = html.split(new RegExp(`id\s*=\s*["']${id}["']`, "i"))[1] ?? "";
+      const m = bloque.match(/<strong[^>]*>\s*([\d.,]+)\s*<\/strong>/i);
+      const n = m ? parseVe(m[1]) : null;
+      if (!n) throw new Error(`no se encontró la tasa ${id}`);
+      return n;
+    };
+    const fecha = html.match(/Fecha Valor:[\s\S]*?content="(\d{4}-\d{2}-\d{2})/)?.[1];
+    if (!fecha) throw new Error("no se encontró la fecha valor");
+    return { fecha, usd: valor("dolar"), eur: valor("euro"), fuente: "BCV (bcv.org.ve)" };
   } finally {
     client.close();
   }
 }
 
-// Respaldo: API publica que publica la tasa OFICIAL del BCV.
-async function desdeRespaldo(): Promise<number | null> {
-  const res = await fetch("https://ve.dolarapi.com/v1/dolares/oficial", {
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) return null;
-  const j = await res.json();
-  const n = Number(j?.promedio);
-  return Number.isFinite(n) && n > 0 ? n : null;
+// Respaldo: el último registro oficial de DolarApi (trae la misma fecha valor que el BCV).
+async function desdeRespaldo(): Promise<TasasBcv> {
+  const ultimo = async (ruta: string) => {
+    const lista = (await (await obtener(`https://ve.dolarapi.com/v1/historicos/${ruta}`)).json()) as
+      { fecha: string; promedio: number }[];
+    const u = lista.at(-1);
+    if (!u || !(u.promedio > 0)) throw new Error(`sin datos de ${ruta}`);
+    return u;
+  };
+  const [usd, eur] = await Promise.all([ultimo("dolares/oficial"), ultimo("euros/oficial")]);
+  if (usd.fecha !== eur.fecha) throw new Error("fechas distintas para dólar y euro");
+  return { fecha: usd.fecha, usd: usd.promedio, eur: eur.promedio, fuente: "BCV (respaldo dolarapi)" };
 }
+
+async function paralelo(): Promise<number> {
+  const lista = (await (await obtener("https://ve.dolarapi.com/v1/dolares")).json()) as { fuente: string; promedio: number }[];
+  const p = lista.find((x) => x.fuente === "paralelo")?.promedio;
+  if (!p || !(p > 0)) throw new Error("DolarApi sin dólar paralelo");
+  return p;
+}
+
+const mensaje = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    let tasa: number | null = null;
-    let fuente = "BCV (bcv.org.ve)";
-
+    const avisos: string[] = [];
+    let bcv: TasasBcv | null = null;
     try {
-      tasa = await desdeBCV();
-    } catch (_) {
-      tasa = null;
+      bcv = await desdeBCV();
+    } catch (e) {
+      avisos.push(`BCV: ${mensaje(e)}`);
+      try { bcv = await desdeRespaldo(); } catch (e2) { avisos.push(`Respaldo BCV: ${mensaje(e2)}`); }
     }
+    let par: number | null = null;
+    try { par = await paralelo(); } catch (e) { avisos.push(`Paralelo: ${mensaje(e)}`); }
 
-    if (!tasa) {
-      try {
-        tasa = await desdeRespaldo();
-        if (tasa) fuente = "BCV (respaldo dolarapi)";
-      } catch (_) {
-        // ignore
-      }
-    }
-
-    if (!tasa) throw new Error("No se pudo obtener la tasa del BCV en este momento");
+    if (!bcv && !par) throw new Error(`No se pudieron obtener las tasas en este momento (${avisos.join(" · ")})`);
 
     // Secret key: esquema NUEVO (SUPABASE_SECRET_KEYS, JSON keyed by name) con
     // fallback a la legacy SUPABASE_SERVICE_ROLE_KEY mientras siga habilitada.
@@ -235,15 +265,47 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       secretKey!,
     );
-    const { error } = await supabase.rpc("upsert_tasa_bcv", { p_tasa: tasa, p_fuente: fuente });
-    if (error) throw error;
 
-    return new Response(JSON.stringify({ ok: true, tasa, fuente }), {
+    const hoy = hoyCaracas();
+    if (bcv) {
+      const { error } = await supabase.rpc("registrar_tasas_automaticas", {
+        p_fecha: bcv.fecha, p_bcv_usd: bcv.usd, p_bcv_eur: bcv.eur, p_fuente_bcv: bcv.fuente,
+      });
+      if (error) avisos.push(`Base (BCV): ${error.message}`);
+    }
+    if (par) {
+      const { error } = await supabase.rpc("registrar_tasas_automaticas", {
+        p_fecha: hoy, p_paralelo_usd: par, p_fuente_paralelo: "dolarapi (paralelo)",
+      });
+      if (error) avisos.push(`Base (paralelo): ${error.message}`);
+    }
+
+    // Tasa canónica: solo la vigente, sin repetir la fila de hoy si ya está con el mismo valor y sin pisar una
+    // corrección a mano de hoy.
+    let canonica = false;
+    const { data: manual } = await supabase.from("tasas_diarias").select("fecha")
+      .eq("fecha", hoy).eq("editada_manual", true).not("bcv_usd", "is", null).limit(1);
+    if (bcv && bcv.fecha <= hoy && !manual?.length) {
+      const { data: yaEsta } = await supabase.from("tasa_bcv").select("id")
+        .eq("fecha", hoy).eq("tasa", bcv.usd).limit(1);
+      if (!yaEsta?.length) {
+        const { error } = await supabase.rpc("upsert_tasa_bcv", { p_tasa: bcv.usd, p_fuente: bcv.fuente });
+        if (error) avisos.push(`Base (tasa canónica): ${error.message}`);
+        else canonica = true;
+      }
+    }
+
+    if (avisos.length) console.error("actualizar-tasa-bcv:", avisos.join(" | "));
+    const ok = !!bcv && !!par && avisos.every((a) => !a.startsWith("Base"));
+    return new Response(JSON.stringify({
+      ok, hoy, bcv, paralelo: par, canonica, avisos,
+      // Compatibilidad con la respuesta de antes
+      tasa: bcv?.usd ?? null, fuente: bcv?.fuente ?? null,
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return new Response(JSON.stringify({ ok: false, error: msg }), {
+    return new Response(JSON.stringify({ ok: false, error: mensaje(e) }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

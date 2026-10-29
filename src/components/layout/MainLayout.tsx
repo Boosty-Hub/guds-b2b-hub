@@ -3,6 +3,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
+import { TasaBcv } from "@/components/TasaBcv";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   Menu,
@@ -107,6 +108,7 @@ export function MainLayout({ children, title }: MainLayoutProps) {
             <BuscadorGlobal compacto atajo={false} className="border-white/30 bg-white/15 text-white hover:bg-white/25" />
             <EmpresaSelector variant="header" compacto />
             <BoostySupportSlot media="(max-width: 1023.98px)" />
+            <TasaBcv compacto />
             <button onClick={toggleTorre} className="relative p-2" title="Torre de control">
               <Bell className="h-5 w-5" />
               {totalBadgeMobile > 0 && (
